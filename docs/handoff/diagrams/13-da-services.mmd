@@ -1,0 +1,8 @@
+%% DA Services: visit planned / rescheduled
+flowchart TB
+  P1["plan visit call site"] --> EV["new event_id<br/>(planned / rescheduled)"]
+  P2["reschedule call site<br/>(only if time really changed)"] --> EV
+  EV --> R["one message per recipient role<br/>(farmer, development agent)"]
+  R --> DL["deadline = min(visit start, now + 7 days - 5 min)<br/>computed once, stored"]
+  DL --> C[["queue_sms(purpose = transactional,<br/>expires_at = deadline,<br/>source_reference = da:visit:V-77:event_id)"]]
+  C --> OAN["OAN Messaging"] --> PH(["Phones"])

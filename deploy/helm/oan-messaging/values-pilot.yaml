@@ -1,0 +1,22 @@
+# Pilot overlay (MSG-08): enables the worker, receipt ingress and cleanup with the real
+# runtime entrypoints. Use together with environment values that name the existing
+# Secrets, image digest, network ranges and connection budget:
+#
+#   helm upgrade --install oan-msg deploy/helm/oan-messaging \
+#     -f deploy/helm/oan-messaging/values-pilot.yaml -f <environment-values>.yaml
+#
+# Broadcast stays disabled (no caller may be granted `broadcast`; the worker refuses to
+# start with OAN_MSG_BROADCAST_ENABLED=true). Dispatch rate defaults are unchanged.
+worker:
+  enabled: true
+  command: [python, -m, oan_messaging.runtime, worker]
+  channels: [sms]          # add telegram once secrets.telegram.bots is configured
+receipts:
+  enabled: true
+  command: [python, -m, oan_messaging.runtime, receipts]
+cleanup:
+  enabled: true
+  mode: cronjob
+  command: [python, -m, oan_messaging.runtime, cleanup]
+statusCheck:
+  enabled: true
