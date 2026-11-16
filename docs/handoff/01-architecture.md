@@ -15,7 +15,7 @@ OAN and later ask for its status.
 | **API** (HTTPS) | Authenticates the caller's token; checks purpose, recipient, length and expiry; stores the message durably **before** answering `202`; replays identical requests as `200` |
 | **PostgreSQL** | Messages, attempts and receipts. Message text and recipient are purged once a message is past `sending`. |
 | **Worker** | Sends due messages under a shared rate limit. OTP is prioritised over other purposes. Never sends after `expires_at`, never resends an uncertain outcome. |
-| **Receipt ingress** | Accepts 8028 delivery receipts over pinned mutual TLS; moves SMS to `delivered` or `failed` |
+| **Receipt ingress** | Accepts 8028 delivery receipts over mutual TLS (8028's callback CA) with a callback secret; moves SMS to `delivered` or `failed` |
 | **Callers** | Decide **what** to send, **to whom**, **when**, and in which language. Keep their own record of each intended message. |
 
 ## 2. Three ways to integrate
@@ -43,7 +43,7 @@ OAN and later ask for its status.
 |---|---|
 | Caller → OAN API | HTTPS; one bearer token per calling service, issued by the OAN operator; allowed channels and purposes per caller |
 | OAN → 8028 | Mutual TLS with the 8028-issued client certificate |
-| 8028 → OAN receipts | Mutual TLS; only the pinned 8028 certificate is accepted |
+| 8028 → OAN receipts | Mutual TLS (certificate from 8028's callback CA, optionally pinned) plus the callback secret in each body |
 | Data at rest | Message content encrypted; recipient stored as a keyed fingerprint plus a masked form; text purged after sending |
 | Logs | Secrets, tokens and message content redacted from every log line |
 | Identity | **Delivering an OTP never proves identity.** Only the owning service's verify step does. |

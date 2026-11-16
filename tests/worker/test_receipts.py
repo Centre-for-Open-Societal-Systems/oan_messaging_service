@@ -34,6 +34,7 @@ from wsupport import (
 
 from oan_messaging.contracts import Provider
 from oan_messaging.receipts import (
+    DEFAULT_PATH,
     CallbackServer,
     ReceiptProcessor,
     ReceiptRejected,
@@ -45,6 +46,7 @@ from oan_messaging.storage.repository import PostgresMessageRepository
 from oan_messaging.storage.schema import messages, receipts
 
 PHONE = "0900000001"
+CB = DEFAULT_PATH  # the callback path registered with 8028
 
 
 @pytest.fixture
@@ -66,7 +68,7 @@ def body(
     data = {
         "sms_id": sms_id,
         "phone_number": phone,
-        "sms_status": status,
+        "status": status,
         "event_time": event_time,
         **extra,
     }
@@ -130,9 +132,8 @@ def test_parse_callback_converts_eat_and_normalizes() -> None:
         (body(sms_id="x" * 65), "invalid_sms_id"),
         (body(phone="0111000000"), "invalid_phone_number"),
         (body(phone=900000001), "invalid_phone_number"),
-        (body(status=""), "invalid_sms_status"),
-        (body(status="x" * 65), "invalid_sms_status"),
-        (body(status="Deliv\nered"), "invalid_sms_status"),
+        (body(status="x" * 65), "invalid_status"),
+        (body(status="Deliv\nered"), "invalid_status"),
         (body(event_time="2026-09-01T08:12:19"), "invalid_event_time"),
         (body(event_time="2026-02-30 08:12:19"), "invalid_event_time"),
         (body(event_time=None), "invalid_event_time"),
@@ -164,10 +165,10 @@ async def test_processor_requires_pinned_peer_certificate_and_ignores_headers(
         "ssl-client-verify": "SUCCESS",
     }
     for peer in (None, b"", der(certs["unpinned_cert"]), der(certs["rogue_cert"])):
-        r = await proc.handle(peer, "POST", "/8028/sms-status", spoof, body())
+        r = await proc.handle(peer, "POST", CB, spoof, body())
         assert r.status == 403
     assert await stored_receipts(sf) == []  # nothing persisted for unauthenticated calls
-    ok = await proc.handle(der(certs["pinned_cert"]), "POST", "/8028/sms-status", JSON, body())
+    ok = await proc.handle(der(certs["pinned_cert"]), "POST", CB, JSON, body())
     assert ok.status == 200 and len(await stored_receipts(sf)) == 1
 
 
@@ -176,12 +177,12 @@ async def test_processor_http_errors(
 ) -> None:
     proc = ReceiptProcessor(repo, load_pins([certs["pinned_cert"]]), clock=lambda: T0)
     peer = der(certs["pinned_cert"])
-    assert (await proc.handle(peer, "GET", "/8028/sms-status", JSON, b"")).status == 405
+    assert (await proc.handle(peer, "GET", CB, JSON, b"")).status == 405
     assert (await proc.handle(peer, "POST", "/other", JSON, body())).status == 404
     assert (
-        await proc.handle(peer, "POST", "/8028/sms-status", {"content-type": "text/plain"}, body())
+        await proc.handle(peer, "POST", CB, {"content-type": "text/plain"}, body())
     ).status == 415
-    bad = await proc.handle(peer, "POST", "/8028/sms-status", JSON, body(phone="0111000000"))
+    bad = await proc.handle(peer, "POST", CB, JSON, body(phone="0111000000"))
     assert bad.status == 400 and b"0111000000" not in bad.body
     assert await stored_receipts(sf) == []
 
@@ -200,7 +201,7 @@ async def test_not_acknowledged_unless_persisted(
         load_pins([certs["pinned_cert"]]),
         clock=lambda: T0,
     )
-    r = await proc.handle(der(certs["pinned_cert"]), "POST", "/8028/sms-status", JSON, body())
+    r = await proc.handle(der(certs["pinned_cert"]), "POST", CB, JSON, body())
     assert r.status == 503 and b"retry_later" in r.body  # 8028 retries; no 200 issued
     assert await stored_receipts(sf) == []
 
@@ -220,7 +221,7 @@ async def test_duplicate_and_out_of_order_callbacks(
     proc = ReceiptProcessor(repo, load_pins([certs["pinned_cert"]]), clock=clock)
     peer = der(certs["pinned_cert"])
     for st in ("Delivered", "Delivered", "Sent"):  # duplicate, then a late "Sent"
-        r = await proc.handle(peer, "POST", "/8028/sms-status", JSON, body(status=st))
+        r = await proc.handle(peer, "POST", CB, JSON, body(status=st))
         assert r.status == 200  # always acknowledged once persisted
     rows = await stored_receipts(sf)
     assert [r["disposition"] for r in rows] == [
@@ -246,13 +247,13 @@ async def test_undocumented_status_is_recorded_without_transition(
     proc = ReceiptProcessor(repo, load_pins([certs["pinned_cert"]]), clock=clock)
     for st in ("Failed", "Queued", "UNKNOWN"):
         r = await proc.handle(
-            der(certs["pinned_cert"]), "POST", "/8028/sms-status", JSON, body(status=st)
+            der(certs["pinned_cert"]), "POST", CB, JSON, body(status=st)
         )
         assert r.status == 200
     assert (await status_of(sf, mid))["status"] == "sent"
     assert [r["raw_status"] for r in await stored_receipts(sf)] == ["Failed", "Queued", "UNKNOWN"]
     exp = await proc.handle(
-        der(certs["pinned_cert"]), "POST", "/8028/sms-status", JSON, body(status="Expired")
+        der(certs["pinned_cert"]), "POST", CB, JSON, body(status="Expired")
     )
     assert exp.status == 200
     m = await status_of(sf, mid)
@@ -274,7 +275,7 @@ async def test_wrong_recipient_receipt_is_mismatched(
     mid = await sent_sms(engine, sf, keys, repo, clock)
     proc = ReceiptProcessor(repo, load_pins([certs["pinned_cert"]]), clock=clock)
     r = await proc.handle(
-        der(certs["pinned_cert"]), "POST", "/8028/sms-status", JSON, body(phone="0900000999")
+        der(certs["pinned_cert"]), "POST", CB, JSON, body(phone="0900000999")
     )
     assert r.status == 200
     assert (await stored_receipts(sf))[0]["disposition"] == "mismatched"
@@ -295,7 +296,7 @@ async def test_early_callback_before_send_response_is_stored_then_applied(
 
     async def gateway_calls_back_before_responding(req: Any, now: Any) -> Any:
         r = await proc.handle(
-            der(certs["pinned_cert"]), "POST", "/8028/sms-status", JSON, body(sms_id="555")
+            der(certs["pinned_cert"]), "POST", CB, JSON, body(sms_id="555")
         )
         assert r.status == 200  # persisted as an orphan, acknowledged
         return sent(Provider.SMS_8028, now, "555")
@@ -318,7 +319,7 @@ async def test_receipt_matches_after_content_purge_and_key_rotation(
     assert (await status_of(sf, mid))["content_purged_at"] is not None
     rotated = keys.rotated_fingerprint("f2")
     proc = ReceiptProcessor(rotated.repo(sf), load_pins([certs["pinned_cert"]]), clock=clock)
-    r = await proc.handle(der(certs["pinned_cert"]), "POST", "/8028/sms-status", JSON, body())
+    r = await proc.handle(der(certs["pinned_cert"]), "POST", CB, JSON, body())
     assert r.status == 200
     (rec,) = await stored_receipts(sf)
     assert (rec["disposition"], rec["recipient_fp_version"]) == ("applied", "f1")
@@ -338,7 +339,7 @@ async def test_telegram_has_no_receipts_via_this_ingress(
     tg = FakeTelegram(clock, lambda req, now: sent(Provider.TELEGRAM, now, "17006100"))
     await make_worker(repo, engine, clock, tg=tg).run_once()
     proc = ReceiptProcessor(repo, load_pins([certs["pinned_cert"]]), clock=clock)
-    r = await proc.handle(der(certs["pinned_cert"]), "POST", "/8028/sms-status", JSON, body())
+    r = await proc.handle(der(certs["pinned_cert"]), "POST", CB, JSON, body())
     assert r.status == 200
     assert (await stored_receipts(sf))[0]["disposition"] == "orphaned"  # SMS-only matching
     assert (await status_of(sf, m.id))["status"] == "sent"
@@ -357,7 +358,7 @@ async def test_no_raw_phone_or_secrets_in_storage_or_logs(
     await sent_sms(engine, sf, keys, repo, clock)
     proc = ReceiptProcessor(repo, load_pins([certs["pinned_cert"]]), clock=clock)
     for payload in (body(), body(phone="0900000777"), body(phone="0111000000")):
-        await proc.handle(der(certs["pinned_cert"]), "POST", "/8028/sms-status", JSON, payload)
+        await proc.handle(der(certs["pinned_cert"]), "POST", CB, JSON, payload)
     dump = repr(await stored_receipts(sf))
     logged = caplog.text + "".join(str(r.args) for r in caplog.records)
     for raw in (
@@ -407,7 +408,7 @@ async def post(
         headers
         if headers is not None
         else (
-            "POST /8028/sms-status HTTP/1.1\r\nHost: localhost\r\n"
+            "POST /sms-status-receiver/v1/update-status HTTP/1.1\r\nHost: localhost\r\n"
             f"Content-Type: application/json\r\nContent-Length: {len(payload)}\r\n\r\n"
         )
     )
@@ -432,7 +433,7 @@ async def raw_exchange(
             headers
             if headers is not None
             else (
-                "POST /8028/sms-status HTTP/1.1\r\nHost: localhost\r\n"
+                "POST /sms-status-receiver/v1/update-status HTTP/1.1\r\nHost: localhost\r\n"
                 f"Content-Type: application/json\r\nContent-Length: {len(payload)}\r\n\r\n"
             )
         )
@@ -456,7 +457,7 @@ async def test_tls_pinned_client_is_accepted_and_persisted_before_200(
 ) -> None:
     mid = await sent_sms(engine, sf, keys, repo, clock)
     status, payload = await post(server, client_ctx(certs, "pinned"), body())
-    assert status == 200 and json.loads(payload) == {"status": "received"}
+    assert status == 200 and json.loads(payload) == {"success": True}
     # By the time the 200 is read, the receipt is durable and applied.
     assert (await stored_receipts(sf))[0]["disposition"] == "applied"
     assert (await status_of(sf, mid))["status"] == "delivered"
@@ -488,7 +489,7 @@ async def test_tls_header_spoofing_cannot_authenticate(
 ) -> None:
     payload = body()
     spoof = (
-        "POST /8028/sms-status HTTP/1.1\r\nHost: localhost\r\n"
+        "POST /sms-status-receiver/v1/update-status HTTP/1.1\r\nHost: localhost\r\n"
         "X-SSL-Client-Cert: " + certs["pinned_cert"].read_text().replace("\n", "") + "\r\n"
         "X-SSL-Client-Verify: SUCCESS\r\n"
         f"Content-Type: application/json\r\nContent-Length: {len(payload)}\r\n\r\n"
@@ -504,7 +505,7 @@ async def test_plain_http_to_the_tls_port_is_refused(
     reader, writer = await asyncio.open_connection("127.0.0.1", server)
     payload = body()
     writer.write(
-        b"POST /8028/sms-status HTTP/1.1\r\nContent-Type: application/json\r\n"
+        b"POST /sms-status-receiver/v1/update-status HTTP/1.1\r\nContent-Type: application/json\r\n"
         + f"Content-Length: {len(payload)}\r\n\r\n".encode()
         + payload
     )
@@ -518,18 +519,18 @@ async def test_plain_http_to_the_tls_port_is_refused(
 @pytest.mark.parametrize(
     ("head", "expected"),
     [
-        ("POST /8028/sms-status HTTP/1.1\r\nContent-Type: application/json\r\n\r\n", 411),
+        (f"POST {CB} HTTP/1.1\r\nContent-Type: application/json\r\n\r\n", 411),
         (
-            "POST /8028/sms-status HTTP/1.1\r\nTransfer-Encoding: chunked\r\n"
+            "POST /sms-status-receiver/v1/update-status HTTP/1.1\r\nTransfer-Encoding: chunked\r\n"
             "Content-Type: application/json\r\n\r\n",
             501,
         ),
         (
-            "POST /8028/sms-status HTTP/1.1\r\nContent-Type: application/json\r\n"
+            f"POST {CB} HTTP/1.1\r\nContent-Type: application/json\r\n"
             "Content-Length: 999999\r\n\r\n",
             413,
         ),
-        ("GET /8028/sms-status HTTP/1.1\r\n\r\n", 405),
+        ("GET /sms-status-receiver/v1/update-status HTTP/1.1\r\n\r\n", 405),
         ("POST /nope HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n", 404),
         ("NONSENSE\r\n\r\n", 400),
     ],
@@ -556,6 +557,136 @@ def test_server_context_requires_client_certs_and_key_permissions(certs: Certs) 
         build_server_ssl_context(certs["server_cert"], certs["server_key"], [certs["pinned_cert"]])
     with pytest.raises(ValueError):
         load_pins([])
+    with pytest.raises(ValueError):  # neither a CA nor a pin: nothing to trust
+        build_server_ssl_context(certs["server_cert"], certs["server_key"])
     loose = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     with pytest.raises(ValueError):
         CallbackServer(ReceiptProcessor.__new__(ReceiptProcessor), loose)
+
+
+# ------------------------------------------------ 8028 guide v1.1 (2026-11-12)
+
+SECRET, PREVIOUS = "callback-secret-current", "callback-secret-previous"
+
+
+def guide_body(secret: Any = SECRET, **kw: Any) -> bytes:
+    """The callback exactly as guide 8.1 shows it: clientSecret, numeric sms_id,
+    international phone number, ``status``."""
+    data = {"clientSecret": secret, "sms_id": 17006100, "phone_number": "251900000001",
+            "status": "Delivered", "event_time": "2026-09-01 08:12:19", **kw}
+    return json.dumps({k: v for k, v in data.items() if v is not None}).encode()
+
+
+def test_parse_guide_shape_and_postman_fallback() -> None:
+    r = parse_callback(guide_body(status="Pending"), T0)
+    assert (r.provider_message_id, r.recipient, r.raw_status) == (
+        "17006100", "+251900000001", "Pending")
+    postman = json.dumps({"sms_id": "17006100", "phone_number": PHONE,
+                          "sms_status": "Delivered", "event_time": "2026-09-01 08:12:19"})
+    assert parse_callback(postman.encode(), T0).raw_status == "Delivered"
+    assert parse_callback(guide_body(status=None), T0).raw_status == "null"
+    nul = json.loads(guide_body())
+    nul["status"] = None
+    assert parse_callback(json.dumps(nul).encode(), T0).raw_status == "null"
+    assert parse_callback(guide_body(status=""), T0).raw_status == "empty"
+
+
+async def test_callback_secret_is_required_and_never_stored_or_logged(
+    engine: AsyncEngine,
+    sf: async_sessionmaker[AsyncSession],
+    keys: Keys,
+    repo: PostgresMessageRepository,
+    clock: FakeClock,
+    certs: Certs,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    await sent_sms(engine, sf, keys, repo, clock)
+    proc = ReceiptProcessor(repo, load_pins([certs["pinned_cert"]]), clock=clock,
+                            callback_secrets=[SECRET, PREVIOUS])
+    peer = der(certs["pinned_cert"])
+    wrong = "wrong-secret-value"
+    for bad in (guide_body(None), guide_body(wrong), guide_body(12345678), guide_body("")):
+        r = await proc.handle(peer, "POST", DEFAULT_PATH, JSON, bad)
+        assert r.status == 401 and json.loads(r.body) == {
+            "success": False, "error": "authentication_failure"}
+    assert await stored_receipts(sf) == []
+    ok = await proc.handle(peer, "POST", DEFAULT_PATH, JSON, guide_body(status="Pending"))
+    assert ok.status == 200 and json.loads(ok.body) == {"success": True}
+    rotated = await proc.handle(peer, "POST", DEFAULT_PATH, JSON, guide_body(secret=PREVIOUS))
+    assert rotated.status == 200
+    dump = repr(await stored_receipts(sf))
+    logged = caplog.text + "".join(str(r.args) for r in caplog.records)
+    for secret in (SECRET, PREVIOUS, wrong):
+        assert secret not in dump and secret not in logged
+    with pytest.raises(ValueError):
+        ReceiptProcessor(repo, load_pins([certs["pinned_cert"]]), callback_secrets=["short"])
+
+
+async def test_pending_never_overwrites_a_final_status(
+    engine: AsyncEngine,
+    sf: async_sessionmaker[AsyncSession],
+    keys: Keys,
+    repo: PostgresMessageRepository,
+    clock: FakeClock,
+    certs: Certs,
+) -> None:
+    mid = await sent_sms(engine, sf, keys, repo, clock)
+    proc = ReceiptProcessor(repo, load_pins([certs["pinned_cert"]]), clock=clock)
+    peer = der(certs["pinned_cert"])
+    for st in ("Pending", "Delivered", "Pending"):  # guide 8.3: late Pending after Delivered
+        r = await proc.handle(peer, "POST", DEFAULT_PATH, JSON, guide_body(status=st))
+        assert r.status == 200
+    assert (await status_of(sf, mid))["status"] == "delivered"
+    statuses = [row["raw_status"] for row in await stored_receipts(sf)]
+    assert statuses == ["Pending", "Delivered", "Pending"]
+
+
+async def test_query_string_on_the_registered_path_is_accepted(
+    repo: PostgresMessageRepository, certs: Certs
+) -> None:
+    proc = ReceiptProcessor(repo, load_pins([certs["pinned_cert"]]), clock=lambda: T0)
+    r = await proc.handle(der(certs["pinned_cert"]), "POST", DEFAULT_PATH + "?v=1", JSON, body())
+    assert r.status == 200
+
+
+def test_processor_needs_pins_or_a_trusted_ca(repo: PostgresMessageRepository) -> None:
+    with pytest.raises(ValueError):
+        ReceiptProcessor(repo, frozenset())
+    proc = ReceiptProcessor(repo, frozenset(), trust_ca=True)
+    assert proc.is_authenticated(b"verified-by-tls") and not proc.is_authenticated(None)
+
+
+@pytest.fixture
+async def ca_server(
+    repo: PostgresMessageRepository, certs: Certs, clock: FakeClock
+) -> AsyncIterator[int]:
+    """CA mode: trust 8028's callback CA, no pins, callback secret required."""
+    ctx = build_server_ssl_context(
+        certs["server_cert"], certs["server_key"], client_ca_certs=[certs["ca_cert"]]
+    )
+    proc = ReceiptProcessor(repo, trust_ca=True, callback_secrets=[SECRET], clock=clock)
+    srv = CallbackServer(proc, ctx)
+    port = await srv.start("127.0.0.1", 0)
+    yield port
+    await srv.close()
+
+
+async def test_ca_mode_accepts_any_cert_from_the_8028_ca_and_refuses_others(
+    ca_server: int,
+    engine: AsyncEngine,
+    sf: async_sessionmaker[AsyncSession],
+    keys: Keys,
+    repo: PostgresMessageRepository,
+    clock: FakeClock,
+    certs: Certs,
+) -> None:
+    mid = await sent_sms(engine, sf, keys, repo, clock)
+    status, payload = await post(ca_server, client_ctx(certs, "unpinned"), guide_body())
+    assert status == 200 and json.loads(payload) == {"success": True}
+    assert (await status_of(sf, mid))["status"] == "delivered"
+    status, _ = await post(ca_server, client_ctx(certs, "pinned"), guide_body("nope-nope"))
+    assert status == 401
+    for who in (None, "rogue"):  # no certificate, or one not issued by the CA
+        assert await raw_exchange(ca_server, client_ctx(certs, who), guide_body()) == b""
+    assert len(await stored_receipts(sf)) == 1

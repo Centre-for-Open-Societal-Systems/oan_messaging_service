@@ -44,9 +44,19 @@ incoherent values. */ -}}
 
 {{- if $v.receipts.enabled -}}
 {{- $_ := required "secrets.receipts.serverTlsSecret is required when receipts are enabled" $v.secrets.receipts.serverTlsSecret -}}
-{{- $_ := required "secrets.receipts.pinnedCertsSecret is required when receipts are enabled" $v.secrets.receipts.pinnedCertsSecret -}}
-{{- if not $v.secrets.receipts.pinnedCertKeys -}}
-{{- fail "secrets.receipts.pinnedCertKeys needs at least one pinned 8028 certificate" -}}
+{{- if and (not $v.secrets.receipts.pinnedCertKeys) (not $v.secrets.receipts.clientCaKeys) -}}
+{{- fail "secrets.receipts needs 8028's callback CA (clientCaSecret, clientCaKeys) or at least one pinned 8028 certificate (pinnedCertsSecret, pinnedCertKeys)" -}}
+{{- end -}}
+{{- if $v.secrets.receipts.pinnedCertKeys -}}
+{{- $_ := required "secrets.receipts.pinnedCertsSecret is required when pinnedCertKeys are set" $v.secrets.receipts.pinnedCertsSecret -}}
+{{- end -}}
+{{- if $v.secrets.receipts.clientCaKeys -}}
+{{- $_ := required "secrets.receipts.clientCaSecret is required when clientCaKeys are set" $v.secrets.receipts.clientCaSecret -}}
+{{- end -}}
+{{- $_ := required "secrets.receipts.callbackSecret.existingSecret is required when receipts are enabled" $v.secrets.receipts.callbackSecret.existingSecret -}}
+{{- $_ := required "secrets.receipts.callbackSecret.key is required when receipts are enabled" $v.secrets.receipts.callbackSecret.key -}}
+{{- if not (hasPrefix "/" (toString $v.receipts.path)) -}}
+{{- fail "receipts.path must start with /" -}}
 {{- end -}}
 {{- range $name, $_ := $v.receipts.service.annotations -}}
 {{- if or (contains "ssl-cert" $name) (contains "ssl-ports" $name) (contains "ssl-negotiation-policy" $name) (contains "backend-protocol" $name) -}}

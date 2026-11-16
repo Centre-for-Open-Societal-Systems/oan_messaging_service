@@ -580,7 +580,7 @@ class Ingress:
         TLS handshake (client-certificate check) refuses the connection."""
         data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
         head = (
-            "POST /8028/sms-status HTTP/1.1\r\nHost: localhost\r\n"
+            "POST /sms-status-receiver/v1/update-status HTTP/1.1\r\nHost: localhost\r\n"
             + extra_headers
             + f"Content-Type: application/json\r\nContent-Length: {len(data)}\r\n\r\n"
         ).encode()
@@ -626,7 +626,7 @@ def callback(sms_id: str, domestic: str, status: str, event: datetime) -> dict[s
     return {
         "sms_id": sms_id,
         "phone_number": domestic,
-        "sms_status": status,
+        "status": status,
         "event_time": eat(event),
     }
 

@@ -109,7 +109,7 @@ async def test_every_component_runs_under_the_runtime_role(
     response = await proc.handle(
         der,
         "POST",
-        "/8028/sms-status",
+        "/sms-status-receiver/v1/update-status",
         {"content-type": "application/json"},
         receipt_body("17006100"),
     )

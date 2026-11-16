@@ -33,6 +33,7 @@ from oan_messaging.adapters.sms8028 import make_client as sms_client
 from oan_messaging.adapters.telegram import TelegramAdapter, TelegramBotRegistry
 from oan_messaging.adapters.telegram import make_client as telegram_client
 from oan_messaging.contracts import Channel, MessageAdapter, Purpose
+from oan_messaging.receipts.ingress import DEFAULT_PATH as DEFAULT_RECEIPTS_PATH
 from oan_messaging.receipts.ingress import (
     CallbackServer,
     ReceiptProcessor,
@@ -68,6 +69,11 @@ log = logging.getLogger(__name__)
 
 def heartbeat_path() -> Path:
     return Path(os.environ.get("OAN_MSG_WORKER_HEARTBEAT_FILE", str(DEFAULT_HEARTBEAT)))
+
+
+def path_list(name: str) -> list[Path]:
+    """Comma-separated file paths from an optional setting."""
+    return [Path(p.strip()) for p in os.environ.get(name, "").split(",") if p.strip()]
 
 
 def required(name: str) -> str:
@@ -191,13 +197,32 @@ async def run(
                     log.error("key versions in use but not configured: %s", ",".join(missing))
                     raise RuntimeError("key check failed")
             if component == "receipts":
-                pins = [Path(p) for p in required("OAN_MSG_RECEIPTS_PINNED_CERTS").split(",")]
+                pins = path_list("OAN_MSG_RECEIPTS_PINNED_CERTS")
+                cas = path_list("OAN_MSG_RECEIPTS_CLIENT_CA_CERTS")
+                if not pins and not cas:
+                    raise ValueError(
+                        "required setting missing: OAN_MSG_RECEIPTS_CLIENT_CA_CERTS "
+                        "or OAN_MSG_RECEIPTS_PINNED_CERTS"
+                    )
+                callback_secrets = [
+                    required("OAN_MSG_RECEIPTS_CALLBACK_SECRET"),
+                    os.environ.get("OAN_MSG_RECEIPTS_CALLBACK_SECRET_PREVIOUS", ""),
+                ]
+                install_redaction(*[s for s in callback_secrets if s])
                 ssl_context = build_server_ssl_context(
                     Path(required("OAN_MSG_RECEIPTS_SERVER_CERT")),
                     Path(required("OAN_MSG_RECEIPTS_SERVER_KEY")),
                     pins,
+                    cas,
                 )
-                server = CallbackServer(ReceiptProcessor(repo, load_pins(pins)), ssl_context)
+                processor = ReceiptProcessor(
+                    repo,
+                    load_pins(pins) if pins else frozenset(),
+                    trust_ca=bool(cas),
+                    callback_secrets=callback_secrets,
+                    path=os.environ.get("OAN_MSG_RECEIPTS_PATH") or DEFAULT_RECEIPTS_PATH,
+                )
+                server = CallbackServer(processor, ssl_context)
                 await server.start("0.0.0.0", int(os.environ.get("OAN_MSG_RECEIPTS_PORT", "8443")))  # noqa: S104 (container ingress)
                 stack.push_async_callback(server.close)
                 await stop.wait()

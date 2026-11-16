@@ -351,22 +351,27 @@ the pilot.
 
 ## Receipts (8028 only)
 
-Telegram has no receipt integration in this scope. The 8028 callback endpoint must sit
-behind verified mTLS, pinning the SHA-256 fingerprint of the 8028-issued certificate. A
-certificate header set by an untrusted proxy is never trusted. The callback is
-authenticated and its evidence durably persisted before the 200; matching and status
-changes may follow asynchronously. Documented statuses map via `RECEIPT_STATUS_MAP`; the
-raw status is always kept:
+Telegram has no receipt integration in this scope. 8028 calls the receipt listener at the
+registered path (default `/sms-status-receiver/v1/update-status`, 8028 guide v1.1). Two
+factors are checked in the process, never from a header: mutual TLS (8028's callback CA,
+optionally narrowed by pinned certificates) and the callback secret in the body
+(constant-time; never stored or logged). The callback is authenticated and its evidence
+durably persisted before `200 {"success": true}`; matching and status changes may follow
+asynchronously. The status is read from `status` (`sms_status` accepted); `sms_id` may be
+a number; the phone arrives as `251…`. Documented statuses map via `RECEIPT_STATUS_MAP`;
+the raw status is always kept:
 
-| 8028 `sms_status` | Message status | Final |
+| 8028 `status` | Message status | Final |
 |---|---|---|
-| `Sent` | `sent` | no |
+| `Pending` | `sent` | no |
+| `Sent` (earlier guide) | `sent` | no |
 | `Delivered` | `delivered` | yes |
-| `Expired` | `failed` (`provider_delivery_expired`; cause not proven) | yes |
+| `Expired` (earlier guide) | `failed` (`provider_delivery_expired`; cause not proven) | yes |
 | `Rejected` | `failed` (`provider_rejected`) | yes |
-| anything else (e.g. `Failed`) | no change, recorded and logged | no |
+| anything else, including null (`null`) or empty (`empty`) | no change, recorded and logged | no |
 
-`event_time` is EAT (UTC+3) and converted to an aware datetime.
+`event_time` is EAT (UTC+3) and converted to an aware datetime. Details and open items:
+`docs/8028-contract.md`.
 
 ## Mandatory downstream acceptance scenarios
 

@@ -71,7 +71,9 @@ services:
       <<: *runtime-db
       OAN_MSG_RECEIPTS_SERVER_CERT: /certs/receipts-server.crt
       OAN_MSG_RECEIPTS_SERVER_KEY: /certs/receipts-server.key
-      OAN_MSG_RECEIPTS_PINNED_CERTS: /certs/callback-client.crt
+      # As 8028 guide v1.1: trust the CA that issues 8028's callback certificate.
+      OAN_MSG_RECEIPTS_CLIENT_CA_CERTS: /certs/ca.crt
+      OAN_MSG_RECEIPTS_CALLBACK_SECRET: ${FAKE8028_CALLBACK_SECRET}
       OAN_MSG_RECEIPTS_PORT: "8443"
     command: [python, -m, oan_messaging.runtime, receipts]
     volumes: [certs:/certs:ro]
@@ -85,6 +87,7 @@ services:
     <<: *oan
     environment:
       FAKE8028_CLIENT_SECRET: ${FAKE8028_CLIENT_SECRET}
+      FAKE8028_CALLBACK_SECRET: ${FAKE8028_CALLBACK_SECRET}
     command: [python, /tools/fake8028.py]
     volumes: [certs:/certs:ro, ./tools:/tools:ro]
     ports: ["127.0.0.1:18028:8080"]

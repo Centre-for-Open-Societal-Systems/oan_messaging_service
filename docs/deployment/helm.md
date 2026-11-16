@@ -24,7 +24,7 @@ whose command is missing refuses to render instead of inventing one.
 | Telegram tokens | `TelegramBotRegistry.from_environ`, `OAN_MSG_TELEGRAM_BOT_TOKEN__<KEY>` (`adapters/telegram.py:147`) | One env var per entry in `secrets.telegram.bots` |
 | Worker process | `python -m oan_messaging.runtime worker`: loads settings and adapters, checks start-up conditions (database latency, key versions, Telegram tokens), stops on SIGTERM, writes a heartbeat each cycle | Off in `values.yaml`; **on in `values-pilot.yaml`** with this command and `worker.channels` |
 | Cleanup | `python -m oan_messaging.runtime cleanup` (one pass; `--forever` for the loop) | Off in `values.yaml`; **on in `values-pilot.yaml`** as a CronJob |
-| Receipt ingress | `python -m oan_messaging.runtime receipts`: reads the certificate and pin files mounted at the §3.2 paths | Off in `values.yaml`; **on in `values-pilot.yaml`** with this command |
+| Receipt ingress | `python -m oan_messaging.runtime receipts`: reads the server certificate, 8028's callback CA and/or pinned certificates (mounted at the §3.2 paths), the callback secret and the path | Off in `values.yaml`; **on in `values-pilot.yaml`** with this command |
 | Health endpoints | API `/livez` (process serves requests) and `/readyz` (database answers); worker `check-heartbeat` | HTTP probes for the API, an exec probe for the worker (§3.6) |
 | Status alerts | `python -m oan_messaging.runtime status --fail-on-alert` (exit 2 on any alert) | `statusCheck` CronJob; off in `values.yaml`, **on in `values-pilot.yaml`** |
 | Key-file validator | `build_ssl_context` and `build_server_ssl_context` reject a private key with any group/other bit (`st_mode & 0o077`) | Validated 0600 snapshot of one Secret generation via init container (§3.2) |
@@ -100,7 +100,8 @@ Mounted paths:
 |---|---|---|
 | worker | `/run/oan-msg/tls/current/tls.crt`, `tls.key`, `ca.crt` | 8028-issued client certificate and key; optional 8028 server CA. Wired to `OAN_MSG_SMS8028_CLIENT_CERT/_CLIENT_KEY/_CA_CERT` |
 | receipts | `/run/oan-msg/tls/current/tls.crt`, `tls.key` | server certificate presented to 8028 |
-| receipts | `/etc/oan-msg/receipts/pins/<key>` | pinned 8028 client certificates (public; mounted directly) |
+| receipts | `/etc/oan-msg/receipts/ca/<key>` | 8028's callback CA (public; mounted directly) |
+| receipts | `/etc/oan-msg/receipts/pins/<key>` | optional pinned 8028 callback certificates (public; mounted directly) |
 
 Regression coverage (`ci/regression/test_tls_snapshot.py`, 10 tests, run against the
 script file itself): the naive mixed-pair hazard, single generation, a switch between
@@ -251,7 +252,9 @@ Session mode, or direct connections, are fine.
 |---|---|
 | 8028 client certificate/key (`secrets.sms8028.tlsSecret`) | Update certificate and key **in one Secret update** (one generation), then `kubectl rollout restart deployment/<fullname>-worker`. The snapshot is taken by the init container at pod start; running pods keep their published pair until restarted. A Secret updated in two steps (certificate, then key) produces an intermediate mismatched generation; pods starting at that moment fail validation and retry rather than run with it. |
 | Receipt server certificate (`secrets.receipts.serverTlsSecret`) | Same, for the receipts Deployment. Tell 8028 in advance if it pins our server certificate. |
-| Pinned 8028 client certificates (`secrets.receipts.pinnedCertsSecret`) | Add the new certificate as a second key (`pinnedCertKeys: [current.pem, previous.pem]`), roll out, wait until 8028 has switched, then remove the old one and roll out again. `load_pins` reads pins at startup only. The renewal notice period is an open 8028 question. |
+| 8028's callback CA (`secrets.receipts.clientCaSecret`) | Add the new CA as a second key in `clientCaKeys`, roll out, remove the old one after 8028 switches. Read at startup only. |
+| Pinned 8028 callback certificates (`secrets.receipts.pinnedCertsSecret`, optional) | Add the new certificate as a second key (`pinnedCertKeys: [current.pem, previous.pem]`), roll out, wait until 8028 has switched, then remove the old one and roll out again. `load_pins` reads pins at startup only. |
+| Callback secret (`secrets.receipts.callbackSecret`) | New value under a new key; set `key` to it and `previousKey` to the old key; roll out; after 8028 switches, clear `previousKey` and roll out again. |
 | Storage keys (`OAN_MSG_CONTENT_KEYS`, `_FINGERPRINT_KEYS`) | Keyrings: add the new version, change `config.contentKeyCurrent` / `fingerprintKeyCurrent`, roll out all components together (one ConfigMap), and retire the old version only when `retire_key_version` allows it. |
 | Caller credential pepper, database passwords | Update the Secret and restart; a pepper change invalidates every issued caller credential. |
 
@@ -291,7 +294,9 @@ chart name. For each they assert:
 | `secrets.sms8028.tlsSecret` | kubernetes.io/tls | `tls.crt`, `tls.key` (8028-issued client certificate); optional CA key named by `caKey` |
 | `secrets.telegram.existingSecret` | Opaque | one key per bot, mapped in `secrets.telegram.bots` (bot key `^[a-z0-9][a-z0-9_-]{0,63}$`) |
 | `secrets.receipts.serverTlsSecret` | kubernetes.io/tls | `tls.crt`, `tls.key` (server certificate 8028 connects to) |
-| `secrets.receipts.pinnedCertsSecret` | Opaque | PEM files named in `pinnedCertKeys` |
+| `secrets.receipts.clientCaSecret` | Opaque | 8028's callback CA, PEM, named in `clientCaKeys` (8028 guide v1.1) |
+| `secrets.receipts.pinnedCertsSecret` (optional) | Opaque | PEM files named in `pinnedCertKeys`; set `pinnedCertKeys: []` to rely on the CA alone |
+| `secrets.receipts.callbackSecret.existingSecret` | Opaque | the callback secret 8028 sends in every callback (`key`, default `callback-secret`; optional `previousKey`) |
 
 Never commit these, put them in values files, or pass them with `--set`.
 
@@ -304,7 +309,13 @@ database: {connectionBudget: <share of max_connections>}
 networkPolicy:
   api: {from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: <gateway ns>}}}]}
   receipts: {fromCIDRs: [<8028 callback source CIDRs>]}
+secrets:
+  receipts:
+    clientCaSecret: oan-messaging-8028-callback-ca     # 8028 guide v1.1: trust its CA
+    clientCaKeys: [ca.crt]
+    pinnedCertKeys: []                                 # no pins unless 8028 sends one
 receipts:
+  path: /sms-status-receiver/v1/update-status          # registered with 8028
   service:
     annotations: {<L4 load balancer annotations; no TLS termination>}
     loadBalancerSourceRanges: [<8028 callback source CIDRs>]
@@ -386,7 +397,8 @@ grants (`deploy/sql/grants.sql`).
 * A fixed egress IP for 8028, and 8028's callback source CIDRs.
 * The L4 load balancer type on the target cluster (NLB, MetalLB, ingress-nginx
   pass-through or APISIX stream route).
-* 8028 certificate pinning details and renewal notice period (handoff Q3).
+* Which certificate 8028 presents on callbacks (CA-issued or fixed) and its source addresses;
+  routing of the registered callback host (`iiss.et`) to the receipts Service.
 * Database: a dedicated database with separate DDL and DML roles, `max_connections`
   share, and no transaction-mode pooler.
 * Whether the API sits behind APISIX (an `ApisixRoute` is not templated here, to avoid a

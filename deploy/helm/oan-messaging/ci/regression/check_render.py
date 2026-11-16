@@ -443,6 +443,15 @@ def guards() -> None:
             "secrets.telegram.existingSecret is required",
         ),
         ((*a, "--set", "secrets.receipts.pinnedCertKeys=null"), "pinned 8028 certificate"),
+        (
+            (*a, "--set", "secrets.receipts.clientCaKeys={ca.crt}"),
+            "secrets.receipts.clientCaSecret is required",
+        ),
+        (
+            (*a, "--set", "secrets.receipts.callbackSecret.existingSecret="),
+            "callbackSecret.existingSecret is required",
+        ),
+        ((*a, "--set", "receipts.path=update-status"), "receipts.path must start with /"),
         (("--set", "image.digest=latest"), "image.digest must look like"),
         (("--set", "secrets.core.existingSecret="), "secrets.core.existingSecret is required"),
         (("--set", "database.existingSecret="), "database.existingSecret is required"),
@@ -454,6 +463,15 @@ def guards() -> None:
     check(
         not error(*a, "--set", "receipts.service.type=NodePort"),
         "NodePort receipts Service renders",
+    )
+    check(
+        not error(
+            *a,
+            "--set", "secrets.receipts.pinnedCertKeys=null",
+            "--set", "secrets.receipts.clientCaSecret=oan-messaging-8028-callback-ca",
+            "--set", "secrets.receipts.clientCaKeys={ca.crt}",
+        ),
+        "receipts with 8028's callback CA and no pins render",
     )
 
 

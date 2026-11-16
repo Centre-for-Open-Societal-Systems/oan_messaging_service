@@ -6,6 +6,10 @@
 {{- range $s.pinnedCertKeys }}
 {{- $pins = append $pins (printf "/etc/oan-msg/receipts/pins/%s" .) }}
 {{- end }}
+{{- $cas := list }}
+{{- range $s.clientCaKeys }}
+{{- $cas = append $cas (printf "/etc/oan-msg/receipts/ca/%s" .) }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -74,6 +78,18 @@ spec:
               value: /run/oan-msg/tls/current/tls.key
             - name: OAN_MSG_RECEIPTS_PINNED_CERTS
               value: {{ $pins | join "," | quote }}
+            - name: OAN_MSG_RECEIPTS_CLIENT_CA_CERTS
+              value: {{ $cas | join "," | quote }}
+            - name: OAN_MSG_RECEIPTS_CALLBACK_SECRET
+              valueFrom:
+                secretKeyRef: {name: {{ $s.callbackSecret.existingSecret | quote }}, key: {{ $s.callbackSecret.key | quote }}}
+            {{- with $s.callbackSecret.previousKey }}
+            - name: OAN_MSG_RECEIPTS_CALLBACK_SECRET_PREVIOUS
+              valueFrom:
+                secretKeyRef: {name: {{ $s.callbackSecret.existingSecret | quote }}, key: {{ . | quote }}}
+            {{- end }}
+            - name: OAN_MSG_RECEIPTS_PATH
+              value: {{ .Values.receipts.path | quote }}
             - name: OAN_MSG_RECEIPTS_PORT
               value: {{ .Values.receipts.containerPort | quote }}
             {{- with .Values.receipts.extraEnv }}
@@ -97,12 +113,20 @@ spec:
             - name: tls-snapshot
               mountPath: /run/oan-msg/tls
               readOnly: true
+            {{- if $pins }}
             - name: pins
               mountPath: /etc/oan-msg/receipts/pins
               readOnly: true
+            {{- end }}
+            {{- if $cas }}
+            - name: callback-ca
+              mountPath: /etc/oan-msg/receipts/ca
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {sizeLimit: 64Mi}
+        {{- if $pins }}
         - name: pins
           secret:
             secretName: {{ $s.pinnedCertsSecret }}
@@ -111,6 +135,17 @@ spec:
               {{- range $s.pinnedCertKeys }}
               - {key: {{ . | quote }}, path: {{ . | quote }}}
               {{- end }}
+        {{- end }}
+        {{- if $cas }}
+        - name: callback-ca
+          secret:
+            secretName: {{ $s.clientCaSecret }}
+            defaultMode: 0444
+            items:
+              {{- range $s.clientCaKeys }}
+              - {key: {{ . | quote }}, path: {{ . | quote }}}
+              {{- end }}
+        {{- end }}
         # Server certificate + key, mounted ONLY into the init container.
         - name: tls-source
           secret:

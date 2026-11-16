@@ -93,3 +93,25 @@ tests re-run.
 
 Service suite after the changes (Python 3.12): **896 passed, 1 xfailed**. Not re-run: the
 Consent Manager end-to-end test (needs an image rebuild; covered by the new unit tests).
+
+## Addendum: 8028 guide v1.1 callbacks (16 November 2026)
+
+8028's integration package (guide v1.1, Postman collection v1.3, samples) showed that the
+receipt listener would have refused every real callback. Fixed:
+
+| Change | Verified by |
+|---|---|
+| Status read from `status` (Postman's `sms_status` still accepted); `Pending` maps to `sent` and never overwrites a final status; null or empty status recorded, not refused | New unit tests; `Pending`, `Delivered`, late `Pending` sequence |
+| Callback secret checked in constant time (current and previous); missing or wrong → 401; never stored or logged | New unit test, including log and storage scans |
+| Answer `200 {"success": true}`; errors `{"success": false, "error": …}` | Unit and TLS tests |
+| Path configurable, default `/sms-status-receiver/v1/update-status`; query strings tolerated | Unit test |
+| 8028's callback CA trusted (`OAN_MSG_RECEIPTS_CLIENT_CA_CERTS`); pins optional and narrowing | TLS test over loopback: CA-issued certificates accepted, others refused at the handshake |
+| Helm: callback CA, callback secret (with rotation key) and path; guards for missing settings | Helm regressions: **2,828 checks passed** |
+| Trial fake 8028: `201` on send; `Pending` then `Delivered` callbacks shaped as guide 8.1 | Local trial from the repository: smoke test `delivered`; listener recorded `Pending` (no change) then applied `Delivered`; fake 8028 saw `{"success": true}` both times; no secret, phone number or traceback in logs |
+
+Service suite after the change (Python 3.12): **901 passed, 1 xfailed**. Ruff and strict
+mypy clean.
+
+Not done: anything against the real 8028 endpoint (credentials are not used in tests).
+The 500-response handling stays `unknown` until 8028 confirms in writing that a 500 means
+nothing was queued.

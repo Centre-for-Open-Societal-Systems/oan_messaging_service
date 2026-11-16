@@ -87,10 +87,22 @@ secrets:
     # Receipt ingress only. kubernetes.io/tls Secret with the SERVER certificate that
     # 8028 sees when it connects (tls.crt, tls.key).
     serverTlsSecret: oan-messaging-receipts-server-tls
-    # Secret (or public material in a Secret) with the pinned 8028 CLIENT certificates:
-    # current and, during renewal, previous.
+    # How 8028's callback client certificate is trusted. Set at least one of the two.
+    # (a) 8028's callback CA (8028 guide v1.1 supplies a CA): any certificate it issues is
+    #     accepted. Rendered as OAN_MSG_RECEIPTS_CLIENT_CA_CERTS.
+    clientCaSecret: ""
+    clientCaKeys: []
+    # (b) Pinned 8028 callback certificates (current and, during renewal, previous). With a
+    #     CA configured too, pins narrow it: only pinned certificates are accepted. For 8028
+    #     guide v1.1 with only the CA, set pinnedCertKeys: [].
     pinnedCertsSecret: oan-messaging-8028-pins
     pinnedCertKeys: [current.pem]
+    # Secret 8028 sends in every callback body (clientSecret, guide 8.1); required.
+    # previousKey: optional, for rotation (both are accepted while it is set).
+    callbackSecret:
+      existingSecret: oan-messaging-8028-callback
+      key: callback-secret
+      previousKey: ""
 
 # --------------------------------------------------------- shared non-secret config
 config:
@@ -186,6 +198,8 @@ receipts:
   # Off by default; values-pilot.yaml sets command: [python, -m, oan_messaging.runtime, receipts].
   enabled: false
   command: []
+  # Callback path registered with 8028 (guide v1.1: /sms-status-receiver/v1/update-status).
+  path: /sms-status-receiver/v1/update-status
   replicas: 2
   containerPort: 8443
   terminationGracePeriodSeconds: 30

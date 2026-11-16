@@ -15,7 +15,7 @@ exception is `issue-credential`, which prints the new token once on stdout.
 |---|---|---|
 | API | `uvicorn --factory oan_messaging.runtime.api:create_app --host 0.0.0.0 --port 8000` | `/livez` (process), `/readyz` (database) |
 | Worker | `python -m oan_messaging.runtime worker` (`OAN_MSG_WORKER_CHANNELS=sms[,telegram]`) | liveness: `python -m oan_messaging.runtime check-heartbeat --max-age 90` |
-| Receipt ingress | `python -m oan_messaging.runtime receipts` | TCP on 8443 |
+| Receipt ingress | `python -m oan_messaging.runtime receipts` (path `OAN_MSG_RECEIPTS_PATH`, default `/sms-status-receiver/v1/update-status`) | TCP on 8443 |
 | Cleanup | `python -m oan_messaging.runtime cleanup` (CronJob) or `cleanup --forever` (Deployment) | exit status |
 | Alert check | `python -m oan_messaging.runtime status --fail-on-alert` (CronJob `status-check`) | Job failure = alert |
 | Migrations | `alembic -c migrations/alembic.ini upgrade head`, as the **owner** role | exit status |
@@ -152,6 +152,20 @@ removed while the worker was running.
   event and keep the receipt rows.
 * `unmatched_late`: the receipt arrived after the receipt window. It is recorded but not
   applied.
+
+### 4.7 8028 credentials and callbacks (8028 guide v1.1)
+
+| Material | Where | Rotation |
+|---|---|---|
+| Our client certificate and key (`CN=OTPSMSClient`, expires 6 November 2027) | `secrets.sms8028.tlsSecret` | 8028 registers it by CN and SHA-256 fingerprint: send them the new certificate first, wait for confirmation, then update the Secret in one step and restart the workers. Otherwise every send returns 401 and the channel is suspended. |
+| Client secret | `secrets.sms8028.existingSecret` | Update the Secret, restart the workers, run `resume --channel sms` if it was suspended |
+| 8028's callback CA | `secrets.receipts.clientCaSecret` (`clientCaKeys`) | Add the new CA as a second key, roll out, remove the old one after 8028 switches |
+| Callback secret | `secrets.receipts.callbackSecret` | Store the new value under a new key and point `key` at it; set `previousKey` to the old key; roll out; ask 8028 to switch; then clear `previousKey` and roll out again |
+| Our callback server certificate (public, for the callback host) | `secrets.receipts.serverTlsSecret` | Renew before expiry; 8028 rejects a certificate that is not publicly trusted or does not match the host |
+
+Callbacks that fail authentication answer `403` (certificate) or `401` (secret) and are
+logged without the secret. A run of them usually means a rotated secret or certificate on
+8028's side: check with 8028 before changing anything here.
 
 ## 5. Releases and rollback
 

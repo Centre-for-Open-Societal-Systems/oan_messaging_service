@@ -1,131 +1,121 @@
 # 8028 SMS Gateway — integration contract summary
 
-Source: the supplied "8028 SMS Gateway API — Integration Guide for Protean" (12 pages).
-This is a working summary for MSG-03 and MSG-05, not a copy of the guide. Where the guide
-contradicts itself or this service's delivery rules, the **Decision** column says what this service does.
-Items marked **OPEN** need an answer from 8028 / eCom before go-live.
+Source: **8028 SMS Gateway API — Integration Guide for Protean, version 1.1 (12 November
+2026)**, with its README and Postman collection v1.3 and 8028's client and callback
+samples (received 16 November 2026). It replaces the earlier 12-page guide. This is a
+working summary, not a copy. Where the material contradicts itself or this service's
+delivery rules, the **Decision** column says what this service does. Items marked
+**OPEN** need an answer from 8028 before go-live.
 
-Contract version: 3.0.0. The review of 1.0.0 approved the decisions on ambiguous 5xx,
-persist-before-ack, single-part limits, undocumented `Failed` and certificate-pin
-discrepancies; 2.0.0 and 3.0.0 apply the corrections from the 1.0.0 and 2.0.0 reviews.
+Credentials (client certificate and key, client secret, callback secret) are never
+written here, in the repository or in logs. They live in the secret store only.
 
-## Transport and auth
+## Transport and authentication
 
-| Item | Guide | Decision |
+| Item | 8028 guide v1.1 | Decision |
 |---|---|---|
-| Base URL | `https://8028.et:3400/sms-api/v1` | Configurable; default only in config examples |
-| Send | `POST /sms/send-sms` | — |
-| TLS | 1.2 or 1.3, client certificate required, verify server cert | Never disable verification; optional `ca.crt` path in config |
-| Auth | client cert **and** `clientSecret` in body; either alone is rejected | Secret from env/vault only; never logged |
-| Charset | `Content-Type: application/json; charset=utf-8` | — |
-| Source IP | Only IPs declared at onboarding can connect | Ops item (deployment out of scope) |
+| Base URL | `https://8028.et:3400/sms-api/v1` (outbound TCP 3400 must be allowed) | Default `OAN_MSG_SMS8028_BASE_URL`; configurable |
+| Send | `POST /sms/send-sms`, `Content-Type: application/json`, UTF-8 | — |
+| Our client authentication | Mutual TLS with the client certificate 8028 issued us **and** `clientSecret` in the body | Certificate and key from a Secret; secret from a Secret; never logged |
+| Certificate registration | 8028 registers our certificate by CN and SHA-256 fingerprint. A replaced or renewed certificate must be registered first, or every request returns 401 | Renewal is an operator task (runbook); the current certificate expires on 6 November 2027 |
+| 8028 server certificate | Publicly trusted; no extra CA; verification must stay on | `OAN_MSG_SMS8028_CA_CERT` left unset; verification never disabled |
 | Time zone | EAT (UTC+3), `YYYY-MM-DD HH:mm:ss` | Adapter converts from aware UTC; receipts converted back |
 
 ## Send request
 
 ```json
-{"clientSecret": "<secret>", "smstext": "…", "phonenums": ["09XXXXXXXX"], "pushdatetime": "2026-09-01 08:12:13"}
+{"clientSecret": "<secret>", "smstext": "…", "phonenums": ["09XXXXXXXX"], "pushdatetime": "2026-11-12 06:00:00"}
 ```
 
 | Field | Guide | Decision |
 |---|---|---|
-| `phonenums` | 10 digits, `09…` or `07…`; up to 1,000 per request | **One recipient per request** (one message = one `sms_id`). Adapter converts E.164 `+2519…`/`+2517…` → `09…`/`07…` |
-| `pushdatetime` | now/past = immediate; future = scheduled | Always "now" in EAT. Scheduling is out of scope |
-| `smstext` | UTF-8; Amharic supported | Single part only (see length) |
-
-## Message length
-
-| Text type | 1 part | per part when multi-part | Guide "max 3 parts" |
-|---|---|---|---|
-| Latin only | 160 | 153 | 466 |
-| Any Amharic/emoji/other Unicode | 70 | 67 | 204 |
-
-**Inconsistency:** 3 × 153 = 459 and 3 × 67 = 201, not 466 / 204 (the guide's figures equal
-160 + 153 + 153 and 70 + 67 + 67, which is not how concatenated SMS works). The guide also
-says "Latin only" without defining whether that means GSM-7 (which includes `€ { } [ ]`
-counted as two septets). **Decision:** pilot accepts exactly one part — 160 GSM-7 septets
-with extension characters counted as 2, otherwise 70 UTF-16 units. **OPEN:** real
-multi-part limit, whether 8028 bills/encodes GSM-7 extension characters as 2 septets.
+| `phonenums` | At least one; each exactly `09XXXXXXXX` or `07XXXXXXXX`; `+251…`/`251…` rejected; all or nothing | **One recipient per request** (one message = one `sms_id`). The adapter converts E.164 to `09…`/`07…` |
+| `pushdatetime` | Optional; omitted or empty sends now; a past **date** is rejected | Sent as "now" in EAT (today's date, so accepted). Scheduling is out of scope |
+| `smstext` | Not empty; trimmed; Unicode supported; no length limit (body < 100 KB); multi-part joined on the handset | **Single part only**: 160 GSM-7 characters (extension characters count 2), otherwise 70 UTF-16 units. Multi-part stays refused until a product decision |
 
 ## Send response → `ProviderResult`
 
-Success (HTTP 200): `{"success": true, "message": "…", "data": [{"sms_id": "17006100", "phone_number": "0900000901"}]}`.
-HTTP 200 means queued at 8028, **not delivered**.
+Success is **HTTP 201**: `{"success": true, "message": "SMS records queued successfully.",
+"data": [{"sms_id": "4433006", "phone_number": "0900000901"}]}`. Queued, **not
+delivered**. `sms_id` is a string and is the only link to later callbacks.
 
 | Observation | Outcome | `failure_code` | Retry? |
 |---|---|---|---|
-| 200, `success: true`, `data` has exactly one entry whose `phone_number` equals ours, non-empty string `sms_id` | `sent` | — | — |
-| 200 but `success` missing/false, `data` empty/multiple/mismatched, or body not JSON | `unknown` | `malformed_response` | **no** — 8028 may have queued it |
-| 400 with `success: false` | `rejected` | `invalid_recipient` if message names the number, else `text_rejected` | no |
-| 401 (wrong secret) | `not_sent`, `retryable=false` | `provider_auth` | no; ops alert |
-| 403 (credentials suspended) | `not_sent`, `retryable=false` | `provider_auth` | no; ops alert |
-| 413 | `rejected` | `text_rejected` | no (single recipient, so cannot split) |
-| 500 / 503 | `unknown` | `provider_server_error` | **no automatic resend** |
+| 2xx (201 per guide), `success: true`, exactly one `data` entry with our number and an `sms_id` | `sent` | — | — |
+| 2xx but `success` not true, `data` empty/multiple/mismatched, or not JSON | `unknown` | `malformed_response` | **no** — 8028 may have queued it |
+| 400 (validation, bad JSON) | `rejected` | `invalid_recipient` if the message names the number, else `text_rejected` | no |
+| 401 (secret wrong or missing, or certificate not registered) | `not_sent`, not retryable | `provider_auth` | no; channel suspended, operator alert |
+| 413 / 415 / other 4xx | `rejected` | `text_rejected` / `provider_rejected` | no |
+| 500 | `unknown` | `provider_server_error` | no automatic resend (see open item 1) |
 | Read timeout after the request was written | `unknown` | `timeout` | no |
-| TCP connect refused / DNS failure (nothing sent) | `not_sent`, `retryable=true` | `provider_unavailable` | yes, with backoff |
-| TLS handshake failure, cert expired/revoked, hostname mismatch | `not_sent`, `retryable=false` | `provider_config` | no; ops alert |
+| Connect refused / DNS failure (nothing sent) | `not_sent`, retryable | `provider_unavailable` | yes, with back-off |
+| TLS handshake failure (no HTTP status: certificate missing or not accepted) | `not_sent`, not retryable | `provider_config` | no; operator alert |
 
-`provider_status` records `http_<code>` (or `timeout`, `tls_error`, `conn_refused`). Error
-`message` text can contain the phone number (e.g. `Invalid phone number: 091261825`) and is
-therefore **never** stored or logged verbatim.
+Error `message` text can contain the phone number (for example `phonenums[1]` values), so
+it is **never** stored or logged verbatim; only `http_<code>` is kept.
 
-**Conflict with the guide:** it says to retry 500/503 after 30 s, 2 min, 10 min. This service
-forbids blind resends after ambiguous outcomes, because a 5xx may follow a successful queue
-and the guide offers no idempotency key or lookup API. **Decision (approved):** 500/503 → `unknown`,
-no automatic resend absent proof of non-submission. **OPEN:** does 8028 guarantee nothing was queued on 5xx? Is there a
-client reference/dedup field or a status lookup by our id?
+## Status callback (8028 → this service) → `DeliveryReceipt`
 
-## Status callback → `DeliveryReceipt`
+8028 calls the registered endpoint **`https://iiss.et/sms-status-receiver/v1/update-status`**
+(guide 8), oldest first, in batches about every 5 seconds:
 
-8028 → our HTTPS endpoint, one JSON object per status change:
-`{"sms_id": "17006100", "phone_number": "0900000901", "sms_status": "Delivered", "event_time": "2026-09-01 08:12:19"}`.
+```json
+{"clientSecret": "<callback secret>", "sms_id": 4433006, "phone_number": "251900000901",
+ "status": "Delivered", "event_time": "2026-11-11 21:33:20"}
+```
 
-| Item | Guide | Decision |
+| Item | Guide v1.1 | Decision (receipt listener) |
 |---|---|---|
-| Auth | mTLS; 8028 presents **the same** client cert it issued us; pin SHA-256 fingerprint | Pin at the TLS terminator that actually performs the handshake; never trust a forwarded cert header from an untrusted hop |
-| Ack | 200 within 10 s; "reply 200 immediately, then process in background" | Authenticate, then **durably persist the receipt evidence, then 200** (approved). Matching/status changes may follow asynchronously |
-| Retries by 8028 | after 1 min, 5 min, 15 min, 1 h, up to 6 h on non-2xx | Receipts must be idempotent (duplicates expected) |
-| Matching | "find the SMS by sms_id" | Match on `sms_id` **and** the keyed HMAC fingerprint of the normalized `phone_number` (works after content purge); mismatch = security event, no status change; after `recipient_match_deadline` recorded as `unmatched_late`. The deadline is anchor + `receipt_window` (default 7 days); the anchor is `sent_at`, or the last persisted attempt time for `unknown` or rejected attempts. A late receipt never causes a resend |
-| Stored evidence | not specified | `StoredReceipt`: `sms_id`, recipient fingerprint, masked phone, raw `sms_status`, times, disposition. **The raw phone number is never persisted.** Deleted after `receipt_evidence_retention` (default 90 days) |
-| Ordering | not specified | Out-of-order handled by `ALLOWED_TRANSITIONS`; final states never move |
-| Early callback | not specified | Callback may arrive before our send response is stored → keep as orphan, re-match on `finish_attempt` |
+| Path | `/sms-status-receiver/v1/update-status` on `iiss.et` | Default `OAN_MSG_RECEIPTS_PATH`; `iiss.et` must route (TCP pass-through) to the listener |
+| Server certificate | Publicly trusted, matching the hostname | The listener presents the public certificate for `iiss.et` (`OAN_MSG_RECEIPTS_SERVER_CERT`) |
+| Client certificate | 8028 presents its own client certificate; 8028 supplied its callback CA (`CN=StatusAPIPrivateCA`) | Trust that CA (`OAN_MSG_RECEIPTS_CLIENT_CA_CERTS`). Optional pins (`OAN_MSG_RECEIPTS_PINNED_CERTS`) narrow it to specific certificates |
+| Callback secret | `clientSecret` in every body; check it on every call | Constant-time check against `OAN_MSG_RECEIPTS_CALLBACK_SECRET` (and `_PREVIOUS` during rotation); wrong or missing → 401; never stored or logged |
+| Status field | `status` | Read `status`; `sms_status` (used by the Postman collection) accepted when `status` is absent |
+| `sms_id` | May be a number; compare as text | Numbers converted to text |
+| `phone_number` | International `251XXXXXXXXX` | Normalised to E.164; matched with `sms_id` through the keyed fingerprint |
+| Answer | HTTP 200 with `{"success": true}`, or updates stop | Validate, **persist the receipt, then** `200 {"success": true}`; storage failure → 503 so 8028 sends it again |
+| Ordering | `Pending` may arrive after `Delivered`; never overwrite a final status | Legal transitions only; final statuses never move |
 
-Status values (guide 5.3):
+Status values (guide 8.2):
 
-| `sms_status` | Final | Our status |
+| `status` | Final | Our status |
 |---|---|---|
-| `Sent` | no | `sent` |
+| `Pending` | no | `sent` (also turns an `unknown` message into `sent`: 8028 has it) |
 | `Delivered` | yes | `delivered` |
-| `Expired` | yes | `failed` / `provider_delivery_expired` — the gateway reports the delivery validity period ran out; the cause (handset off, coverage, operator) is not proven. Raw `Expired` kept as `provider_status` |
 | `Rejected` | yes | `failed` / `provider_rejected` |
-| anything else | no | record + log; no change |
+| `Sent`, `Expired` (earlier guide) | no / yes | kept: `sent` / `failed` (`provider_delivery_expired`) |
+| anything else, including null or empty | no | recorded (`null`/`empty` for missing values) and acknowledged; no change |
 
-**Inconsistency:** the guide's sample receiver treats `Failed` as final, but `Failed` is not in
-the status table. **Decision:** `Failed` is handled as undocumented (non-final, recorded, no
-change). **OPEN:** confirm whether `Failed` exists and what it means.
+## Inconsistencies in 8028's material
 
-## Other inconsistencies and open items
+1. **Status field name.** The guide (8.1) and 8028's callback sample use `status`; the
+   Postman collection v1.3 (folder 3) sends `sms_status`. **Decision:** accept both, prefer
+   `status`. **OPEN:** confirm `status`.
+2. **Status values.** The guide lists `Pending`, `Delivered`, `Rejected`; the Postman
+   collection also sends `Sent`, `Failed` and `Expired`. **Decision:** all are recorded;
+   only documented values change status.
+3. **Callback certificate.** The guide says 8028 presents "its own" client certificate and
+   supplies a CA; the README tells testers to present our own client certificate to the
+   callback host, and 8028's covering note asks to "use the provided CRT certificate for
+   both the client and callback services". **Decision:** trust 8028's callback CA.
+   **OPEN:** confirm which certificate 8028 presents on callbacks; if it is a fixed
+   certificate, add it as a pin.
+4. **8028's callback CA has no Key Usage extension.** Accepted by the current image
+   (Python 3.11). Python 3.13 and later verify strictly and may reject it. **OPEN:** ask
+   8028 to reissue the CA with Key Usage before any image upgrade.
 
-1. **Callback fingerprint algorithm.** Section 5.5 pins SHA-256; the nginx sample uses
-   `$ssl_client_fingerprint`, which is SHA-1. **Decision:** SHA-256 pinning, never weakened because of the sample; if nginx is
-   used, compare the full certificate (`$ssl_client_escaped_cert`) or use a SHA-256 capable
-   terminator. **OPEN:** confirm 8028 is fine with that.
-2. **Garbled sentence** in 5.5: "CA file, extra key or Protean-issued certificate is
-   needed" — almost certainly "**no** CA file…". Assumed so.
-3. **Acceptance scenarios** say "ten scenarios" but list seven (S1–S7).
-4. **S3 expectation** "no callback before 06:00 EAT" ties to the sample time, not a rule.
-   Scheduling is out of scope.
-5. **Certificate renewal**: the sample pins `client.crt` and `client.old.crt`. **Decision:**
-   pin set is configurable (current + previous). **OPEN:** renewal notice period.
-6. **Callback server certificate** must be publicly trusted while also requesting a client
-   cert — needs a terminator configured for `optional_no_ca`-style requests. Deployment is
-   out of scope; recorded for the runbook (MSG-08).
-7. **Rate limit**: 20 requests/second per client. Enforced across workers in MSG-05.
-   **OPEN:** is the limit per IP, per certificate or per account; behavior when exceeded
-   (status code not documented).
-8. **Partial success** for multi-recipient requests is not described. Avoided by sending one
-   recipient per request; any `data` shape other than exactly one matching entry → `unknown`.
-9. **`sms_id` uniqueness** scope and lifetime not stated. Stored as an opaque string ≤ 64.
-10. **No client reference / idempotency on 8028.** The send API has no caller-supplied
-    reference, so our `Idempotency-Key` protects only our own API. It cannot dedupe at the
-    gateway, which is another reason ambiguous submissions stay `unknown`.
+## Open items for 8028
+
+1. **500 means nothing was queued** (guide 6: the transaction is rolled back, safe to retry).
+   This service still treats 500 as `unknown` and never resends. Changing that to
+   "not sent, retry" is a small adapter change once 8028 confirms it in writing.
+2. **Credentials in the package.** 8028's client sample contains the client secret in the
+   same package as the private key, which the guide itself says to keep apart. Ask 8028
+   to issue a new client secret, and to confirm whether the key needs reissuing.
+3. **Callback secret** value, delivered separately (not in the package).
+4. **Callback source addresses**, for the listener's network allow-list.
+5. **Production endpoint and certificate**, if different from the test ones.
+6. **Rate limit** (previously 20 requests/second) and the response when it is exceeded;
+   not mentioned in guide v1.1. The service keeps its 20/s limit (about 14 sent per second).
+7. **No idempotency at 8028.** There is no caller reference or status lookup, so an
+   ambiguous submission (timeout after sending) stays `unknown` and is never resent.

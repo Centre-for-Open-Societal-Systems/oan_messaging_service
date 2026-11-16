@@ -842,8 +842,11 @@ class MessageAdapter(Protocol):
 
 
 class ReceiptStatus(StrEnum):
-    """8028 ``sms_status`` values as documented (guide section 5.3)."""
+    """8028 callback ``status`` values. Guide v1.1 (2026-11-12) documents ``Pending``,
+    ``Delivered`` and ``Rejected``; ``Sent`` and ``Expired`` are kept from earlier
+    versions. Anything else is recorded without a status change."""
 
+    PENDING = "Pending"
     SENT = "Sent"
     DELIVERED = "Delivered"
     EXPIRED = "Expired"
@@ -855,6 +858,9 @@ class ReceiptStatus(StrEnum):
 #: undocumented -> non-final, recorded, no status change (see docs/8028-contract.md).
 #: The raw status is always preserved alongside the mapped code.
 RECEIPT_STATUS_MAP: Mapping[ReceiptStatus, tuple[MessageStatus, FailureCode | None, bool]] = {
+    # Pending: accepted by 8028, not yet delivered. Evidence the message left OAN, so an
+    # ``unknown`` message becomes ``sent``; never overwrites a final status.
+    ReceiptStatus.PENDING: (MessageStatus.SENT, None, False),
     ReceiptStatus.SENT: (MessageStatus.SENT, None, False),
     ReceiptStatus.DELIVERED: (MessageStatus.DELIVERED, None, True),
     ReceiptStatus.EXPIRED: (MessageStatus.FAILED, FailureCode.PROVIDER_DELIVERY_EXPIRED, True),

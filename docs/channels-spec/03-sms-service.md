@@ -84,18 +84,21 @@ provider URL or priority.
 
 ## 3.5 Receipts, retention and privacy
 
-* **Receipts:** 8028 calls the receipt listener over mutual TLS. The listener accepts
-  only the pinned 8028 client certificate (by SHA-256 fingerprint), never a certificate
-  header from a proxy, stores the receipt, then answers `200`. Receipts are matched on
-  `sms_id` and a fingerprint of the recipient within 7 days of sending.
+* **Receipts** (8028 guide v1.1): 8028 calls the receipt listener at the registered path
+  (`/sms-status-receiver/v1/update-status`). Two factors are checked in the process:
+  mutual TLS with a certificate issued by 8028's callback CA (optionally narrowed by
+  pinned certificates; never a certificate header from a proxy), and the callback secret
+  in the body (never stored or logged). The listener stores the receipt, then answers
+  `200 {"success": true}`. Receipts are matched on `sms_id` and a fingerprint of the
+  recipient (sent as `251…`) within 7 days of sending.
 
-  | 8028 status | OAN status |
+  | 8028 `status` | OAN status |
   |---|---|
-  | `Sent` | `sent` |
+  | `Pending` | `sent` (never overwrites a final status) |
   | `Delivered` | `delivered` |
-  | `Expired` | `failed` (`provider_delivery_expired`) |
   | `Rejected` | `failed` (`provider_rejected`) |
-  | anything else | recorded, no change |
+  | `Sent`, `Expired` (earlier guide) | `sent`, `failed` (`provider_delivery_expired`) |
+  | anything else, including null | recorded, no change |
 
 * **Content** (text and recipient) is encrypted at rest and deleted in the same
   transaction that moves a message out of `accepted`/`sending`, including `sent`. A

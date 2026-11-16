@@ -139,7 +139,7 @@ async def test_pinning_a_ca_certificate_still_rejects_other_certificates_it_issu
         )
     finally:
         await ingress.server.close()
-    assert status == 403 and json.loads(body) == {"error": "forbidden"}
+    assert status == 403 and json.loads(body) == {"success": False, "error": "forbidden"}
     assert (await h.status(token, mid))["status"] == "sent"
     assert (await h.one("SELECT count(*) FROM receipts"))[0] == 0
 
@@ -162,7 +162,7 @@ async def test_unacknowledged_when_storage_is_down_then_accepted_on_8028_retry(
         body = callback(h.sms.returned_ids[0], fake_number(101), "Delivered", h.clock())
         monkeypatch.setattr(h.repo, "record_receipt", down)
         status, payload = await ingress.post(body)
-        assert (status, json.loads(payload)) == (503, {"error": "retry_later"})
+        assert (status, json.loads(payload)) == (503, {"success": False, "error": "retry_later"})
         monkeypatch.setattr(h.repo, "record_receipt", real)
         status, _ = await ingress.post(body)  # 8028 retry schedule: 1 min later
         assert status == 200

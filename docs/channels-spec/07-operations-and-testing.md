@@ -6,8 +6,8 @@
 |---|---|---|
 | Namespaces | Own namespace and Helm release (`oan-messaging`) | RapidPro deployment; `oan-bot-services` release |
 | Databases | Own PostgreSQL database; owner role for migrations, runtime role for processes | RapidPro's PostgreSQL and Redis; OAN Bot Services' own PostgreSQL |
-| Secrets | Caller tokens are hashed in OAN; content and fingerprint keys, database URLs, 8028 client certificate and key, 8028 CA, pinned receipt certificate fingerprint: all in Kubernetes Secrets | Bot token per environment (courier channel configuration); webhook secret; `contact_ref` HMAC key; Keycloak client secret; flow ↔ service credential |
-| Public exposure | 8028 receipt listener only (pinned mutual TLS) | One webhook path (Design 1) |
+| Secrets | Caller tokens are hashed in OAN; content and fingerprint keys, database URLs, 8028 client certificate and key, 8028 client secret, 8028's callback CA (and optional pinned callback certificates), callback secret: all in Kubernetes Secrets | Bot token per environment (courier channel configuration); webhook secret; `contact_ref` HMAC key; Keycloak client secret; flow ↔ service credential |
+| Public exposure | 8028 receipt listener only, at the registered callback host (mutual TLS with 8028's callback CA, plus the callback secret) | One webhook path (Design 1) |
 | URLs | Dev and staging URLs to be published by DevOps; all examples use `example.invalid` | Same |
 | Certificates | HTTPS everywhere. Python 3.13 and later (including Frappe v16 on 3.14) verify strictly: private CA certificates need Subject and Authority Key Identifiers and CA key usage. Ask 8028 to confirm its certificates carry both identifiers. | Public certificate on the webhook host |
 
