@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Pattern** | Frappe connector ([03](03-frappe-connector.md)) |
+| **Pattern** | Frappe connector ([03](03-frappe-connector.md)): explicit `queue_sms` calls (**preferred**, §3). Interim option: the connector's `send_sms` hook (**supported**, §6). |
 | **Status** | Designed; **not built**. The connector and the Credit patch are the reference implementation. |
 | **Today** | SMS goes through Frappe core `_send_sms` from `services/notifications.py` (`_send_sms_row`), with no idempotency key, no expiry and no delivery status. Reviewed at `7118e82` and `4d03412`. |
 
@@ -61,9 +61,46 @@ def _send_sms_row(row, mobile):
     row.db_set({"status": "Queued with OAN", "oan_message": name})
 ```
 
-## 5. Decisions Grievance owns
+## 5. Why explicit calls, not only the hook
+
+Grievance already sends through Frappe's `_send_sms`, so the hook (§6) would move it to
+OAN with one line. It is supported, but it is not the target, because Grievance would:
+
+* show **Sent** when OAN has only **accepted** the message, with no `delivered` or
+  `failed` afterwards (the hook gets no status back);
+* risk a **duplicate SMS** if a failed row is sent again after an unclear outcome (each
+  hook call is a new message to OAN);
+* mark a row **Failed** whenever OAN is briefly unavailable, instead of waiting in the
+  outbox;
+* share **one purpose and expiry** with every other `_send_sms` caller on the site,
+  including Auth's reset OTPs.
+
+The explicit change in §3 and §4 removes all four.
+
+## 6. Interim option: the `send_sms` hook
+
+Use it only if the explicit change cannot ship first. Details, settings and behaviour:
+[03 §7](03-frappe-connector.md).
+
+| # | Step | Owner | Done when |
+|---|---|---|---|
+| H1 | Install and configure the connector on the site (§3 steps 1 and 8) | Grievance dev, DevOps | Connector enabled |
+| H2 | Add to `hooks.py`: `required_apps = ["oan_auth_service", "oan_messaging_connector"]` and `send_sms = "oan_messaging_connector.sms_hook.send_sms"` | Grievance dev | `frappe.get_hooks("send_sms")` returns only this method |
+| H3 | Leave Hook Message Purpose at `transactional` and expiry at 30 minutes (Auth's reset OTPs on the same site use the same values) | DevOps | Settings checked |
+| H4 | Template inventory and phone normalisation (§3 steps 5 and 6) still apply: the hook refuses text longer than one SMS part | Grievance content, dev | Every template fits |
+| H5 | Read "Sent" on SMS rows as **accepted by OAN**; a refusal or an unreachable OAN shows **Failed** with the reason | Grievance support | Support note written |
+| H6 | Do not re-send a Failed SMS row automatically: an unclear outcome may already have reached OAN | Grievance dev | No automatic resend |
+| H7 | Acceptance: QA cases GR-H1 to GR-H4 | QA | Evidence recorded |
+
+`_send_sms_row` needs **no code change** for the hook: with a hook registered it skips
+its gateway and SMS Log checks and treats the hook's exception as "not sent". The
+connector's tests run this logic (from `develop` `4d03412`) against the hook: accepted,
+refused, and connector disabled.
+
+## 7. Decisions Grievance owns
 
 * Shortened template wording.
 * Whether any event needs an expiry (none assumed).
 * The cut-over date per site.
+* Whether to use the `send_sms` hook as an interim step, and the date it is removed.
 * Telegram for Grievance: future scope.

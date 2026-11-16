@@ -115,3 +115,25 @@ mypy clean.
 Not done: anything against the real 8028 endpoint (credentials are not used in tests).
 The 500-response handling stays `unknown` until 8028 confirms in writing that a 500 means
 nothing was queued.
+
+## Addendum: Frappe `send_sms` hook (16 November 2026)
+
+Explicit calls stay the preferred integration. For Grievance and Auth, which already send
+through Frappe's built-in SMS sender, the connector gained an opt-in `send_sms` hook
+(`oan_messaging_connector.sms_hook.send_sms`). It registers nothing unless a module adds
+the line to its own `hooks.py`.
+
+| Check | Result |
+|---|---|
+| Connector suite (`develop` `f911344`) on Frappe 16.56.0 / Python 3.14.10, including 17 new hook tests | **33 passed** |
+| Hook through Frappe's own `_send_sms`, called the way Grievance and Auth call it | Pass |
+| Grievance's SMS delivery logic (`_send_sms_row`, develop `4d03412`) without the hook: still fails closed with no gateway | Pass |
+| The same logic with the hook: accepted → Sent with a masked SMS Log; OAN refusal or disabled connector → exception (row Failed) | Pass |
+| Auth's `_sms_gateway_configured()` (installed `oan_auth_service`) with and without the hook | Pass |
+| Unclear outcome retried with the same key, then raised; one key per recipient; OTP purpose and its 30-minute ceiling; no code or phone in Error Log | Pass |
+| One send through the trial OAN API from the bench (`bench execute`, test number) | OAN accepted it (`transactional`, `frappe:send_sms:…`); SMS Log written with a masked number and no text |
+| Ruff with the COSS configuration (line length 110, tabs) and Auth's Semgrep rules on the new code | Clean; 0 findings |
+
+Not done: the trial's fake 8028 was stopped, so that message was not carried to
+`delivered` (the hook's job ends at OAN acceptance). The Grievance repository was not
+modified; its delivery logic was exercised in the connector's tests.

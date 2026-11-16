@@ -11,6 +11,16 @@ team is in the *OAN Messaging integration handoff* pack.
 | **OTP sender** (send now) | Auth, eSignet, DPI Consent Manager | A code must never be stored or logged in plain text and is worthless after minutes. The service sends immediately with `purpose = otp` and the code's own expiry. |
 | **Direct API** | Any other non-Frappe sender | The Python client or plain HTTPS against the contract, with the sender's own record of each message (key and OAN id) |
 
+**Interim, for existing Frappe senders only.** Grievance and Auth already send through
+Frappe's built-in SMS sender. The connector also provides a Frappe `send_sms` hook that a
+module can switch on with one line in its `hooks.py`, so that sender goes to OAN before
+the module changes its code. It is supported but not preferred: it gets no delivery
+status, applies one purpose and expiry to every SMS on the site, and its unclear outcomes
+can lead to a duplicate if the caller sends again. It raises on every failure, so the
+modules' own fail-closed handling still works. Explicit calls (the connector's
+`queue_sms` or the OTP sender) remain the target for every module. Details: handoff
+guide 03 §7.
+
 ## 4.2 Callers
 
 | Caller | Pattern | Purposes | What it sends | Status |

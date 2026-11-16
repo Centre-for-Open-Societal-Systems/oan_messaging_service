@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Pattern** | OTP sender ([04](04-otp-senders.md)), from a Frappe post-commit job |
+| **Pattern** | OTP sender ([04](04-otp-senders.md)), from a Frappe post-commit job (**preferred**, §3). Interim option: the connector's `send_sms` hook (**supported**, §6). |
 | **Status** | Designed; **not built**. Reviewed at `34c7306`. |
 | **Today** | `_deliver_reset_by_sms` enqueues Frappe core `_send_sms` after commit. The code lives only in the job arguments (no outbox), which is correct and stays that way. |
 
@@ -82,7 +82,42 @@ gateway sent `Retry-After`; then wait about 30 seconds. Import `ReconciliationRe
 A shared `send_otp_now()` helper in the connector is a planned follow-up
 ([22](22-decisions-and-open-items.md)).
 
-## 5. Telegram linking OTP (new)
+## 5. Why the explicit job, not only the hook
+
+Auth already enqueues Frappe's `_send_sms`, so the connector's `send_sms` hook would move
+the reset OTP to OAN with no Auth change. It is supported, but it is not the target:
+
+* **Purpose and expiry are per site, not per message.** Auth runs on every module site
+  (Grievance, Credit and DA list it in `required_apps`). On a site where the hook also
+  carries Grievance notices, the purpose must stay `transactional`, so the reset code is
+  sent without OTP priority and with the site's expiry instead of the code's own TTL.
+* **No retry with the same key across jobs.** The hook retries an unclear outcome only
+  inside the one job; it cannot requeue for later.
+* **No OAN id in Auth's log**, so a support question cannot be traced to one message.
+
+The explicit job in §3 and §4 sets `purpose="otp"`, `expires_at` from the code's TTL and
+a stable key, and logs the OAN id.
+
+## 6. Interim option: the `send_sms` hook
+
+Details, settings and behaviour: [03 §7](03-frappe-connector.md).
+
+* **No Auth code change.** `_sms_gateway_configured()` returns true once a hook is
+  registered, and the reset job calls the hook instead of Frappe's gateway. The code
+  stays only in the job arguments; the connector stores nothing.
+* **Who registers it.** A `send_sms` line in Auth's own `hooks.py` would turn the hook on
+  for **every** site with Auth, including Credit and DA. Register it in the module app
+  of the site that wants it (for example Grievance, [12 §6](12-grievance.md)), not in
+  Auth.
+* **Settings.** On a site where the hook carries only OTPs, set Hook Message Purpose to
+  `otp` and the expiry to the code's TTL in minutes (10 for the default 600 s; at most
+  30). Otherwise leave `transactional` and 30 minutes.
+* **Failures.** When the connector is disabled, not configured, or OAN refuses, the hook
+  raises: the job fails with an Error Log entry and no code reaches the user. The
+  requester's response does not change, as today.
+* Acceptance: QA cases AUTH-H1 and AUTH-H2.
+
+## 7. Telegram linking OTP (new)
 
 The Telegram bot specification v1.1 links a farmer's Telegram account to their Farmer ID
 with an OTP to their **registered phone** (from the beneficiary API). Auth issues and
