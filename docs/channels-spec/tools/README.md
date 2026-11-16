@@ -8,6 +8,7 @@ export TITLE="OAN Channels Specification" SUBTITLE="SMS and Telegram: version 2.
 export CONTRACT="OAN Messaging contract 3.0.0; RapidPro courier v26.3.82"
 export AUDIENCE="ATI, module teams, OAN Messaging and Telegram bot developers, DevOps, security"
 export HEADER="OAN Channels Specification v2.0 (Review)"
+export NOTE="Hosts are example.invalid placeholders except 8028's published API host and the Master Data development host; phone numbers are 0900000xxx test numbers."
 node build_docx.js <CHANNELS-SPEC dir> <out.docx> contents.json
 ```
 

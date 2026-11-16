@@ -53,7 +53,8 @@ Consent Manager cases are new here.
 | CR-01 | Bank moves an application to the next stage | One `stage_changed` SMS; Desk Submitted → delivered |
 | CR-02 | Bank moves it to "Approved" | `application_approved` |
 | CR-03 | Bank rejects it | `application_rejected`, with no reason text in the SMS |
-| CR-04 | Bank completes it (disbursed) | `loan_disbursed` |
+| CR-04 | Bank completes it with stage "Disbursed" | `loan_disbursed` |
+| CR-04b | Bank completes it with any other stage label | `application_completed` (no "paid out" claim) |
 | CR-05 | Same stage set again | No SMS |
 | CR-06 | Visit scheduled, then cancelled | Two SMS; both expire at the visit |
 | CR-07 | OAN unreachable during dispatch | Row stays Queued; later sent once with the same key |

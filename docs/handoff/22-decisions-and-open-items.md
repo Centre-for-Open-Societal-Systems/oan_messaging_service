@@ -6,7 +6,7 @@
 |---|---|
 | **Identity owner + DPI** | **The beneficiary API route for a farmer's registered phone (and Master Data kebele code)**: its access rules and what happens when there is no phone. Agreed direction: every farmer SMS goes to the registered phone. Used by the Consent Manager resolver, the Telegram linking OTP, and later by Credit, Grievance and DA. |
 | DPI | Fix the Consent Manager build: the `openg2p-fastapi-common` pin (works with `9ddccc00f5`, or update to the new `crypto` package) and the missing `greenlet`; partner display names; Amharic OTP text |
-| Credit | Which stage label means "approved" for each bank; bank short names; whether agents get copies; translations |
+| Credit | Which stage labels mean "approved" and "disbursed" for each bank (only a "Disbursed" stage sends the "paid out" SMS); bank short names; whether agents get copies; translations |
 | Grievance | Shortened templates (one is 204 characters; seven exceed 70); cut-over date per site |
 | DA | The plan and reschedule call sites; recipient roles; templates; whether cancellation is a message; the agent's phone source (DA backend roster) |
 | Auth | Pre-check recipient format before issuing; caller naming, one per site (`auth-<site>`): **needed before a token can be issued**; which site hosts the Telegram linking routes |
@@ -18,7 +18,6 @@
 
 | Item | Owner | Notes |
 |---|---|---|
-| The connector keeps message text after the final status | Connector | Add a purge and a retention period |
 | `send_otp_now()` helper in the connector, for Auth | Connector | Keeps the text only in job arguments |
 | `queue_telegram()` in the connector | Connector | When a Frappe module needs Telegram |
 | Consent notices (granted, denied, revoked, expired, shared) | DPI | Phase 2; templates exist |

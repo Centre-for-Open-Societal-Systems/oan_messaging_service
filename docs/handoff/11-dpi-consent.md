@@ -4,7 +4,7 @@
 |---|---|
 | **Pattern** | OTP sender ([04](04-otp-senders.md)); FastAPI service, calls OAN directly |
 | **Status** | **Patch built and trial-tested end to end** (real Consent Manager HTTP API, real OAN over HTTPS, fake 8028) |
-| **Code** | `code/patches/consent-management/0001-*.patch` and `0002-*.patch` (branch `oan-messaging-otp` on base `b6d5e45`) |
+| **Code** | `code/patches/consent-management/0001-*.patch` to `0003-*.patch` (branch `oan-messaging-otp` on base `b6d5e45`) |
 | **Today** | **The OTP is generated but never delivered**: the provider only logs it, in plain text. Every consent-gated data release (A2C applications, bank partners) needs manual help. **This is the most urgent gap.** |
 
 ![Consent OTP flow](diagrams/11-dpi-consent.png)
@@ -33,10 +33,10 @@
 | # | Step | Owner | Done when |
 |---|---|---|---|
 | 1 | **Fix the build first.** At `b6d5e45` the service does not build or run: the `openg2p-fastapi-common` pin is broken (it needs commit `9ddccc00f5`, or the code updated to the new `crypto` package), and `greenlet` is missing | DPI dev | Image builds and starts from a clean checkout |
-| 2 | Apply the two patch commits | DPI dev | `pytest backend/tests`: 5 pass; sanity suite as before |
+| 2 | Apply the three patch commits | DPI dev | `pytest backend/tests`: 17 pass; sanity suite as before |
 | 3 | **Phone for OTPs.** The Consent Manager stores no phone, only the Fayda FIN. The agreed direction is the farmer's **registered phone from the beneficiary API**. Implement `resolve_phone()` against that route once the identity owner publishes it (the route, its access, and what to do when there is no phone), and remove the dev phone map. | **Identity owner** and DPI | Route published; resolver implemented and tested |
 | 4 | Partner display names (at most 30 characters; longer ones are shortened) | DPI | Names checked |
-| 5 | Amharic OTP text, which must fit 70 characters with the code and partner name | DPI content | Measured |
+| 5 | Amharic OTP text, which must fit 70 characters with the code and partner name. The patch measures every OTP text against one SMS part and, when the full text does not fit (for example an Amharic partner name), sends a short text without the partner name. | DPI content | Measured |
 | 6 | OAN operator registers caller `dpi-consent` (sms; otp, transactional) and issues a token | OAN ops | Token in the secret store |
 | 7 | Set `CONSENT_MANAGER_OAN_*` (HTTPS URL, token, CA if private), `..._OAN_DELIVERY_ENABLED=true` | DevOps | An OTP request produces an SMS |
 | 8 | Dev acceptance ([20](20-testing-and-acceptance.md), CM-01 to CM-08) | QA | Evidence recorded |

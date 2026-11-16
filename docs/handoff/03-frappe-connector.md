@@ -4,7 +4,7 @@ A reusable Frappe app that every Frappe module installs to send notices through 
 owns everything that is the same for all callers, so each module only adds its texts and
 its call sites.
 
-* **Status:** trial build, 11 tests passing; trial-tested end to end with Credit on
+* **Status:** trial build, 16 tests passing; trial-tested end to end with Credit on
   Frappe 16.56.0 and Python 3.14. Not released. MIT licence, as for other OAN services.
 * **Where:** in the developer package, `code/oan_messaging_connector.tar.gz` (source) and
   `code/oan_messaging_connector.bundle` (git history, branch `develop`). Unpack the
@@ -17,7 +17,8 @@ its call sites.
 | Part | Purpose |
 |---|---|
 | **OAN Message** doctype | The outbox: one row per intended message. `delivery_id` (UUID4, set at insert) is the Idempotency-Key and never changes. Rows cannot be deleted. |
-| **OAN Messaging Settings** (single doctype) | Enabled, base URL, caller token (Password field), CA bundle, HTTP attempts, receipt window |
+| **OAN Messaging Settings** (single doctype) | Enabled, base URL, caller token (Password field), CA bundle, HTTP attempts, receipt window, content retention (days) |
+| `purge_content` | Daily: on finished rows older than the retention period (default 7 days), clears the text and masks the recipient. Delivery metadata stays. |
 | `queue_sms(...)` | The only call your module makes |
 | `dispatch_queued` | Runs right after your transaction commits, plus every minute as a safety net. `FOR UPDATE SKIP LOCKED` and one commit per row, so it is safe with several workers. |
 | `poll_statuses` | Every minute: GET on rows whose poll is due (backoff 1 min, capped at 6 h). Never resends. |
@@ -81,7 +82,7 @@ from oan_messaging_connector.api import queue_sms
 name = queue_sms(
     recipient=doc.phone_number,             # 09/07/+251 Ethiopian mobile
     text=rendered_text,                     # already in the recipient's language; one SMS part
-    purpose="transactional",                # otp | transactional | alert
+    purpose="transactional",                # transactional | alert (OTPs are refused)
     source_reference=f"a2c:{doc.name}:loan_disbursed",
     reference_doctype=doc.doctype,
     reference_name=doc.name,
@@ -95,9 +96,11 @@ Rules:
 * **Call it inside the business transaction**, at the line of code where the change
   happens: the API function or service method, not a generic `on_update` hook. It only
   inserts a row; sending starts after commit, so a rollback sends nothing.
-* **It never raises because of messaging.** When disabled, or when the message is invalid
-  (too long, bad purpose, OTP without expiry, already expired), it returns `None` and
-  writes an **Error Log** entry. Your business action is never blocked by an SMS.
+* **It never raises.** When disabled, when the message is invalid (too long, bad or OTP
+  purpose, already expired), or when settings, the database or the queue fail, it
+  returns `None` and writes an **Error Log** entry. If only the enqueue fails, it returns
+  the row name and the one-minute sweep sends it. Your business action is never blocked
+  by an SMS.
 * **One call per recipient.** Two people means two calls with the same
   `source_reference`.
 * Keep your **texts and event mapping in your own app**. The Credit pattern is a good
@@ -143,14 +146,17 @@ no status-change signal, so read it when the record is displayed.
 * Desk, **OAN Message** list: filter **Needs Attention**.
 * `oan_messaging_connector.api.messages_for(doctype, name)` returns the delivery state of
   one business record, for support screens.
-* **Do not** put OTP codes through the connector: its outbox stores the text. Use the OTP
-  pattern ([04](04-otp-senders.md)).
+* **OTPs are refused** (`queue_sms` returns `None`): the outbox stores the text, and an OTP
+  must never be stored. Use the OTP pattern ([04](04-otp-senders.md)).
+* **Retention:** after the retention period, finished rows keep only metadata (status,
+  ids, masked recipient, times). Set it in the settings (**Clear Message Text After
+  (days)**, default 7) or with `oan_messaging_content_retention_days` in
+  `site_config.json`.
 
 ## 7. Known limits (follow-ups)
 
 | Limit | Plan |
 |---|---|
 | SMS only | Telegram support can be added the same way when a Frappe module needs it |
-| Text stays on the row after the final status | Add a purge of `text` after the final status, plus a retention period (privacy) |
 | No send-now helper for OTPs | Add `send_otp_now()`, which keeps the text only in job arguments, for Auth |
 | Polling stops at 7 days for SMS (configurable) | Matches the receipt window |

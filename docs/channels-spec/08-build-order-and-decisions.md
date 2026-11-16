@@ -54,7 +54,7 @@
 
 | ID | Decision | Owner | Options |
 |---|---|---|---|
-| RP-D1 | RapidPro stores contacts, message history and media | ATI, security | Accept with encryption, operator-only access, retention (for example 90 days) and a deleting Stop flow; or the custom router |
+| RP-D1 | RapidPro stores contacts, message history and media | ATI, security | Accept with encryption, operator-only access, a retention period (for example 90 days) and a Stop flow verified to delete the contact, its messages and its media (§5.4); or the custom router. The privacy notice text depends on this. |
 | RP-D2 | Inline buttons | ATI | Accept reply keyboards; or patch courier |
 | RP-D4 | Media to Development Agents as attachments | ATI | Accept (agents no longer see farmer names) |
 | RP-D6 | Who runs RapidPro (version, upgrades, backups) | ATI DevOps | ATI DevOps or the RapidPro platform owner |

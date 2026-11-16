@@ -111,7 +111,7 @@ seccompProfile:
 {{/* ---------------------------------------------------------------- guards */}}
 {{- define "oan.requireCommand" -}}
 {{- if not .cmd -}}
-{{- fail (printf "%s.command is required when %s.enabled=true: no %s entrypoint exists in the codebase yet; MSG-08 must provide it (see docs/deployment/helm.md)" .name .name .name) -}}
+{{- fail (printf "%s.command is required when %s.enabled=true: use values-pilot.yaml, which sets python -m oan_messaging.runtime %s (see docs/deployment/helm.md)" .name .name .name) -}}
 {{- end -}}
 {{- end -}}
 

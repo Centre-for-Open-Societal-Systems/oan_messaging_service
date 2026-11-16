@@ -26,7 +26,14 @@ cd stack/a2c && echo "A2C_DB_ROOT_PW=$(openssl rand -hex 16)" > .env && docker c
 ```
 
 Inside `a2c-bench`:
-1. `bench init --frappe-branch version-16 --skip-assets --python python3`.
+1. `bench init --frappe-branch version-16 --skip-redis-config-generation --skip-assets --python python3`.
+   The image has no Redis server; the compose file provides Redis containers, so bench
+   must not generate its own Redis configuration.
+   Then point bench at the compose services:
+   `bench set-config -g db_host a2c-mariadb`,
+   `bench set-config -g redis_cache redis://a2c-redis-cache:6379`,
+   `bench set-config -g redis_queue redis://a2c-redis-queue:6379` and
+   `bench set-config -g redis_socketio redis://a2c-redis-cache:6379`.
 2. `bench get-app` for `/repos/oan_auth_service`, `/repos/oan_messaging_connector` and
    `/repos/oan_a2c_service` (branch `oan-messaging-sms`).
 3. `bench new-site a2c.trial`, then install `oan_a2c` and `oan_messaging_connector`.

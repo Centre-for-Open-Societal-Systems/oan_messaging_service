@@ -33,8 +33,9 @@ It also summarises the OAN Messaging Service design (`docs/architecture.md`, con
 
 ## 0.4 Conventions
 
-* All hosts are `example.invalid` placeholders and all phone numbers are `0900000xxx`
-  test numbers. No real token or number appears anywhere.
+* Hosts are `example.invalid` placeholders, except two real, documented hosts: 8028's
+  published API host (in the 8028 contract notes) and the Master Data development host
+  (§5.6). Phone numbers are `0900000xxx` test numbers. No real token or number appears.
 * "Registered phone" means the farmer's phone number held in the farmer registry and
   returned by the beneficiary API.
 * Words in `code` are field, table or command names.

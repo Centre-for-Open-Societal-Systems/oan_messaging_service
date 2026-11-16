@@ -30,8 +30,9 @@ and the bot sends no SMS.
    media forwarded unchanged. Every answer comes from an OAN service, approved content
    or a Development Agent. There is no AI, speech or image processing at run time.
 7. **The bot keeps the minimum.** Language, kebele and the current step, each with an
-   expiry. Only a farmer who links their Farmer ID (§6.6) has a link record, held in
-   OAN Bot Services, never in RapidPro.
+   expiry, plus the conversation that RapidPro keeps for the retention period decided in
+   RP-D1 (§5.4). Only a farmer who links their Farmer ID (§6.6) has a link record, held
+   in OAN Bot Services, never in RapidPro.
 8. **Narrow routes.** The bot reaches OAN services only through one adapter per
    service, with its own service account.
 9. **Telegram arrives only through one secured webhook path** (Design 1, §5.3). Nothing

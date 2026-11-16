@@ -1,4 +1,4 @@
-# OAN Messaging Service: Helm chart (draft, MSG-08H)
+# OAN Messaging Service: Helm chart
 
 | | |
 |---|---|
@@ -12,20 +12,21 @@ points at a real environment. Hostnames, CIDRs and Secret names are placeholders
 
 ## 1. What the code provides today
 
-Every command, variable and path the chart uses was read from the code. Where the code
-has nothing, the chart refuses to render instead of inventing it.
+Every command, variable and path the chart uses was read from the code. A component
+whose command is missing refuses to render instead of inventing one.
 
 | Need | In the code | Chart behaviour |
 |---|---|---|
-| API process | `uvicorn --factory oan_messaging.api:create_app` (`oan_messaging/api/__init__.py:3`) | Default `api.command`, plus `--host/--port` and `--timeout-graceful-shutdown 20` |
+| API process | `uvicorn --factory oan_messaging.runtime.api:create_app` (also the image's default command) | Default `api.command`, plus `--host/--port` and `--timeout-graceful-shutdown 20` |
 | Schema migration | `migrations/alembic.ini` + `migrations/env.py`, URL from `OAN_MSG_DATABASE_URL` | Default `migration.command: alembic -c migrations/alembic.ini upgrade head` (working directory: `image.workingDir`, MSG-08) |
 | Storage settings | `StorageSettings`, prefix `OAN_MSG_` (`storage/config.py`) | `OAN_MSG_DATABASE_URL`, `_CONTENT_KEYS`, `_FINGERPRINT_KEYS`, `_CREDENTIAL_PEPPER` from Secrets; `_CONTENT_KEY_CURRENT`, `_FINGERPRINT_KEY_CURRENT`, `_MAX_BODY_BYTES`, `_DB_POOL_SIZE`, `_DB_MAX_OVERFLOW`, `_POLICY_*_SECONDS` as plain config |
 | 8028 adapter settings | `Sms8028Settings.from_environ` (`adapters/sms8028.py:142`) | `OAN_MSG_SMS8028_CLIENT_SECRET` (Secret), `_CLIENT_CERT`, `_CLIENT_KEY`, `_CA_CERT` (file paths), `_BASE_URL` (optional) |
 | Telegram tokens | `TelegramBotRegistry.from_environ`, `OAN_MSG_TELEGRAM_BOT_TOKEN__<KEY>` (`adapters/telegram.py:147`) | One env var per entry in `secrets.telegram.bots` |
-| Worker process | `Worker.run_forever(stop)` library API only (`worker/dispatcher.py:142`). **No entrypoint**, no settings loader for `WorkerConfig`, adapters or the limiter | `worker.enabled: false`; enabling without `worker.command` fails rendering |
-| Cleanup | `run_cleanup` (one pass) and `cleanup_forever` (loop) library functions (`worker/cleanup.py`). **No entrypoint** | `cleanup.enabled: false`; CronJob or Deployment mode once a command exists |
-| Receipt ingress | `CallbackServer`, `build_server_ssl_context`, `load_pins` (`receipts/ingress.py`). **No entrypoint and no settings loader** (listen address, port, certificate paths) | `receipts.enabled: false`; files are mounted at fixed paths (§3.2) for MSG-08 to wire |
-| Health endpoints | **None.** The API has only the three message routes; anything else is `404` | TCP-socket probes only (§3.6) |
+| Worker process | `python -m oan_messaging.runtime worker`: loads settings and adapters, checks start-up conditions (database latency, key versions, Telegram tokens), stops on SIGTERM, writes a heartbeat each cycle | Off in `values.yaml`; **on in `values-pilot.yaml`** with this command and `worker.channels` |
+| Cleanup | `python -m oan_messaging.runtime cleanup` (one pass; `--forever` for the loop) | Off in `values.yaml`; **on in `values-pilot.yaml`** as a CronJob |
+| Receipt ingress | `python -m oan_messaging.runtime receipts`: reads the certificate and pin files mounted at the §3.2 paths | Off in `values.yaml`; **on in `values-pilot.yaml`** with this command |
+| Health endpoints | API `/livez` (process serves requests) and `/readyz` (database answers); worker `check-heartbeat` | HTTP probes for the API, an exec probe for the worker (§3.6) |
+| Status alerts | `python -m oan_messaging.runtime status --fail-on-alert` (exit 2 on any alert) | `statusCheck` CronJob; off in `values.yaml`, **on in `values-pilot.yaml`** |
 | Key-file validator | `build_ssl_context` and `build_server_ssl_context` reject a private key with any group/other bit (`st_mode & 0o077`) | Validated 0600 snapshot of one Secret generation via init container (§3.2) |
 
 ## 2. Components
@@ -34,9 +35,10 @@ has nothing, the chart refuses to render instead of inventing it.
 |---|---|---|---|
 | `api` | Deployment ×2, ClusterIP Service, PDB, optional Ingress | enabled | database runtime URL, storage keys |
 | `migration` | Helm `pre-install,pre-upgrade` hook Job + hook ServiceAccount | enabled | **migration database URL only** |
-| `worker` | Deployment ×2 | disabled (MSG-08) | storage keys, runtime URL, 8028 client secret, 8028 client certificate/key, Telegram tokens |
-| `receipts` | Deployment ×2, L4 Service (LoadBalancer by default), PDB | disabled (MSG-08) | storage keys, runtime URL, receipt server certificate/key, pinned 8028 certificates |
-| `cleanup` | CronJob (default) or Deployment ×1 | disabled (MSG-08) | storage keys, runtime URL |
+| `worker` | Deployment ×2 | off; on in `values-pilot.yaml` | storage keys, runtime URL, 8028 client secret, 8028 client certificate/key, Telegram tokens |
+| `receipts` | Deployment ×2, L4 Service (LoadBalancer by default), PDB | off; on in `values-pilot.yaml` | storage keys, runtime URL, receipt server certificate/key, pinned 8028 certificates |
+| `cleanup` | CronJob (default) or Deployment ×1 | off; on in `values-pilot.yaml` | storage keys, runtime URL |
+| `statusCheck` | CronJob (`status --fail-on-alert`, every 5 minutes) | off; on in `values-pilot.yaml` | storage keys, runtime URL |
 
 Every component reads the storage keys because `StorageSettings` requires all of them at
 startup and the repository needs the cipher and fingerprinter. The 8028 and Telegram
@@ -179,23 +181,23 @@ is never automatic (`retire_key_version` refuses while data still uses a version
 
 ### 3.6 Probes and graceful shutdown
 
-* **API:** `tcpSocket` startup, readiness and liveness probes on the HTTP port. This
-  proves only that uvicorn listens. Startup already fails if secrets or policy are
-  invalid, but the database is not checked: `make_engine` connects lazily. A real
-  `/livez` and `/readyz` are MSG-08 work (or a contract decision, since they would be new
-  routes).
+* **API:** HTTP probes. Startup and liveness use `/livez` (the process serves requests);
+  readiness uses `/readyz` (the database answers), so a pod without database access is
+  taken out of the Service.
 * **Receipts:** `tcpSocket` probes on the TLS port. A bare TCP connect never completes a
   TLS handshake; check on the cluster whether asyncio logs each probe as a handshake
   error, and disable the probes (`receipts.probes: {}`) if it does.
-* **Worker, cleanup:** no probes. They open no port and write no heartbeat. MSG-08 must
-  add one (for example a heartbeat file plus an `exec` probe) before the chart can add
-  probes.
+* **Worker:** an exec liveness probe, `python -m oan_messaging.runtime check-heartbeat
+  --max-age 90`. The worker touches a heartbeat file after every cycle, success or
+  handled failure; a hung loop stops touching it and the pod is restarted.
+* **Cleanup and status check:** CronJobs; a failed run shows as a failed Job. The status
+  check fails (exit 2) on any alert, so alerting can watch failed Jobs.
 * **Shutdown:** uvicorn handles SIGTERM (`--timeout-graceful-shutdown 20`, grace period
-  30 s). The worker's `run_forever(stop)` stops on an `asyncio.Event`; the MSG-08 entrypoint
-  must set it on SIGTERM. `worker.terminationGracePeriodSeconds` (default 150) must be ≥ the
-  worker lease (default 120 s, `config.policy.workerLease`), and rendering fails otherwise.
-  A stopped worker that does not finish within the lease leaves its claim to lease
-  recovery: an interrupted `sending` becomes `unknown`, never a resend.
+  30 s). The worker stops on SIGTERM after its current cycle.
+  `worker.terminationGracePeriodSeconds` (default 150) must be ≥ the worker lease (default
+  120 s, `config.policy.workerLease`), and rendering fails otherwise. A worker that does
+  not finish within the lease leaves its claim to lease recovery: an interrupted
+  `sending` becomes `unknown`, never a resend.
 
 ### 3.7 Connection estimates and budget
 
@@ -310,11 +312,20 @@ migration:
   network: {mode: hook}      # or preprovisioned + preprovisionedPolicy, see §3.3
 networkPolicy:
   egress: {enabled: true, postgres: {cidrs: [<PostgreSQL CIDR>]}}
-# Only once MSG-08 provides the entrypoints:
-worker:   {enabled: true, command: [<MSG-08 worker command>]}
-receipts: {enabled: true, command: [<MSG-08 receipt-ingress command>]}
-cleanup:  {enabled: true, command: [<MSG-08 cleanup command>]}
 ```
+
+Install with the pilot overlay, which turns on the worker, receipt ingress, cleanup and
+status check with their real commands:
+
+```bash
+helm upgrade --install oan-msg deploy/helm/oan-messaging \
+  -f deploy/helm/oan-messaging/values-pilot.yaml -f <environment-values>.yaml
+```
+
+After the first install, apply the runtime role's grants (`deploy/sql/grants.sql`, as
+the owner role); until then the worker and receipt pods are refused by the database and
+restart. See `docs/runbook.md` for the operator commands (callers, tokens, suspend and
+resume, status).
 
 The API itself is exposed by the cluster gateway (for example an APISIX route to
 `<release>-oan-messaging-api:80`, `/api/v1/messages/*` only), or with `api.ingress`.
@@ -322,36 +333,30 @@ The API itself is exposed by the cluster gateway (for example an APISIX route to
 need a fixed egress IP (NAT gateway or egress gateway). The chart cannot provide that.
 
 Representative values files used for validation: `deploy/helm/oan-messaging/ci/`
-(`02-all-components-proposed-values.yaml` uses **proposed, non-existent** commands
-purely to render every template).
+(`02-all-components-proposed-values.yaml` and `04-status-check-values.yaml` render every
+template with the real commands).
 
-## 5. Validation (2026-11-15, revision for the MSG-08H review)
+## 5. Validation
 
-Tools: helm v4.3.1, kubeconform v0.8.0, Python 3.12.13 with PyYAML 6.0.3, LibreSSL 3.3.6.
-No cluster was contacted; nothing was installed or deployed. Every check below is
-repeatable with one command:
+| Date | Check | Result |
+|---|---|---|
+| 16 November 2026 | `ci/run-regressions.sh` (lint, render, secret scan, kubeconform) with helm v4.3.1, kubeconform v0.8.0 | All pass; **2,824 render checks**, 0 failed |
+| 15 November 2026 | Install on a throwaway local kind cluster with `values-pilot.yaml`: migration hook, grants, probes, cleanup Job, status CronJob (including a deliberate `suspended:sms` alert), worker pod replacement, `helm upgrade` to a new image | All pass |
+
+Every regression check is repeatable with one command:
 
 ```bash
 PYTHON=<python with PyYAML> deploy/helm/oan-messaging/ci/run-regressions.sh
 ```
 
-| Check | Result |
-|---|---|
-| `helm lint` (defaults + 3 values files) | 4/4 pass (INFO only: no chart icon) |
-| `helm template` | 9, 19 and 7 resources |
-| Secret-material scan (rendered output, values, templates) | none; no Secret objects rendered |
-| `kubeconform -strict`, Kubernetes 1.29.0 / 1.31.0 / 1.33.0 | 35/35 valid each |
-| `ci/regression/test_tls_snapshot.py` | 10/10 pass (also on Python 3.11 and 3.9) |
-| `ci/regression/check_render.py` | 2218/2218 checks pass: names and selectors across 6 name configurations × 3 values files; 6 refused name cases (including the reviewer's 63-character repro); exact budget figures and boundaries; 9 invalid budget inputs; migration modes, ordering, selectors and credential isolation; 16 earlier guards plus 2 valid inputs |
-
-Not checked: installation on any cluster, kubelet Secret projection, Pod Security
-Admission, CNI NetworkPolicy enforcement and timing, cloud load balancer behaviour, and
-the probe-log behaviour in §3.6.
+Not checked: CNI NetworkPolicy enforcement (kindnet does not enforce it), cloud load
+balancer behaviour, Pod Security Admission, multi-node scheduling, and the receipt probe
+log behaviour in §3.6.
 
 ## 6. Assumptions
 
-* The MSG-08 image runs as uid/gid 10001, contains `python`, `uvicorn` and `alembic` on
-  `PATH`, and has `migrations/` under `image.workingDir`.
+* The image (repository `Dockerfile`) runs as uid/gid 10001, has `python`, `uvicorn` and
+  `alembic` on `PATH`, and has `migrations/` under `image.workingDir`.
 * PostgreSQL is reachable over TLS and its CA is trusted by the image.
 * 8028 can reach a public TCP endpoint and publishes its callback source CIDRs.
 * All components share one ServicePolicy (one ConfigMap) and roll out together after a
@@ -359,30 +364,21 @@ the probe-log behaviour in §3.6.
 
 ## 7. Blockers and open items
 
-**MSG-08 (runtime packaging), required before any install:**
+**Resolved by MSG-08:** runtime image, worker, receipt and cleanup entry points, API
+health routes, worker heartbeat, status check, start-up checks and the least-privilege
+grants (`deploy/sql/grants.sql`).
 
-1. Runtime image: non-root uid/gid, pinned dependencies, `python`/`uvicorn`/`alembic`,
-   migrations path, digest to pin.
-2. Worker entrypoint: settings loader for `WorkerConfig`, adapters (`Sms8028Settings`,
-   `TelegramBotRegistry`) and `SharedRateLimiter`; SIGTERM wired to the stop event;
-   heartbeat for probes.
-3. Receipt-ingress entrypoint: settings for listen host/port, server certificate/key
-   paths and pin paths (the chart mounts them at the §3.2 paths), plus SIGTERM handling.
-4. Cleanup entrypoint: one-shot (`run_cleanup`) for the CronJob and/or loop
-   (`cleanup_forever`) for the Deployment mode.
-5. Health endpoints for the API (`/livez`, `/readyz` with a database check). New routes
-   may need a contract decision.
-6. Worker rate limiter constructed with `max_coordination_connections` equal to
-   `worker.coordinationConnections` (budget input only, §3.7).
-7. Optional database-level migration guard (for example an advisory lock in
+**Still open:**
+
+1. `worker.coordinationConnections` is a budget input only: keep it equal to the rate
+   limiter's coordination connections in the runtime (default 2).
+2. Optional database-level migration guard (for example an advisory lock in
    `migrations/env.py`) if more than one release or manual migrations could ever target the
    same database (§3.3).
-8. Logging configuration (the code logs ids and codes only; the runtime must not raise
-   httpx/httpcore log levels in a way that bypasses the adapters' redaction filters).
-
-**MSG-07:** independent integration and failure acceptance of the assembled service,
-including migrations from an empty database and restart recovery, before this chart is
-used outside a disposable dev namespace.
+3. A phased rollout and stop sequence for upgrades that change behaviour across versions
+   (release blocker OI-72).
+4. Independent review of the service before this chart is used outside a disposable dev
+   namespace.
 
 **Operations / open questions:**
 

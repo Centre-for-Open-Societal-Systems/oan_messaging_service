@@ -77,13 +77,26 @@ priority; message and media retention settings; RapidPro API rate limits.
   every step.
 * **Session:** a step expires after 30 minutes of silence; the farmer returns to Main
   menu.
-* **Privacy notice** after the first language choice: the bot keeps only language and
-  kebele; it asks for the Farmer ID and phone number only if the farmer chooses *Link
-  my Farmer ID*; Stop deletes them.
+* **What the bot keeps** (shown in the privacy notice after the first language choice):
+  * in RapidPro: the farmer's contact (Telegram id and name), language, kebele, and the
+    conversation, including downloaded photos and voice notes, for the retention period
+    decided in RP-D1;
+  * in OAN Bot Services: question records (with `contact_ref` only) for 90 days after
+    closing, and, only after *Link my Farmer ID*, the Farmer ID and linked phone.
+
+  The bot asks for the Farmer ID and phone number only if the farmer chooses *Link my
+  Farmer ID*. **The notice text is final only after RP-D1:** it must state the real
+  retention period and must not promise more than the platform does.
 * **Stop:** Main menu has "Stop and delete my data"; `/stop` does the same. After
-  confirmation the contact and link are deleted, open questions close with the reason
-  "farmer stopped", and queued messages are dropped. A later `/start` begins as a new
-  contact.
+  confirmation:
+  1. OAN Bot Services deletes the farmer link and drops queued messages;
+  2. open questions close with the reason "farmer stopped" (their records keep only
+     `contact_ref` until normal retention);
+  3. the flow deletes the RapidPro contact through the RapidPro API, which removes its
+     message history; downloaded media must be removed from RapidPro's storage with it.
+
+  Each deletion must be verified on the deployed RapidPro version before the Stop flow is
+  published (part of RP-D1). A later `/start` begins as a new contact.
 * **`contact_ref`** (HMAC-SHA256 of `chat_id` with a secret key) is the only farmer
   identifier allowed in logs, metrics, audit events, the question store and calls to
   OAN services, except the Farmer ID and phone sent to the beneficiary API and Auth

@@ -1,11 +1,11 @@
-OAN Messaging Service chart {{ .Chart.Version }} — DRAFT, NOT A WORKING DEPLOYMENT.
+OAN Messaging Service chart {{ .Chart.Version }} (draft for review).
 
 Rendered components:
   api        {{ ternary "enabled" "disabled" .Values.api.enabled }}
   migration  {{ ternary "enabled (pre-install/pre-upgrade hook)" "disabled" .Values.migration.enabled }}
-  worker     {{ ternary "enabled" "disabled (no entrypoint yet: MSG-08)" .Values.worker.enabled }}
-  receipts   {{ ternary "enabled" "disabled (no entrypoint yet: MSG-08)" .Values.receipts.enabled }}
-  cleanup    {{ ternary (printf "enabled (%s)" .Values.cleanup.mode) "disabled (no entrypoint yet: MSG-08)" .Values.cleanup.enabled }}
+  worker     {{ ternary "enabled" "disabled (enable with values-pilot.yaml)" .Values.worker.enabled }}
+  receipts   {{ ternary "enabled" "disabled (enable with values-pilot.yaml)" .Values.receipts.enabled }}
+  cleanup    {{ ternary (printf "enabled (%s)" .Values.cleanup.mode) "disabled (enable with values-pilot.yaml)" .Values.cleanup.enabled }}
 
 Estimated PostgreSQL connections from configured pool limits (not enforced at runtime):
   steady state            {{ include "oan.connectionSteady" . }}

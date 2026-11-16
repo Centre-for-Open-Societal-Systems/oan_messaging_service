@@ -62,11 +62,12 @@ The OAN operator registers each caller, its channels and purposes, and issues it
 | Part | Purpose |
 |---|---|
 | **OAN Message** doctype | The outbox: one row per intended message. `delivery_id` (UUID4, set at insert) is the idempotency key and never changes. Rows cannot be deleted. |
-| **OAN Messaging Settings** | Enabled, base URL, caller token, CA bundle, HTTP attempts, receipt window. `site_config.json` keys override them: `oan_messaging_enabled`, `oan_messaging_base_url`, `oan_messaging_token`, `oan_messaging_ca_bundle`. |
-| `queue_sms(...)` | The only call a module makes, inside its business transaction. It only inserts a row and **never raises** because of messaging: if disabled or invalid it returns `None` and writes an Error Log. |
+| **OAN Messaging Settings** | Enabled, base URL, caller token, CA bundle, HTTP attempts, receipt window, content retention (days). `site_config.json` keys override them: `oan_messaging_enabled`, `oan_messaging_base_url`, `oan_messaging_token`, `oan_messaging_ca_bundle`. |
+| `queue_sms(...)` | The only call a module makes, inside its business transaction. It only inserts a row and **never raises**: if disabled, invalid, or settings, the database or the queue fail, it returns `None` and writes an Error Log. **It refuses OTPs**, because the outbox stores the text. |
 | `dispatch_queued` | Runs after commit, and every minute as a safety net; `FOR UPDATE SKIP LOCKED`, one commit per row |
 | `poll_statuses` | Every minute for due rows (back-off 1 minute to 6 hours); never resends; SMS polling stops after the receipt window |
 | One-SMS check | Refuses text that does not fit one part before calling OAN |
+| `purge_content` | Daily: on finished rows older than the retention period (default 7 days), clears the text and masks the recipient; delivery metadata stays |
 
 ![Outbox states](diagrams/04-connector-states.png)
 
@@ -78,8 +79,7 @@ status).
 (Python 3.14) a private CA's certificates must carry Subject and Authority Key
 Identifiers and CA key usage; the scheduler and workers (including the `short` queue, which runs dispatch) on every site.
 
-**Known limits:** SMS only; message text stays on the row after the final status (purge
-and retention to add); no send-now helper for OTPs yet (OTP senders use §4.5).
+**Known limits:** SMS only; no send-now helper for OTPs yet (OTP senders use §4.5).
 
 ## 4.5 OTP senders
 

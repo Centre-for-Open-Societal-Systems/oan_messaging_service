@@ -1,0 +1,79 @@
+From 974d6f0852e661c89d80e6a49551efac8fa0d5c3 Mon Sep 17 00:00:00 2001
+From: OAN trial <trial@example.invalid>
+Date: Mon, 16 Nov 2026 10:14:57 +0530
+Subject: [PATCH 2/2] Say "paid out" only for a Disbursed stage; neutral notice
+ for other completions
+
+---
+ oan_a2c/oan_messaging/events.py  | 15 ++++++++++++---
+ oan_a2c/tests/test_farmer_sms.py |  7 +++++++
+ 2 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/oan_a2c/oan_messaging/events.py b/oan_a2c/oan_messaging/events.py
+index af5cd02..bd42ad7 100644
+--- a/oan_a2c/oan_messaging/events.py
++++ b/oan_a2c/oan_messaging/events.py
+@@ -18,8 +18,10 @@
+ stage_changed           ``api/v1/loan_applications.py`` ``update_loan_status`` (In Transition)
+ application_approved    same, when the bank's stage label is "Approved" (bank-defined)
+ application_rejected    same, Reject transition (status Rejected)
+-loan_disbursed          same, Complete transition (status Completed, default label
+-                        "Disbursed")
++loan_disbursed          same, Complete transition (status Completed) **only** when the
++                        bank's stage label is "Disbursed" (the default label)
++application_completed   same, Complete transition with any other stage label: a neutral
++                        notice, because a bank may use Completed before paying out
+ visit_scheduled         ``api/v1/leads.py`` ``schedule_visit``
+ visit_cancelled         ``api/v1/leads.py`` ``update_visit_schedule_status`` -> Cancelled
+ ======================  ===================================================================
+@@ -96,6 +98,10 @@ def fits_one_sms(text: str) -> bool:
+         "en": "OAN Credit: {bank} has paid out the loan for application {app}. Contact the "
+         "bank if you have not received it.",
+     },
++    "application_completed": {
++        "en": "OAN Credit: {bank} has completed your loan application {app}. The bank will "
++        "contact you about the loan.",
++    },
+     "visit_scheduled": {
+         "en": "OAN Credit: an agent will visit you on {date} at {time}, at {place}. "
+         "Visit ref {visit}.",
+@@ -141,7 +147,10 @@ def event_for_transition(new_status: str, stage_label: str | None) -> str | None
+     if new_status == "Rejected":
+         return "application_rejected"
+     if new_status == "Completed":
+-        return "loan_disbursed"
++        # "Paid out" only when the bank's own stage says so; banks name their stages.
++        if (stage_label or "").strip().lower() == "disbursed":
++            return "loan_disbursed"
++        return "application_completed"
+     if new_status == "In Transition" and stage_label:
+         return (
+             "application_approved" if stage_label.strip().lower() == "approved" else "stage_changed"
+diff --git a/oan_a2c/tests/test_farmer_sms.py b/oan_a2c/tests/test_farmer_sms.py
+index a5a00b7..b65b92a 100644
+--- a/oan_a2c/tests/test_farmer_sms.py
++++ b/oan_a2c/tests/test_farmer_sms.py
+@@ -43,6 +43,7 @@ def msg(self, name):
+ 	def test_status_changes_queue_the_matching_farmer_event(self):
+ 		cases = {("Rejected", "Rejected"): "application_rejected",
+ 		         ("Completed", "Disbursed"): "loan_disbursed",
++		         ("Completed", "Loan Closed"): "application_completed",
+ 		         ("In Transition", "Approved"): "application_approved",
+ 		         ("In Transition", "Verified"): "stage_changed"}
+ 		for (status, stage), event in cases.items():
+@@ -52,6 +53,12 @@ def test_status_changes_queue_the_matching_farmer_event(self):
+ 			self.assertIn("APP-2026-91001", m.text)
+ 		self.assertIsNone(notify.notify_status_change(app_doc(), "Active", None))
+ 
++	def test_paid_out_only_for_a_disbursed_stage(self):
++		self.assertEqual(events.event_for_transition("Completed", " disbursed "), "loan_disbursed")
++		for label in (None, "", "Approved", "Sanctioned", "Loan Closed"):
++			self.assertEqual(events.event_for_transition("Completed", label),
++			                 "application_completed", label)
++
+ 	def test_submitted_event_text_names_application_and_bank(self):
+ 		m = self.msg(notify.notify_application(app_doc(), "application_submitted"))
+ 		self.assertIn("sent to your bank", m.text)
+-- 
+2.54.0 (Apple Git-157)
+

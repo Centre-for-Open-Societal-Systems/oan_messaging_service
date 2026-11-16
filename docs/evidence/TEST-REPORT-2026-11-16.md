@@ -74,3 +74,22 @@ in the Credit bench container.
 * A real 8028 gateway, real Telegram, real handsets.
 * Grievance, DA, Auth and eSignet integrations (designed, not built).
 * The GitHub Actions workflow (not run on GitHub).
+
+## Addendum: fixes after the independent review (16 November 2026)
+
+An independent static review raised eight findings. All eight were fixed and the affected
+tests re-run.
+
+| Finding | Fix | Verified by |
+|---|---|---|
+| Connector: `queue_sms` could raise on settings, database or queue errors | Whole function guarded; an enqueue failure keeps the row for the one-minute sweep | 2 new tests; connector suite **16 passed** on Frappe 16.56.0 / Python 3.14.10 |
+| Connector: OTPs accepted, text kept indefinitely | `otp` refused; daily `purge_content` clears text and masks the recipient of finished rows after a retention period (default 7 days, configurable) | 3 new tests (refusal, purge of finished rows only, recent rows kept) |
+| Helm guide described the chart before the runtime work | Guide rewritten for the current chart and `values-pilot.yaml`; chart comments, install notes and guard message updated | Helm regressions: **2,824 checks passed** |
+| Credit patch: "paid out" SMS on any completion | "Paid out" only when the bank's stage label is "Disbursed"; a neutral `application_completed` notice otherwise (patch `0002`) | Credit SMS tests **7 passed**; Credit end to end: 5 messages, each `delivered` once |
+| Consent patch: an Amharic partner name made the OTP text too long | Text measured against one SMS part (same rule as the service, cross-checked on 20,000 random strings); short fallback without the partner name (patch `0003`) | Consent tests **17 passed** (12 new, including Amharic partner names) |
+| Credit trial: `bench init` failed without Redis | `--skip-redis-config-generation` and the bench Redis and database settings documented | Matches the working bench's configuration |
+| Spec: privacy notice and Stop promised deletion not yet designed | Notice and Stop now state what RapidPro keeps, how Stop deletes it, and that both depend on RP-D1 | Document review |
+| Real-looking phone number; blanket "all hosts are placeholders" claim | Number replaced with a test number; claim narrowed to name the two real documented hosts | Text scan |
+
+Service suite after the changes (Python 3.12): **896 passed, 1 xfailed**. Not re-run: the
+Consent Manager end-to-end test (needs an image rebuild; covered by the new unit tests).

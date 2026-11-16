@@ -1,7 +1,7 @@
 From b29decf6cd6798aeaf1eb7fbb99aed72c910f05e Mon Sep 17 00:00:00 2001
 From: OAN trial <trial@example.invalid>
 Date: Sun, 15 Nov 2026 20:17:50 +0530
-Subject: [PATCH 2/2] Map OTP delivery failures to visible 4xx/5xx on issue
+Subject: [PATCH 2/3] Map OTP delivery failures to visible 4xx/5xx on issue
  (consent and aggregation)
 
 ---

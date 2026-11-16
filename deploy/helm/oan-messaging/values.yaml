@@ -1,8 +1,8 @@
-# OAN Messaging Service: Helm chart DRAFT (MSG-08H).
+# OAN Messaging Service: Helm chart (draft for review).
 #
-# NOT DEPLOYABLE YET. The MSG-08 runtime image and the worker, cleanup and receipt-ingress
-# entrypoints do not exist. Those workloads are therefore disabled by default and refuse
-# to render without an explicit command. See docs/deployment/helm.md ("Blockers").
+# The worker, receipt ingress, cleanup and status check are off by default and refuse to
+# render without a command. values-pilot.yaml turns them on with the real runtime
+# commands. See docs/deployment/helm.md.
 #
 # Every value below is a placeholder for a dev environment. This chart never creates
 # Secrets: every credential, key and certificate comes from an existing Secret that OAN
@@ -109,7 +109,7 @@ config:
 api:
   enabled: true
   replicas: 2
-  # Documented in oan_messaging/api/__init__.py. Real today; packaged by MSG-08.
+  # Same as the image's default command.
   command:
     - uvicorn
     - --factory
@@ -128,9 +128,6 @@ api:
   resources:
     requests: {cpu: 100m, memory: 192Mi}
     limits: {cpu: "1", memory: 512Mi}
-  # The API has no health endpoint (only the three message routes; anything else is
-  # 404). Until MSG-08 adds one, probes only prove the socket is open, not that
-  # PostgreSQL is reachable.
   probes:
     # /livez: process serves requests; /readyz: database answers (oan_messaging.runtime.api)
     startup: {httpGet: {path: /livez, port: http}, periodSeconds: 2, failureThreshold: 30}
@@ -153,7 +150,7 @@ api:
 
 # --------------------------------------------------------------------- worker
 worker:
-  # DISABLED: no worker entrypoint exists (MSG-08). Enabling requires `command`.
+  # Off by default; values-pilot.yaml sets command: [python, -m, oan_messaging.runtime, worker].
   enabled: false
   command: []
   replicas: 2
@@ -163,13 +160,12 @@ worker:
   pool: {size: 5, maxOverflow: 5}
   rollout: {maxSurge: 1}   # maxUnavailable is fixed at 1
   # Budget input ONLY: the rate limiter's own NullPool coordination connections per worker
-  # pod. Nothing passes this to the runtime; it must equal the max_coordination_connections
-  # the MSG-08 worker entrypoint uses (code default 2). Integer >= 1.
+  # pod. Nothing passes this to the runtime; keep it equal to the runtime's value
+  # (default 2). Integer >= 1.
   coordinationConnections: 2
   resources:
     requests: {cpu: 100m, memory: 192Mi}
     limits: {cpu: "1", memory: 512Mi}
-  # No probe is possible yet: workers open no port and write no heartbeat (MSG-08).
   # Channels this worker dispatches (OAN_MSG_WORKER_CHANNELS). Every enabled channel must be
   # served by at least one worker; telegram also needs secrets.telegram.bots.
   channels: [sms]
@@ -187,7 +183,7 @@ worker:
 
 # ------------------------------------------------------------- receipt ingress
 receipts:
-  # DISABLED: CallbackServer has no entrypoint and no settings loader (MSG-08).
+  # Off by default; values-pilot.yaml sets command: [python, -m, oan_messaging.runtime, receipts].
   enabled: false
   command: []
   replicas: 2
@@ -223,8 +219,7 @@ receipts:
 
 # ---------------------------------------------------------------------- cleanup
 cleanup:
-  # DISABLED: no cleanup entrypoint exists (MSG-08). run_cleanup (one pass) and
-  # cleanup_forever (loop) exist as library functions only.
+  # Off by default; values-pilot.yaml sets command: [python, -m, oan_messaging.runtime, cleanup].
   enabled: false
   # cronjob: one run_cleanup pass per schedule (concurrencyPolicy Forbid).
   # deployment: one long-running cleanup_forever loop (strategy Recreate).

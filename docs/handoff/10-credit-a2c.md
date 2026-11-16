@@ -4,7 +4,7 @@
 |---|---|
 | **Pattern** | Frappe connector ([03](03-frappe-connector.md)) |
 | **Status** | **Patch built and trial-tested end to end** (Frappe 16.56.0, Python 3.14, real OAN over HTTPS, fake 8028) |
-| **Code** | `code/patches/oan_a2c_service/0001-*.patch` (branch `oan-messaging-sms` on base `3887b8b`), plus the connector app |
+| **Code** | `code/patches/oan_a2c_service/0001-*.patch` and `0002-*.patch` (branch `oan-messaging-sms` on base `3887b8b`), plus the connector app |
 | **Today** | A2C sends the farmer **no SMS at all**; its only notifications are in-app messages for bank staff and agents |
 
 ![Credit flow](diagrams/10-credit-a2c.png)
@@ -17,7 +17,8 @@
 | `stage_changed` | `api/v1/loan_applications.py` `update_loan_status` (In Transition) | Your loan application {app} with {bank} is now at stage: {stage}. | no |
 | `application_approved` | same, when the bank's stage label is "Approved" | {bank} approved your loan application {app}. The bank will contact you about next steps. | no |
 | `application_rejected` | same, Reject transition | {bank} did not approve loan application {app}. Ask your agent or the bank for the reason. | no |
-| `loan_disbursed` | same, Complete transition | {bank} has paid out the loan for application {app}. Contact the bank if you have not received it. | no |
+| `loan_disbursed` | same, Complete transition **when the bank's stage label is "Disbursed"** | {bank} has paid out the loan for application {app}. Contact the bank if you have not received it. | no |
+| `application_completed` | same, Complete transition with any other stage label (a bank may complete before paying out) | {bank} has completed your loan application {app}. The bank will contact you about the loan. | no |
 | `visit_scheduled` | A2C Visit Schedule inserted (status Scheduled) | An agent will visit you on {date} at {time}, at {place}. Visit ref {visit}. | at the visit (max 7 days) |
 | `visit_cancelled` | A2C Visit Schedule status → Cancelled | Agent visit {visit} on {date} is cancelled. Your agent will contact you to book a new time. | at the visit |
 

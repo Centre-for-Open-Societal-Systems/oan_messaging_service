@@ -244,7 +244,7 @@ const title = [
     ["Status", "Review (not deployed)"],
     ["Contract", process.env.CONTRACT || "OAN Messaging external contract 3.0.0"],
     ["Audience", process.env.AUDIENCE || "Credit (A2C), DPI Consent Manager, Grievance, DA Services, Auth and eSignet teams; QA; DevOps"],
-    ["Note", "All hosts are example.invalid placeholders and all phone numbers are 0900000xxx test numbers."],
+    ["Note", process.env.NOTE || "All hosts are example.invalid placeholders and all phone numbers are 0900000xxx test numbers."],
   ].map(([k, v]) => new Paragraph({ spacing: { before: 160 }, children: [
     new TextRun({ text: `${k}: `, bold: true, font: FONT, size: 22 }), new TextRun({ text: v, font: FONT, size: 22 })] })),
   new Paragraph({ children: [new PageBreak()] }),
