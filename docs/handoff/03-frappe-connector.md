@@ -4,8 +4,10 @@ A reusable Frappe app that every Frappe module installs to send notices through 
 owns everything that is the same for all callers, so each module only adds its texts and
 its call sites.
 
-* **Status:** trial build, 33 tests passing; trial-tested end to end with Credit on
-  Frappe 16.56.0 and Python 3.14. Not released. MIT licence, as for other OAN services.
+* **Status:** trial build, 34 tests passing; trial-tested end to end with Credit on
+  Frappe 16.56.0 and Python 3.14. Meets the checks of the OAN Frappe apps (pre-commit,
+  Semgrep with the shared rules, pip-audit; report in `docs/evidence/`). Not released.
+  MIT licence, as for other OAN services.
 * **Two ways in.** New code calls `queue_sms` explicitly (**preferred**, §5). Modules that
   already send through Frappe's own SMS sender (Grievance and Auth) can instead switch
   that sender to OAN with an opt-in `send_sms` hook (**supported, interim**, §7).
