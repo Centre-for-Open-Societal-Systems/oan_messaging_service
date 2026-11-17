@@ -3,63 +3,75 @@
 | | |
 |---|---|
 | **Pattern** | OTP sender ([04](04-otp-senders.md)); FastAPI service, calls OAN directly |
-| **Status** | **Patch built and trial-tested end to end** (real Consent Manager HTTP API, real OAN over HTTPS, fake 8028) |
-| **Code** | `code/patches/consent-management/0001-*.patch` to `0003-*.patch` (branch `oan-messaging-otp` on base `b6d5e45`) |
-| **Today** | **The OTP is generated but never delivered**: the provider only logs it, in plain text. Every consent-gated data release (A2C applications, bank partners) needs manual help. **This is the most urgent gap.** |
+| **Status** | **Kit built and tested**: lint and Semgrep clean, full backend suite 220 passed (25 new), end to end through OAN over HTTPS |
+| **Code** | Kit `code/kits/consent-management/` (one patch on `develop` `32bce76`, with its README) |
+| **Today** | On `develop`, OTP consent issues a code but **cannot deliver it**: without a delivering provider, codes go only to the service log or a bucket (test harnesses), and with neither the request is refused (503). Every consent-gated data release (A2C applications, bank partners) is blocked on this. **This is the most urgent gap.** |
 
 ![Consent OTP flow](diagrams/11-dpi-consent.png)
 
 ## 1. What the farmer receives
 
-| Message | Raised in | Purpose | Text |
+| Message | Raised by | Purpose | Text |
 |---|---|---|---|
-| Consent OTP | `lifecycle_service.issue_otp` → `otp_provider.issue` | `otp`, expires with the code (300 s) | OAN: {code} is your code to allow {partner} to use your registry data. It expires in 5 minutes. Never share this code. |
-| Data-release OTP | `aggregator_service` (status `pending_otp`) | `otp` | OAN: {code} is your code to release your registry data to {partner}. It expires in 5 minutes. Never share this code. |
-| Consent granted, denied, revoked, expired; data shared (**phase 2**) | `lifecycle_service`, `consent_service`, `aggregator_service` | `transactional` | Templates ready in `examples/dpi_consent_notifications.py`; not wired yet |
+| Consent OTP | `POST /consent-requests` with `method: "otp"`, and `resend-otp` (`otp_consent_service` → `OtpService.issue` → provider) | `otp`, expires with the code (`otp_ttl_sec`, 300 s) | OAN: {code} is your code to allow {partner} to use your registry data. It expires in 5 minutes. Never share this code. |
+| Consent granted, denied, revoked, expired; data shared (**phase 2**) | consent services | `transactional` | Templates ready in `examples/dpi_consent_notifications.py`; not wired yet |
 
-## 2. What the patch changes
+When the partner name makes the text too long for one SMS (for example Amharic letters),
+a short text without the name is sent instead.
+
+## 2. What the kit changes
+
+`develop` already has the extension point: a provider that delivers sets `delivers`, and
+`OtpService` then needs no test harness. The kit uses it.
 
 | File | Change |
 |---|---|
-| `services/otp_delivery.py` (new) | Builds the SMS: purpose `otp`, `expires_at` = the code's expiry, key per issue, partner display name, phone from the resolver. Calls OAN, and on failure raises `OtpError` 422, 502 or 503. |
-| `services/otp_provider.py` | Both providers call delivery after issuing. **The code is masked in logs** unless `otp_debug_enabled`. |
-| `services/lifecycle_service.py`, `services/aggregator_service.py` | A delivery failure on **issue** becomes a visible error (it was a bare 500); nothing is stored |
-| `config.py` | `oan_delivery_enabled` (default **off**), `oan_base_url`, `oan_token`, `oan_ca_bundle`, `oan_timeout_seconds`, `oan_max_attempts`, `oan_phone_resolver`, `oan_otp_phone_map` |
+| `services/otp_provider.py` | Both providers send the code through OAN when it is configured (`delivers` is then true); otherwise the log and bucket harnesses as before |
+| `services/otp_delivery.py` (new) | Purpose `otp`, `expires_at` = the code's expiry, one key per issued code, partner display name, phone from the resolver. On failure raises `OtpError` 422, 502, 503, or 500 for a configuration error. The code and phone are never logged. |
+| `services/sms_length.py` (new) | The one-SMS-part rule OAN enforces |
+| `config.py` | `oan_delivery_enabled` (default **off**), `oan_base_url`, `oan_token`, `oan_ca_bundle`, `oan_timeout_seconds`, `oan_max_attempts`, `oan_phone_resolver`, `oan_otp_phone_map`; `oan_delivery_ready` |
 | `oan_client/` (vendored) | The OAN client, unchanged apart from relative imports |
-| `backend/tests/test_oan_otp_delivery.py` | 5 tests |
+| `backend/tests/` | 19 unit tests and 6 integration tests through the partner portal API |
 
 ## 3. Integration steps
 
 | # | Step | Owner | Done when |
 |---|---|---|---|
-| 1 | **Fix the build first.** At `b6d5e45` the service does not build or run: the `openg2p-fastapi-common` pin is broken (it needs commit `9ddccc00f5`, or the code updated to the new `crypto` package), and `greenlet` is missing | DPI dev | Image builds and starts from a clean checkout |
-| 2 | Apply the three patch commits | DPI dev | `pytest backend/tests`: 17 pass; sanity suite as before |
-| 3 | **Phone for OTPs.** The Consent Manager stores no phone, only the Fayda FIN. The agreed direction is the farmer's **registered phone from the beneficiary API**. Implement `resolve_phone()` against that route once the identity owner publishes it (the route, its access, and what to do when there is no phone), and remove the dev phone map. | **Identity owner** and DPI | Route published; resolver implemented and tested |
+| 1 | Check that the service builds and starts from a clean checkout of `develop` (on `main` it needed a framework pin and `greenlet`; `develop` brings `greenlet` through `sqlalchemy[asyncio]`) | DPI dev | Image builds and starts |
+| 2 | Apply the kit (`git am code/kits/consent-management/*.patch`) | DPI dev | `pytest backend/tests` with the test database: 220 pass |
+| 3 | **Phone for OTPs.** The Consent Manager stores no phone, only the subject ID. The agreed direction is the farmer's **registered phone from the beneficiary API**. Implement `resolve_phone()` against that route once the identity owner publishes it (the route, its access, and what to do when there is no phone), and remove the dev phone map. | **Identity owner** and DPI | Route published; resolver implemented and tested |
 | 4 | Partner display names (at most 30 characters; longer ones are shortened) | DPI | Names checked |
-| 5 | Amharic OTP text, which must fit 70 characters with the code and partner name. The patch measures every OTP text against one SMS part and, when the full text does not fit (for example an Amharic partner name), sends a short text without the partner name. | DPI content | Measured |
+| 5 | Amharic OTP text, which must fit 70 characters with the code and partner name (the kit measures every text and falls back to a short one) | DPI content | Measured |
 | 6 | OAN operator registers caller `dpi-consent` (sms; otp, transactional) and issues a token | OAN ops | Token in the secret store |
-| 7 | Set `CONSENT_MANAGER_OAN_*` (HTTPS URL, token, CA if private), `..._OAN_DELIVERY_ENABLED=true` | DevOps | An OTP request produces an SMS |
+| 7 | Set `CONSENT_MANAGER_OAN_*` (HTTPS URL, token, CA if private), `..._OAN_DELIVERY_ENABLED=true`; turn `otp_log_codes` and `otp_publish_enabled` off | DevOps | An OTP request produces an SMS |
 | 8 | Dev acceptance ([20](20-testing-and-acceptance.md), CM-01 to CM-08) | QA | Evidence recorded |
 | 9 | Phase 2: wire the consent notices (granted, denied, revoked, expired, data shared) | DPI | Optional for the pilot |
 
-## 4. Responses the consent screen must handle
+## 4. Responses the partner portal must handle
 
-| API answer on `POST /consent-requests/{id}/otp` | Meaning | Screen |
+| API answer on `POST /consent-requests` (`method: "otp"`) or `resend-otp` | Meaning | Screen |
 |---|---|---|
-| `200` | Code handed to OAN (the code is never in the response) | "We sent a code to your phone" |
+| `201` / `200` | Code handed to OAN (the code is never in the response) | "We sent a code to the farmer's phone" |
 | `422 otp_destination_unknown` | No phone for this farmer | "No phone number on record": route to support |
 | `502 otp_delivery_rejected` | OAN refused the message | "Could not send the code": alert ops |
 | `503 otp_delivery_unavailable` | OAN unreachable after retries | "Try again in a moment" |
+| `503 otp_unavailable` | No delivery channel configured (for example OAN switched on without a token) | "Could not send the code": alert ops |
 
-## 5. Trial evidence (15 November 2026)
+A request whose first code cannot be delivered is cancelled; the partner raises a new one.
 
-* The OTP SMS reached the gateway through OAN. A wrong code was rejected (401); the right
-  code verified, then approval succeeded.
-* A re-issue sent a new SMS with a new key, and the stale code was rejected.
-* Unknown phone: 422, and no SMS.
-* No OTP code anywhere in the Consent Manager log.
-* Unit tests 5/5. Not run over HTTP: the data-release OTP (it needs registries; it uses
-  the same delivery module) and the service with auth on.
+## 5. Evidence (17 November 2026)
+
+* Ruff (E, F, W, I, UP, B, RUF, S, BLE) and ruff format on the new files, Semgrep's Python
+  correctness and security rules on every changed file: clean. The repository has no lint
+  configuration of its own.
+* Full backend suite (PostgreSQL 16, Python 3.12): 220 passed with the kit, 195 without;
+  the 6 integration tests raise and resend real OTP consent requests, grant the consent
+  with the code taken from the SMS, and check the 422 and 503 refusals.
+* End to end against OAN over HTTPS and the fake 8028, with the same delivery module on
+  the `main` build (the only Consent Manager image available): the OTP SMS reached the
+  gateway; a wrong code was rejected and the right code approved; a re-issue sent a new
+  SMS with a new key and the stale code was rejected; unknown phone 422 with no SMS; no
+  OTP code in the service log.
 
 ## 6. Configuration example (dev)
 

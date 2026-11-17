@@ -23,7 +23,9 @@ PHONE = "0900000601"  # CONSENT_MANAGER_OAN_OTP_PHONE_MAP: FIN-1001 -> 090000060
 
 
 def ok(r: httpx.Response, *codes: int) -> dict:
-    assert r.status_code in codes, f"{r.request.method} {r.request.url.path}: {r.status_code} {r.text[:300]}"
+    assert r.status_code in codes, (
+        f"{r.request.method} {r.request.url.path}: {r.status_code} {r.text[:300]}"
+    )
     return r.json() if r.content else {}
 
 
@@ -41,17 +43,44 @@ def wait_code(after: int, timeout: float = 30) -> tuple[str, str]:
 def main() -> None:
     c = httpx.Client(base_url=CM, timeout=30)
     tag = uuid.uuid4().hex[:6]
-    partner = ok(c.post("/consent/v1/partners", json={
-        "audience": f"trial-bank-{tag}", "controller_id": "farmer-registry", "name": "Trial Bank"}), 201)
-    ok(c.put(f"/consent/v1/partners/{partner['id']}/policy", json={
-        "allowed_data_scopes": ["farmer.mobile", "farmer.firstname"],
-        "allowed_purposes": ["loan_assessment"], "allowed_subject_id_types": ["FIN"],
-        "lawful_basis": "consent", "required_auth_method": "otp"}), 200)
+    partner = ok(
+        c.post(
+            "/consent/v1/partners",
+            json={
+                "audience": f"trial-bank-{tag}",
+                "controller_id": "farmer-registry",
+                "name": "Trial Bank",
+            },
+        ),
+        201,
+    )
+    ok(
+        c.put(
+            f"/consent/v1/partners/{partner['id']}/policy",
+            json={
+                "allowed_data_scopes": ["farmer.mobile", "farmer.firstname"],
+                "allowed_purposes": ["loan_assessment"],
+                "allowed_subject_id_types": ["FIN"],
+                "lawful_basis": "consent",
+                "required_auth_method": "otp",
+            },
+        ),
+        200,
+    )
 
     def new_request(subject: str) -> str:
-        return ok(c.post("/consent/v1/consent-requests", json={
-            "subject_id": {"type": "FIN", "value": subject}, "partner_id": partner["id"],
-            "purpose": {"code": "loan_assessment"}, "requested_scopes": ["farmer.mobile"]}), 201)["id"]
+        return ok(
+            c.post(
+                "/consent/v1/consent-requests",
+                json={
+                    "subject_id": {"type": "FIN", "value": subject},
+                    "partner_id": partner["id"],
+                    "purpose": {"code": "loan_assessment"},
+                    "requested_scopes": ["farmer.mobile"],
+                },
+            ),
+            201,
+        )["id"]
 
     before = len(httpx.get(INBOX, params={"phone": PHONE}, timeout=5).json())
     rid = new_request("FIN-1001")
@@ -67,8 +96,13 @@ def main() -> None:
     assert bad.status_code >= 400
 
     ok(c.post(f"/consent/v1/consent-requests/{rid}/verify-otp", json={"otp": code}), 200)
-    artefact = ok(c.post(f"/consent/v1/consent-requests/{rid}/approve",
-                         json={"granted_scopes": ["farmer.mobile"]}), 201)
+    artefact = ok(
+        c.post(
+            f"/consent/v1/consent-requests/{rid}/approve",
+            json={"granted_scopes": ["farmer.mobile"]},
+        ),
+        201,
+    )
     print("approved after OTP; artefact", artefact["id"])
 
     # Re-issue: a NEW code, a NEW SMS (new key), the old code no longer works.
@@ -86,13 +120,21 @@ def main() -> None:
     total = len(httpx.get(INBOX, timeout=5).json())
     rid3 = new_request("FIN-9999")
     r = c.post(f"/consent/v1/consent-requests/{rid3}/otp")
-    print("unknown phone ->", r.status_code, r.json().get("reason") or r.json().get("detail") or r.text[:120])
+    print(
+        "unknown phone ->",
+        r.status_code,
+        r.json().get("reason") or r.json().get("detail") or r.text[:120],
+    )
     assert r.status_code == 422
     time.sleep(3)
     assert len(httpx.get(INBOX, timeout=5).json()) == total
 
-    logs = subprocess.run(["docker", "compose", "logs", "cm-api"], cwd=HERE,
-                          capture_output=True, text=True).stdout
+    logs = subprocess.run(  # noqa: S603 - fixed arguments
+        ["docker", "compose", "logs", "cm-api"],  # noqa: S607 - local trial: docker from PATH
+        cwd=HERE,
+        capture_output=True,
+        text=True,
+    ).stdout
     for secret in (code, first, second):
         assert secret not in logs, "an OTP code appeared in the Consent Manager log"
     print("Consent Manager logs contain no OTP code")

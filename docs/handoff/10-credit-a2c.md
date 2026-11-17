@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Pattern** | Frappe connector ([03](03-frappe-connector.md)) |
-| **Status** | **Patch built and trial-tested end to end** (Frappe 16.56.0, Python 3.14, real OAN over HTTPS, fake 8028) |
-| **Code** | `code/patches/oan_a2c_service/0001-*.patch` and `0002-*.patch` (branch `oan-messaging-sms` on base `3887b8b`), plus the connector app |
+| **Status** | **Kit built and tested**: lint and Semgrep clean, full A2C suite unchanged, end to end through OAN (Frappe 16.56.0, Python 3.14) |
+| **Code** | Kit `code/kits/oan_a2c_service/` (one patch on `develop` `f6bb735`, with its README), plus the connector app |
 | **Today** | A2C sends the farmer **no SMS at all**; its only notifications are in-app messages for bank staff and agents |
 
 ![Credit flow](diagrams/10-credit-a2c.png)
@@ -22,14 +22,14 @@
 | `visit_scheduled` | A2C Visit Schedule inserted (status Scheduled) | An agent will visit you on {date} at {time}, at {place}. Visit ref {visit}. | at the visit (max 7 days) |
 | `visit_cancelled` | A2C Visit Schedule status → Cancelled | Agent visit {visit} on {date} is cancelled. Your agent will contact you to book a new time. | at the visit |
 
-Every text is sent with the prefix "OAN Credit: " (12 characters, added by `render()`),
-and the prefixed text fits one SMS at the maximum field lengths (bank 30, stage 30, place
-40 characters). The table shows the text without the prefix.
+Every template starts with "OAN Credit: " (12 characters), and the full text fits one SMS
+at the maximum field lengths (bank 30, stage 30, place 40 characters). The table shows the
+text without that prefix.
 
-**Phone number:** the patch reads the phone from A2C's own records (`phone_number` on the
+**Phone number:** the kit reads the phone from A2C's own records (`phone_number` on the
 application or lead). The agreed source is the registered phone from the beneficiary
 API; switch when that route exists (guide 22). **Visit messages** are English only in the
-patch; add Amharic before go-live.
+kit; add Amharic before go-live.
 
 (*) Visit SMS use `doc_events` on **A2C Visit Schedule** because inserting a schedule,
 or changing its status to Cancelled, *is* the business event and each happens once per
@@ -48,15 +48,15 @@ Consent Manager ([11](11-dpi-consent.md)), never by A2C.
 | # | Step | Owner | Done when |
 |---|---|---|---|
 | 1 | Install `oan_messaging_connector` on each A2C site | A2C dev | `bench --site <site> list-apps` shows it |
-| 2 | Apply the patch: `required_apps`, `oan_a2c/oan_messaging/{events,notify}.py`, 2 call sites, 2 visit hooks, tests | A2C dev | `run-tests --app oan_a2c`: 6 new tests pass, and nothing that passed before fails |
+| 2 | Apply the kit (`git am code/kits/oan_a2c_service/*.patch`): `required_apps`, `oan_a2c/oan_messaging/{events,notify}.py`, 2 call sites, 2 visit hooks, tests | A2C dev | `run-tests --app oan_a2c`: the 12 new tests pass, and nothing that passed before fails |
 | 3 | Confirm, per bank, which stage label means "approved" (`event_for_transition`) | A2C product + banks | Labels recorded; the mapping adjusted if a bank uses another word |
 | 4 | Agree bank short names (at most 30 characters) and the display language source | A2C product | `bank_name` values checked |
 | 5 | Add Amharic, Afaan Oromo and other translations to `TEMPLATES` | A2C content | Each template, at maximum field lengths, fits one SMS (70 characters if Amharic): the test passes |
-| 6 | OAN operator registers caller `a2c` (sms, transactional) and issues a token | OAN ops | Token stored in the site's secret |
+| 6 | OAN operator registers caller `a2c` (sms; `transactional`, plus `otp` if the Auth kit sends reset codes on this site) and issues a token | OAN ops | Token stored in the site's secret |
 | 7 | Set `oan_messaging_*` site config (HTTPS URL, token, CA if private); scheduler and workers running | DevOps | `queue_sms` creates rows and they reach **Submitted** |
 | 8 | Dev-environment acceptance ([20](20-testing-and-acceptance.md), CR-01 to CR-08) | QA | Evidence recorded |
 
-## 3. How the code is laid out (after the patch)
+## 3. How the code is laid out (after the kit)
 
 ```
 oan_a2c/oan_messaging/events.py   # TEMPLATES, render(), event_for_transition(), visit_deadline()
@@ -70,13 +70,15 @@ oan_a2c/hooks.py                        # required_apps + A2C Visit Schedule doc
   sets `status` with `db_set`, which skips `on_update`.
 * A status or stage that did not change sends nothing.
 
-## 4. Trial evidence (15 November 2026)
+## 4. Evidence (17 November 2026)
 
-* A2C suite: 299 tests. The 6 new tests pass. The failure set is identical to the
-  unpatched baseline: 6 pre-existing failures in `test_farmer_b2c`, unrelated to this
-  work.
-* End to end: three real `update_loan_status` calls (Verified, Approved, Disbursed) plus
-  a visit scheduled and then cancelled. Each message reached the gateway once and showed
+* A2C pre-commit hooks and Semgrep (Frappe rules, Python correctness, A2C rules) on the
+  changed files: clean.
+* The 12 kit tests pass. Full A2C suite: 293 tests with the kit, 281 without; the same 7
+  pre-existing failures in both (`test_farmer_b2c` and loan-product checks), none from
+  the kit.
+* End to end: three real `update_loan_status` calls (Verified, Approved, Disbursed) plus a
+  visit scheduled and then cancelled. Each message reached the gateway once and showed
   **Submitted → delivered** in the Desk.
 * Not run end to end: `submit_application`, because A2C rightly requires an approved
   consent first. It is covered by a unit test.

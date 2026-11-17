@@ -23,7 +23,7 @@ License, the same as other OAN services (see `LICENSE`).
 | `docs/channels-spec/` | **OAN Channels Specification v2.0** (SMS and Telegram), Markdown and Word |
 | `docs/handoff/` | **Integration handoff** for module teams, Markdown and Word; QA cases |
 | `docs/evidence/` | Release-blocker status; the RapidPro evaluation |
-| `integrations/patches/` | Trial patches for Credit (A2C) and the DPI Consent Manager |
+| `integrations/kits/` | Integration kits: one tested patch per module (Credit, Consent Manager, Auth, Grievance, DA) with its README |
 | `trial/` | Local integration trial with a fake 8028 gateway (`trial/README.md`) |
 
 The Frappe app that other OAN Frappe modules install is in the separate

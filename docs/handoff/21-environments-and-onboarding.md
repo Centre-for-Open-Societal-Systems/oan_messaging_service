@@ -14,11 +14,10 @@ python -m oan_messaging.runtime revoke-credentials --caller a2c --credential <id
 
 | Caller | Channels | Purposes |
 |---|---|---|
-| `a2c` | sms | transactional |
+| `a2c` | sms | transactional, otp (Auth reset codes on this site) |
 | `dpi-consent` | sms | otp, transactional |
-| `grievance` | sms | transactional |
-| `da` | sms | transactional |
-| `auth-<site>` (proposed: one per site) | sms | otp |
+| `grievance` | sms | transactional, otp (Auth reset codes on this site) |
+| `da` | sms | transactional, otp (Auth reset codes on this site) |
 | `esignet` | sms | otp |
 | (none in Phase 1) | telegram | transactional |
 

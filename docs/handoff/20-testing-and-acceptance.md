@@ -64,14 +64,14 @@ Consent Manager cases are new here.
 
 | ID | Case | Expected |
 |---|---|---|
-| CM-01 | Request a consent OTP | SMS arrives; the code is not in the API response or the logs |
+| CM-01 | Raise an OTP consent request (`method: "otp"`) | 201; SMS arrives; the code is not in the API response or the logs |
 | CM-02 | Wrong code | 401; the attempt counted |
-| CM-03 | Right code, then approve | Consent approved |
-| CM-04 | Re-issue | New SMS, new key; the old code rejected |
+| CM-03 | Right code (`verify-otp`) | 201; consent active |
+| CM-04 | `resend-otp` after the cooldown | New SMS, new key; the old code rejected |
 | CM-05 | Subject without a phone | 422 `otp_destination_unknown`; no SMS |
-| CM-06 | OAN unavailable | 503; nothing stored; succeeds on retry |
+| CM-06 | OAN unavailable | 503 `otp_delivery_unavailable`; the request is cancelled; a new request succeeds once OAN is back |
 | CM-07 | OTP not sent before its 300 s expiry (worker stopped) | OAN ends it `expired`; never sent late |
-| CM-08 | Data-release OTP (aggregation with registries) | SMS with the "release your registry data" text |
+| CM-08 | OAN switched on without a token | 503 `otp_unavailable`; no code issued, nothing sent |
 
 ### Common to every module (COMMON cases)
 
@@ -81,11 +81,15 @@ Consent Manager cases are new here.
 * No secret or full phone number in logs.
 * The status UI never shows "Sent" on `202`.
 
-## 4. What the trial already proved (15 November 2026)
+## 4. What has been proved (17 November 2026)
 
 | Module | Result |
 |---|---|
-| OAN | Smoke test: HTTPS API → worker → 8028 mTLS → receipt → `delivered` |
-| Credit | CR-01, 02, 04 and 06 passed end to end (9 messages, each delivered once); CR-03 is covered by a unit test. Connector 11/11; A2C suite shows no regressions. |
-| Consent Manager | CM-01 to CM-05 passed end to end; unit tests 5/5 |
-| Not yet | CR-07, CR-08, CM-06 to CM-08 end to end. |
+| OAN | Smoke test: HTTPS API → worker → 8028 mTLS → receipt → `delivered`. Service suite 901 passed. |
+| Connector | 40 tests; Semgrep with the Frappe and shared OAN rules: 0 findings |
+| Credit kit | CR-01, 02, 04 and 06 end to end (5 messages, each delivered once); 12 kit tests; full A2C suite unchanged |
+| Consent Manager kit | CM-01 to CM-05 end to end (`main` build); on `develop`, 25 new tests including CM-01, 03, 04, 05, 06 and 08 through the API and database |
+| Auth kit | AUTH-01 end to end (one `otp` SMS, no code in logs); 7 kit tests; full Auth suite unchanged |
+| Grievance kit | GR-01, 03, 06, 11 as tests on a Grievance site; full suite unchanged |
+| DA kit | DA-01 to 06 as tests through the real plan and reschedule services; full suite unchanged |
+| Not yet | Everything on the shared dev environment; CR-07, CR-08, CM-07 end to end; live 8028 cases |

@@ -25,11 +25,11 @@ guide 03 §7.
 
 | Caller | Pattern | Purposes | What it sends | Status |
 |---|---|---|---|---|
-| `a2c` | Connector | transactional | Application submitted, stage changes, approval, rejection, disbursal, agent visits (9 events) | Patch built; trial-tested end to end |
-| `dpi-consent` | OTP sender | otp, transactional | Consent and data-release OTPs; consent notices later | Patch built; trial-tested end to end |
-| `grievance` | Connector | transactional | 12 grievance notices (received, updates, closure) | Designed |
-| `da` | Connector | transactional | Visit planned and rescheduled, to farmer and Development Agent | Designed |
-| `auth-<site>` (proposed: one per site) | OTP sender | otp | Password-reset OTP; Telegram linking OTP (§6.6) | Designed |
+| `a2c` | Connector | transactional | Application submitted, stage changes, approval, rejection, disbursal, agent visits (8 events) | Kit built; tested end to end |
+| `dpi-consent` | OTP sender | otp, transactional | Consent and data-release OTPs; consent notices later | Kit built; tested end to end |
+| `grievance` | Connector | transactional (+ otp for Auth) | 12 grievance notices (received, updates, closure) | Kit built and tested |
+| `da` | Connector | transactional (+ otp for Auth) | Visit planned and rescheduled, to the farmer when the agent ticks the box (agents are alerted on Telegram) | Kit built and tested |
+| The caller of the site Auth runs on | OTP sender (`send_sms_now`) | otp | Password-reset OTP (kit built, tested end to end); Telegram linking OTP (§6.6, designed) | Kit built and tested |
 | `esignet` | OTP sender | otp | Login OTP for Farmer ID | Designed; the eSignet team implements |
 
 The OAN operator registers each caller, its channels and purposes, and issues its token

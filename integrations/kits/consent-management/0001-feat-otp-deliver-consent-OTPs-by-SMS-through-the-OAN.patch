@@ -1,49 +1,75 @@
-From b5ed252d208bf3e955c18fd2a7c39e94d2dc8721 Mon Sep 17 00:00:00 2001
-From: OAN trial <trial@example.invalid>
-Date: Sun, 15 Nov 2026 19:33:31 +0530
-Subject: [PATCH 1/3] Deliver OTPs by SMS through the OAN Messaging Service
- (trial)
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OAN Messaging <messaging@example.invalid>
+Date: Tue, 17 Nov 2026 08:45:18 +0530
+Subject: [PATCH] feat(otp): deliver consent OTPs by SMS through the OAN
+ Messaging Service
 
+When CONSENT_MANAGER_OAN_DELIVERY_ENABLED is on with a base URL and token, both OTP
+providers send each issued code as one SMS (purpose otp, expiring with the code) and
+report delivers = true, so OtpService no longer needs the log or bucket harness. A code
+that cannot be handed to OAN raises OtpError, so the request is refused visibly (422 no
+phone, 502 refused, 503 unavailable, 500 misconfigured) instead of waiting on a code
+nobody received. The code and phone are never logged.
+
+- services/otp_delivery.py: phone resolution (test map; a registry resolver plugs in at
+  resolve_phone), text that always fits one SMS part, one idempotency key per code.
+- oan_client/: the OAN Messaging client (contract 3.0.0), vendored unchanged apart from
+  relative imports.
+- tests: 19 unit tests and 6 integration tests through the partner portal API.
 ---
- backend/src/openg2p_consent_manager/config.py |  30 +
+ backend/src/openg2p_consent_manager/config.py |  38 +-
  .../oan_client/VENDORED.md                    |   3 +
  .../oan_client/__init__.py                    |  48 ++
  .../oan_client/client.py                      | 633 ++++++++++++++++++
  .../oan_client/keys.py                        |  64 ++
- .../services/otp_delivery.py                  | 136 ++++
- .../services/otp_provider.py                  |  24 +-
- backend/tests/test_oan_otp_delivery.py        | 107 +++
- 8 files changed, 1043 insertions(+), 2 deletions(-)
+ .../services/otp_delivery.py                  | 166 +++++
+ .../services/otp_provider.py                  |  44 +-
+ .../services/sms_length.py                    |  17 +
+ backend/tests/test_oan_otp_delivery.py        | 173 +++++
+ backend/tests/test_otp_sms.py                 | 140 ++++
+ 10 files changed, 1313 insertions(+), 13 deletions(-)
  create mode 100644 backend/src/openg2p_consent_manager/oan_client/VENDORED.md
  create mode 100644 backend/src/openg2p_consent_manager/oan_client/__init__.py
  create mode 100644 backend/src/openg2p_consent_manager/oan_client/client.py
  create mode 100644 backend/src/openg2p_consent_manager/oan_client/keys.py
  create mode 100644 backend/src/openg2p_consent_manager/services/otp_delivery.py
+ create mode 100644 backend/src/openg2p_consent_manager/services/sms_length.py
  create mode 100644 backend/tests/test_oan_otp_delivery.py
+ create mode 100644 backend/tests/test_otp_sms.py
 
 diff --git a/backend/src/openg2p_consent_manager/config.py b/backend/src/openg2p_consent_manager/config.py
-index ea718d4..2b777e6 100644
+index 7db9e8b..3dcfdf2 100644
 --- a/backend/src/openg2p_consent_manager/config.py
 +++ b/backend/src/openg2p_consent_manager/config.py
-@@ -345,6 +345,36 @@ class Settings(BaseSettings):
-     # JSON: {"staff": "6140798523698702"}
-     fayda_individual_id_map: str = ""
+@@ -253,7 +253,7 @@ class Settings(BaseSettings):
+ 
+     # ── OTP consent: partner raises a request, the CM sends the subject a code,
+     # the partner submits it and the consent is granted (partner portal API) ──
+-    otp_provider: str = "fayda"  # fayda | internal (neither delivers the code yet)
++    otp_provider: str = "fayda"  # fayda | internal (delivered by SMS when oan_delivery_enabled)
+     otp_length: int = 6
+     otp_ttl_sec: int = 300
+     otp_max_attempts: int = 3  # wrong codes per issued code
+@@ -287,6 +287,42 @@ class Settings(BaseSettings):
+     otp_publish_secret_key: str = ""
+     otp_publish_id_type: str = "FIN"
  
 +    # ── OTP delivery by SMS through the OAN Messaging Service ───────────────
-+    # Off by default: the providers then only log that nothing was delivered.
-+    # When on, every issued OTP is sent as one SMS (purpose "otp", expiring with
-+    # the code itself) and an issue that cannot be delivered fails visibly.
++    # Off by default. When on (with a base URL and token), every issued code is
++    # sent as one SMS (purpose "otp", expiring with the code itself), and an
++    # issue that cannot be delivered fails visibly instead of storing the code.
 +    oan_delivery_enabled: bool = False
-+    oan_base_url: str = ""          # e.g. https://oan-messaging.<env>/  (no path)
-+    oan_token: str = ""             # caller credential from the OAN operator; secret
-+    oan_ca_bundle: str = ""         # optional CA bundle path for the OAN API
++    oan_base_url: str = ""  # e.g. https://oan-messaging.<env>  (no path)
++    oan_token: str = ""  # caller credential from the OAN operator; secret
++    oan_ca_bundle: str = ""  # optional CA bundle path for the OAN API
 +    oan_timeout_seconds: float = 5.0
-+    oan_max_attempts: int = 2       # client retries, same key and body
++    oan_max_attempts: int = 2  # client retries, same key and body
 +    # Subject -> phone resolution. "map" reads oan_otp_phone_map (dev/staging test
-+    # numbers only). A production resolver (registry lookup by FIN, approved by
-+    # the identity owner) replaces it; see services/otp_delivery.py.
++    # numbers only). A production resolver (the registered phone from the
++    # beneficiary API, approved by the identity owner) replaces it; see
++    # services/otp_delivery.py.
 +    oan_phone_resolver: str = "map"
-+    # JSON: {"<subject_id_value or Fayda individualId>": "0900000101"}
++    # JSON: {"<subject_id_value>": "0900000101"}
 +    oan_otp_phone_map: str = ""
 +
 +    @property
@@ -55,13 +81,18 @@ index ea718d4..2b777e6 100644
 +            return {}
 +        try:
 +            parsed = json.loads(raw)
-+        except Exception:  # noqa: BLE001 - never log the value: it holds phones
++        except ValueError:  # never log the value: it holds phones
 +            return {}
 +        return parsed if isinstance(parsed, dict) else {}
 +
-     @property
-     def fayda_individual_ids(self) -> dict:
-         import json
++    @property
++    def oan_delivery_ready(self) -> bool:
++        """SMS delivery is switched on and has somewhere to send."""
++        return bool(self.oan_delivery_enabled and self.oan_base_url and self.oan_token)
++
+     # ── Subject authentication with national ID (consent scenario 1, phase 2) ──
+     # The subject (e.g. a farmer at the bank) proves who they are through an
+     # OIDC provider such as eSignet (OTP, biometrics) during an assisted request:
 diff --git a/backend/src/openg2p_consent_manager/oan_client/VENDORED.md b/backend/src/openg2p_consent_manager/oan_client/VENDORED.md
 new file mode 100644
 index 0000000..be8a09e
@@ -836,14 +867,14 @@ index 0000000..a0f94df
 +    return str(uuid.uuid5(OAN_KEY_NAMESPACE, key_material(service, event_id, role, channel)))
 diff --git a/backend/src/openg2p_consent_manager/services/otp_delivery.py b/backend/src/openg2p_consent_manager/services/otp_delivery.py
 new file mode 100644
-index 0000000..a560525
+index 0000000..44ee014
 --- /dev/null
 +++ b/backend/src/openg2p_consent_manager/services/otp_delivery.py
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,166 @@
 +"""Deliver issued OTPs by SMS through the OAN Messaging Service.
 +
-+Until now neither OTP provider delivered anything: the code was only written to the
-+service log. With ``oan_delivery_enabled`` every issued code is sent as one SMS:
++Without it, the OTP providers only write the code to the service log (development). With
++``oan_delivery_enabled`` every issued code is sent as one SMS:
 +
 +* purpose ``otp``; ``expires_at`` is the code's own ``otp_expires_at``, passed
 +  unchanged. OAN never sends it after that moment.
@@ -880,6 +911,7 @@ index 0000000..a560525
 +    SmsDelivery,
 +    delivery_key,
 +)
++from .sms_length import fits_one_sms
 +
 +_config = Settings.get_config()
 +_logger = logging.getLogger(_config.logging_default_logger_name)
@@ -889,6 +921,14 @@ index 0000000..a560525
 +    "It expires in {minutes} minutes. Never share this code.",
 +    "data_release": "OAN: {code} is your code to release your registry data to {partner}. "
 +    "It expires in {minutes} minutes. Never share this code.",
++}
++#: Used when the full text does not fit one SMS part, for example when the partner name has
++#: Amharic letters (the limit is then 70 characters). No partner name, ASCII only.
++SHORT_TEMPLATES = {
++    "consent": "OAN: {code} is your consent code. It expires in {minutes} minutes. "
++    "Never share this code.",
++    "data_release": "OAN: {code} is your code to release your registry data. It expires in "
++    "{minutes} minutes. Never share this code.",
 +}
 +PARTNER_MAX = 30
 +#: Tests may inject an httpx transport (e.g. ``httpx.MockTransport``).
@@ -903,8 +943,9 @@ index 0000000..a560525
 +
 +def resolve_phone(subject_value: str, individual_id: str | None) -> str | None:
 +    if _config.oan_phone_resolver != "map":
-+        raise _otp_error(500, "otp_resolver_unsupported",
-+                         "configured phone resolver is not available")
++        raise _otp_error(
++            500, "otp_resolver_unsupported", "configured phone resolver is not available"
++        )
 +    phones = _config.oan_otp_phones
 +    return phones.get(subject_value) or (phones.get(individual_id) if individual_id else None)
 +
@@ -921,6 +962,17 @@ index 0000000..a560525
 +    return name if len(name) <= PARTNER_MAX else name[: PARTNER_MAX - 1].rstrip() + "."
 +
 +
++def render_otp_text(kind: str, code: str, partner: str, minutes: int) -> str:
++    """The OTP text, guaranteed to fit one SMS part (OAN refuses anything longer)."""
++    text = TEMPLATES[kind].format(code=code, partner=partner, minutes=minutes)
++    if fits_one_sms(text):
++        return text
++    short = SHORT_TEMPLATES[kind].format(code=code, minutes=minutes)
++    if fits_one_sms(short):
++        return short
++    raise _otp_error(500, "otp_text_too_long", "the OTP text does not fit one SMS part")
++
++
 +async def deliver_otp(request, code: str, individual_id: str | None = None) -> str | None:
 +    """Send ``code`` for ``request``. Returns the OAN message id, or None when disabled."""
 +    if not _config.oan_delivery_enabled:
@@ -935,11 +987,11 @@ index 0000000..a560525
 +    now = datetime.now(timezone.utc)
 +    phone = resolve_phone(request.subject_id_value, individual_id)
 +    if not phone:
-+        raise _otp_error(422, "otp_destination_unknown",
-+                         "no phone number is registered for this subject")
++        raise _otp_error(
++            422, "otp_destination_unknown", "no phone number is registered for this subject"
++        )
 +    minutes = max(1, round((expires_at - now).total_seconds() / 60))
-+    text = TEMPLATES[kind].format(code=code, partner=await _partner_name(request.partner_id),
-+                                  minutes=minutes)
++    text = render_otp_text(kind, code, await _partner_name(request.partner_id), minutes)
 +    issue = str(int(expires_at.timestamp() * 1_000_000))
 +    delivery = SmsDelivery(
 +        idempotency_key=delivery_key("dpi-consent", transaction, f"otp-{kind}-{issue}", "sms"),
@@ -950,95 +1002,167 @@ index 0000000..a560525
 +        expires_at=expires_at,
 +        first_submitted_at=now,
 +    )
-+    cfg = ClientConfig(
-+        base_url=_config.oan_base_url,
-+        token=Secret(_config.oan_token),
-+        connect_timeout=_config.oan_timeout_seconds,
-+        read_timeout=_config.oan_timeout_seconds,
-+        max_attempts=max(1, _config.oan_max_attempts),
-+        ca_bundle=_config.oan_ca_bundle or None,
-+    )
++    try:
++        cfg = ClientConfig(
++            base_url=_config.oan_base_url,
++            token=Secret(_config.oan_token),
++            connect_timeout=_config.oan_timeout_seconds,
++            read_timeout=_config.oan_timeout_seconds,
++            max_attempts=max(1, _config.oan_max_attempts),
++            ca_bundle=_config.oan_ca_bundle or None,
++        )
++    except ValueError:  # e.g. a non-HTTPS base URL; the message never holds the token
++        raise _otp_error(
++            500, "otp_delivery_misconfigured", "OAN delivery is not configured"
++        ) from None
 +    try:
 +        client = OanClient(cfg, transport=_transport) if _transport is not None else OanClient(cfg)
 +        async with client:
 +            submission = await client.submit(delivery)
 +    except OanRejected as exc:
-+        _logger.error("OTP delivery rejected by OAN (request %s): HTTP %s %s",
-+                      request.id, exc.status, exc.code)
-+        raise _otp_error(502, "otp_delivery_rejected", "the SMS service refused the code") \
-+            from None
++        _logger.error(
++            "OTP delivery rejected by OAN (request %s): HTTP %s %s",
++            request.id,
++            exc.status,
++            exc.code,
++        )
++        raise _otp_error(502, "otp_delivery_rejected", "the SMS service refused the code") from None
 +    except (OanClientError, OSError) as exc:
-+        _logger.error("OTP delivery unavailable (request %s): %s", request.id,
-+                      type(exc).__name__)
-+        raise _otp_error(503, "otp_delivery_unavailable",
-+                         "the SMS service is unavailable; ask for a new code") from None
++        _logger.error("OTP delivery unavailable (request %s): %s", request.id, type(exc).__name__)
++        raise _otp_error(
++            503, "otp_delivery_unavailable", "the SMS service is unavailable; ask for a new code"
++        ) from None
 +    request.otp_channel = "SMS"
-+    _logger.info("OTP handed to OAN for request %s (message %s, %s)", request.id,
-+                 submission.id, kind)
++    _logger.info(
++        "OTP handed to OAN for request %s (message %s, %s)", request.id, submission.id, kind
++    )
 +    return submission.id
 diff --git a/backend/src/openg2p_consent_manager/services/otp_provider.py b/backend/src/openg2p_consent_manager/services/otp_provider.py
-index 8fe138a..1a8519b 100644
+index 9f68a5c..3343b28 100644
 --- a/backend/src/openg2p_consent_manager/services/otp_provider.py
 +++ b/backend/src/openg2p_consent_manager/services/otp_provider.py
-@@ -87,6 +87,22 @@ async def _publish(request, code: str, individual_id: str, id_type: str) -> None
+@@ -11,12 +11,13 @@ Two providers, one interface:
+ ``internal``
+     The generic equivalent: a random code with no Fayda framing.
+ 
+-Neither provider *delivers* anything yet (``delivers = False``): there is no
+-SMS gateway. For testing, the code can be written to the service log
+-(``otp_log_codes``) or to a bucket (``otp_publish_enabled``); with neither,
+-OtpService refuses to issue. A real Fayda / SMS deployment plugs in by
+-implementing ``issue`` and ``verify`` and setting ``delivers = True``; nothing
+-above this file changes.
++Both providers deliver the code by SMS through the OAN Messaging Service when
++``oan_delivery_enabled`` is on and configured (``delivers`` is then true; see
++``otp_delivery``). A code that cannot be handed to OAN raises ``OtpError``, so
++the request is refused instead of waiting on a code nobody received. Without
++OAN, the code can be written to the service log (``otp_log_codes``) or to a
++bucket (``otp_publish_enabled``) for testing; with none of these, OtpService
++refuses to issue.
+ """
+ import hashlib
+ import hmac
+@@ -76,6 +77,25 @@ async def _publish(request, code: str, individual_id: str) -> None:
          _logger.warning("OTP publish skipped: %s", exc)
  
  
-+async def _deliver(request, code: str, individual_id) -> bool:
-+    """Send the code by SMS through OAN when enabled. True when handed over.
++async def _deliver(request, code: str, destination: str) -> bool:
++    """Send the code by SMS through OAN when configured. True when handed over;
++    raises OtpError when delivery is configured but fails."""
++    if not _config.oan_delivery_ready:
++        return False
++    from .otp_delivery import deliver_otp  # late: otp_delivery imports OtpError from here
 +
-+    Raises OtpError when delivery is enabled but fails, so the caller's
-+    transaction rolls back and the subject asks for a new code.
-+    """
-+    from .otp_delivery import deliver_otp
-+
-+    return await deliver_otp(request, code, individual_id) is not None
-+
-+
-+def _loggable(code: str) -> str:
-+    """The code itself only under otp_debug_enabled (dev); otherwise masked."""
-+    return code if _config.otp_debug_enabled else "******"
++    await deliver_otp(request, code, destination)
++    return True
 +
 +
- # ── Fayda ───────────────────────────────────────────────────────────────────
++class _DeliversWhenConfigured:
++    """``delivers`` follows the OAN settings, read at use time."""
++
++    @property
++    def delivers(self) -> bool:
++        return _config.oan_delivery_ready
++
++
+ def _announce(request, code: str, destination: str, provider: str) -> None:
+     """Say a code was issued. The code itself only with ``otp_log_codes``
+     (test harness), since anything that reads the log could then use it."""
+@@ -96,12 +116,11 @@ def _count_failure(request) -> OtpError:
+     return OtpError(401, "otp_invalid", "incorrect OTP; %d attempt(s) remaining" % left)
  
- class FaydaOtpProvider:
-@@ -135,12 +151,14 @@ class FaydaOtpProvider:
  
-         await _publish(request, code, individual_id, _config.fayda_identifier_type)
+-class FaydaOtpProvider:
++class FaydaOtpProvider(_DeliversWhenConfigured):
+     """Fayda's rules, applied here rather than called over HTTP. The
+     transaction IS the consent-request row, so it is as durable as the request."""
  
-+        if await _deliver(request, code, individual_id):
-+            return
-         masked = fayda_otp.mask_phone_number(_config.fayda_demo_phone)
-         _logger.warning(
-             "[OTP] %s for individualId '%s' (transaction %s, masked %s) - generated "
-             "in-process with Fayda rules; NO message was delivered. Wire a real "
-             "Fayda or an SMS gateway before any non-demo use.",
--            code, individual_id, transaction_id, masked,
-+            _loggable(code), individual_id, transaction_id, masked,
-         )
+     name = "fayda"
+-    delivers = False
+ 
+     async def issue(self, request, destination: str) -> None:
+         transaction_id = request.id
+@@ -115,7 +134,8 @@ class FaydaOtpProvider:
+         # What the code was bound TO; verify() re-derives the hash from it.
+         request.otp_destination = destination
+         request.otp_provider = self.name
+-        await _publish(request, code, destination)
++        if not await _deliver(request, code, destination):
++            await _publish(request, code, destination)
+         _announce(request, code, destination, self.name)
  
      async def verify(self, request, code: str) -> None:
-@@ -201,10 +219,12 @@ class InternalOtpProvider:
+@@ -141,11 +161,10 @@ class FaydaOtpProvider:
+         request.otp_verified_at = datetime.now(timezone.utc)
  
-         await _publish(request, code, destination, "")
  
-+        if await _deliver(request, code, None):
-+            return
-         _logger.warning(
-             "[OTP] %s for subject '%s' (request %s) - the internal provider only "
-             "logs the code; no message was delivered.",
--            code, destination, request.id,
-+            _loggable(code), destination, request.id,
-         )
+-class InternalOtpProvider:
++class InternalOtpProvider(_DeliversWhenConfigured):
+     """A random code with no Fayda framing. The simplest thing that works."""
+ 
+     name = "internal"
+-    delivers = False
+ 
+     @staticmethod
+     def _hash(code: str, request_id: str) -> str:
+@@ -163,7 +182,8 @@ class InternalOtpProvider:
+         request.otp_channel = "log"
+         request.otp_destination = destination
+         request.otp_provider = self.name
+-        await _publish(request, code, destination)
++        if not await _deliver(request, code, destination):
++            await _publish(request, code, destination)
+         _announce(request, code, destination, self.name)
  
      async def verify(self, request, code: str) -> None:
+diff --git a/backend/src/openg2p_consent_manager/services/sms_length.py b/backend/src/openg2p_consent_manager/services/sms_length.py
+new file mode 100644
+index 0000000..ed25827
+--- /dev/null
++++ b/backend/src/openg2p_consent_manager/services/sms_length.py
+@@ -0,0 +1,17 @@
++"""One-SMS-part rule, identical to the OAN Messaging Service's check.
++
++OAN refuses text that does not fit one part, so the OTP text is measured before it is sent.
++"""
++
++GSM7_BASIC = frozenset(
++    "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?"
++    "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà"
++)
++GSM7_EXTENSION = frozenset("^{}\\[~]|€\f")
++
++
++def fits_one_sms(text: str) -> bool:
++    """Same rule OAN enforces: 160 GSM-7 septets (extension chars = 2), else 70 UTF-16."""
++    if all(c in GSM7_BASIC or c in GSM7_EXTENSION for c in text):
++        return sum(2 if c in GSM7_EXTENSION else 1 for c in text) <= 160
++    return len(text.encode("utf-16-le")) // 2 <= 70
 diff --git a/backend/tests/test_oan_otp_delivery.py b/backend/tests/test_oan_otp_delivery.py
 new file mode 100644
-index 0000000..8d2b709
+index 0000000..5900592
 --- /dev/null
 +++ b/backend/tests/test_oan_otp_delivery.py
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,173 @@
 +"""OTP delivery through the OAN Messaging Service (services/otp_delivery.py).
 +
 +The OAN API is an in-process httpx MockTransport shaped like contract 3.0.0. No network,
@@ -1046,6 +1170,7 @@ index 0000000..8d2b709
 +
 +    pip install pytest pytest-asyncio && pytest backend/tests -q
 +"""
++
 +import json
 +import types
 +from datetime import datetime, timedelta, timezone
@@ -1066,20 +1191,34 @@ index 0000000..8d2b709
 +        self.requests.append(request)
 +        body = json.loads(request.content)
 +        if self.code == 202:
-+            return httpx.Response(202, json={
-+                "id": "0b9f3a52-5c1e-4d55-9b7a-3f1c2a7e9d10",
-+                "idempotency_key": request.headers["Idempotency-Key"], "channel": "sms",
-+                "status": "accepted", "source_reference": body["source_reference"],
-+                "created_at": "2026-09-01T05:12:13Z", "expires_at": body["expires_at"]})
-+        return httpx.Response(self.code, json={"title": "x", "status": self.code, "errors": [],
-+                                               "code": "service_unavailable"},
-+                              headers={"content-type": "application/problem+json"})
++            return httpx.Response(
++                202,
++                json={
++                    "id": "0b9f3a52-5c1e-4d55-9b7a-3f1c2a7e9d10",
++                    "idempotency_key": request.headers["Idempotency-Key"],
++                    "channel": "sms",
++                    "status": "accepted",
++                    "source_reference": body["source_reference"],
++                    "created_at": "2026-09-01T05:12:13Z",
++                    "expires_at": body["expires_at"],
++                },
++            )
++        return httpx.Response(
++            self.code,
++            json={"title": "x", "status": self.code, "errors": [], "code": "service_unavailable"},
++            headers={"content-type": "application/problem+json"},
++        )
 +
 +
 +def request(**kw):
-+    base = dict(id="req-1", correlation_id=None, partner_id="partner-1",
-+                subject_id_value="FIN-1001", otp_channel=None,
-+                otp_expires_at=datetime.now(timezone.utc) + timedelta(seconds=300))
++    base = dict(
++        id="req-1",
++        correlation_id=None,
++        partner_id="partner-1",
++        subject_id_value="FIN-1001",
++        otp_channel=None,
++        otp_expires_at=datetime.now(timezone.utc) + timedelta(seconds=300),
++    )
 +    base.update(kw)
 +    return types.SimpleNamespace(**base)
 +
@@ -1095,6 +1234,7 @@ index 0000000..8d2b709
 +
 +    async def name(_pid):
 +        return "Awash Bank"
++
 +    monkeypatch.setattr(otp_delivery, "_partner_name", name)
 +    fake = FakeOan()
 +    monkeypatch.setattr(otp_delivery, "_transport", httpx.MockTransport(fake))
@@ -1117,8 +1257,9 @@ index 0000000..8d2b709
 +@pytest.mark.asyncio
 +async def test_reissue_is_a_new_key_and_data_release_differs(cfg):
 +    await otp_delivery.deliver_otp(request(), "111111")
-+    await otp_delivery.deliver_otp(request(otp_expires_at=datetime.now(timezone.utc)
-+                                           + timedelta(seconds=301)), "222222")
++    await otp_delivery.deliver_otp(
++        request(otp_expires_at=datetime.now(timezone.utc) + timedelta(seconds=301)), "222222"
++    )
 +    await otp_delivery.deliver_otp(request(correlation_id="corr-9"), "333333")
 +    keys = [r.headers["Idempotency-Key"] for r in cfg.requests]
 +    assert len(set(keys)) == 3
@@ -1146,6 +1287,198 @@ index 0000000..8d2b709
 +    monkeypatch.setattr(otp_delivery._config, "oan_delivery_enabled", False, raising=False)
 +    assert await otp_delivery.deliver_otp(request(), "482913") is None
 +    assert not cfg.requests
--- 
-2.54.0 (Apple Git-157)
-
++
++
++def test_full_text_names_the_partner_when_it_fits():
++    text = otp_delivery.render_otp_text("consent", "123456", "Awash Bank", 5)
++    assert "Awash Bank" in text and otp_delivery.fits_one_sms(text)
++
++
++@pytest.mark.parametrize("partner", ["ሙከራ ባንክ", "Awash ባንክ", "Bank “Abay”", "Bank \u2013 Oromia"])
++@pytest.mark.parametrize("kind", ["consent", "data_release"])
++def test_non_gsm_partner_name_falls_back_to_a_text_that_fits(kind, partner):
++    text = otp_delivery.render_otp_text(kind, "123456", partner, 30)
++    assert otp_delivery.fits_one_sms(text)
++    assert partner not in text and "123456" in text
++
++
++@pytest.mark.parametrize("kind", ["consent", "data_release"])
++def test_longest_ascii_partner_still_fits(kind):
++    partner = "W" * otp_delivery.PARTNER_MAX
++    text = otp_delivery.render_otp_text(kind, "12345678", partner, 30)
++    assert partner in text and otp_delivery.fits_one_sms(text)
++
++
++@pytest.mark.asyncio
++async def test_amharic_partner_otp_is_sent_and_fits(cfg, monkeypatch):
++    async def amharic(_pid):
++        return "ሙከራ ባንክ"
++
++    monkeypatch.setattr(otp_delivery, "_partner_name", amharic)
++    assert await otp_delivery.deliver_otp(request(), "123456")
++    body = json.loads(cfg.requests[0].content)
++    assert otp_delivery.fits_one_sms(body["text"]) and "123456" in body["text"]
++
++
++@pytest.mark.asyncio
++async def test_oan_refusal_is_a_visible_502(cfg):
++    cfg.code = 422
++    with pytest.raises(otp_provider.OtpError) as err:
++        await otp_delivery.deliver_otp(request(), "482913")
++    assert (err.value.status, err.value.reason) == (502, "otp_delivery_rejected")
++    assert len(cfg.requests) == 1  # a refusal is never retried
++
++
++@pytest.mark.asyncio
++async def test_non_https_base_url_is_a_configuration_error(cfg, monkeypatch):
++    monkeypatch.setattr(otp_delivery._config, "oan_base_url", "http://oan.example.invalid")
++    with pytest.raises(otp_provider.OtpError) as err:
++        await otp_delivery.deliver_otp(request(), "482913")
++    assert (err.value.status, err.value.reason) == (500, "otp_delivery_misconfigured")
++    assert not cfg.requests
+diff --git a/backend/tests/test_otp_sms.py b/backend/tests/test_otp_sms.py
+new file mode 100644
+index 0000000..1f1e5df
+--- /dev/null
++++ b/backend/tests/test_otp_sms.py
+@@ -0,0 +1,140 @@
++"""OTP consent codes delivered by SMS through the OAN Messaging Service.
++
++The real partner portal API and database (see conftest); the OAN Messaging API is an
++in-process fake (httpx MockTransport) shaped like contract 3.0.0. Test numbers only.
++"""
++
++import json
++
++import httpx
++import pytest
++from test_assisted_consent import (  # noqa: F401 - fixtures
++    as_partner,
++    bank,
++    portal,
++    realm_key,
++    token,
++    upload,
++)
++from test_otp_consent import (  # noqa: F401 - fixtures
++    OTP,
++    backdate_last_send,
++    codes,
++    otp_body,
++    otp_config,
++    raise_request,
++)
++
++SUBJECT = "123456789012"  # the subject of request_body()
++PHONE = "0900000611"
++
++
++class FakeOan:
++    def __init__(self):
++        self.code, self.requests = 202, []
++
++    def __call__(self, request):
++        self.requests.append(request)
++        body = json.loads(request.content)
++        if self.code == 202:
++            return httpx.Response(
++                202,
++                json={
++                    "id": "0b9f3a52-5c1e-4d55-9b7a-3f1c2a7e9d10",
++                    "idempotency_key": request.headers["Idempotency-Key"],
++                    "channel": "sms",
++                    "status": "accepted",
++                    "source_reference": body["source_reference"],
++                    "created_at": "2026-09-01T05:12:13Z",
++                    "expires_at": body["expires_at"],
++                },
++            )
++        return httpx.Response(
++            self.code,
++            json={"title": "x", "status": self.code, "errors": [], "code": "service_unavailable"},
++            headers={"content-type": "application/problem+json"},
++        )
++
++
++@pytest.fixture
++def oan(monkeypatch, otp_config):  # noqa: F811 - the fixture imported above
++    """OAN delivery on, the log harness off: the SMS is the only way the code travels."""
++    from openg2p_consent_manager.services import otp_delivery
++
++    monkeypatch.setattr(otp_config, "otp_log_codes", False)
++    monkeypatch.setattr(otp_config, "oan_delivery_enabled", True)
++    monkeypatch.setattr(otp_config, "oan_base_url", "https://oan-messaging.example.invalid")
++    monkeypatch.setattr(otp_config, "oan_token", "oanmsg_" + "t" * 43)
++    monkeypatch.setattr(otp_config, "oan_max_attempts", 1)
++    monkeypatch.setattr(otp_config, "oan_otp_phone_map", json.dumps({SUBJECT: PHONE}))
++    fake = FakeOan()
++    monkeypatch.setattr(otp_delivery, "_transport", httpx.MockTransport(fake))
++    return fake
++
++
++def sms_bodies(fake):
++    return [json.loads(r.content) for r in fake.requests]
++
++
++def test_raise_sends_the_code_by_sms(portal, as_partner, bank, codes, oan):  # noqa: F811
++    req = raise_request(as_partner(bank.audience))
++    (body,) = sms_bodies(oan)
++    assert body["recipient"] == PHONE and body["purpose"] == "otp"
++    assert codes[-1] in body["text"]
++    assert body["source_reference"] == f"dpi-consent:{req['id']}:otp-consent"
++
++
++def test_the_sms_code_grants_the_consent(portal, as_partner, bank, codes, oan):  # noqa: F811
++    pc = as_partner(bank.audience)
++    req = raise_request(pc)
++    code = next(w for w in sms_bodies(oan)[0]["text"].split() if w.isdigit() and len(w) == 6)
++    status, consent = pc("POST", f"{OTP}/{req['id']}/verify-otp", json={"otp": code})
++    assert status == 201, consent
++    assert consent["status"] == "active" and consent["consent_request_id"] == req["id"]
++
++
++def test_resend_is_a_new_sms_with_a_new_key(portal, as_partner, bank, codes, oan, run):  # noqa: F811
++    pc = as_partner(bank.audience)
++    req = raise_request(pc)
++    backdate_last_send(run, req["id"])
++    status, body = pc("POST", f"{OTP}/{req['id']}/resend-otp")
++    assert status == 200, body
++    first, second = oan.requests
++    assert first.headers["Idempotency-Key"] != second.headers["Idempotency-Key"]
++    assert codes[-1] in json.loads(second.content)["text"]
++
++
++def test_unreachable_oan_refuses_the_request(portal, as_partner, bank, codes, oan):  # noqa: F811
++    oan.code = 503
++    status, body = as_partner(bank.audience)("POST", OTP, json=otp_body())
++    assert status == 503 and body["error"] == "otp_delivery_unavailable"
++
++
++def test_unknown_subject_phone_is_a_visible_422(
++    portal,  # noqa: F811
++    as_partner,  # noqa: F811
++    bank,  # noqa: F811
++    codes,  # noqa: F811
++    oan,
++    otp_config,  # noqa: F811
++    monkeypatch,
++):
++    monkeypatch.setattr(otp_config, "oan_otp_phone_map", "{}")
++    status, body = as_partner(bank.audience)("POST", OTP, json=otp_body())
++    assert status == 422 and body["error"] == "otp_destination_unknown"
++    assert oan.requests == []
++
++
++def test_delivery_switched_on_without_a_token_issues_nothing(
++    portal,  # noqa: F811
++    as_partner,  # noqa: F811
++    bank,  # noqa: F811
++    codes,  # noqa: F811
++    oan,
++    otp_config,  # noqa: F811
++    monkeypatch,
++):
++    monkeypatch.setattr(otp_config, "oan_token", "")
++    status, body = as_partner(bank.audience)("POST", OTP, json=otp_body())
++    assert status == 503 and body["error"] == "otp_unavailable"
++    assert codes == [] and oan.requests == []

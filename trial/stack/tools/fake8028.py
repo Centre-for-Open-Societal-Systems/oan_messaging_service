@@ -32,6 +32,8 @@ SECRET = os.environ["FAKE8028_CLIENT_SECRET"]
 CALLBACK_URL = os.environ.get(
     "FAKE8028_CALLBACK_URL", "https://oan-receipts:8443/sms-status-receiver/v1/update-status"
 )
+if not CALLBACK_URL.startswith("https://"):
+    raise SystemExit("FAKE8028_CALLBACK_URL must be an https URL")
 CALLBACK_SECRET = os.environ["FAKE8028_CALLBACK_SECRET"]
 CALLBACK_DELAY = float(os.environ.get("FAKE8028_CALLBACK_DELAY", "1.0"))
 MODE = os.environ.get("FAKE8028_MODE", "ok")  # ok | http503 | http401
@@ -52,22 +54,31 @@ def callback(sms_id: str, phone: str) -> None:
 def send_status(sms_id: str, phone: str, status: str) -> None:
     ctx = ssl.create_default_context(cafile=f"{CERTS}/ca.crt")
     ctx.load_cert_chain(f"{CERTS}/callback-client.crt", f"{CERTS}/callback-client.key")
-    body = json.dumps({
-        "clientSecret": CALLBACK_SECRET,
-        "sms_id": int(sms_id),  # 8028 may send it as a number (guide 8.1)
-        "phone_number": "251" + phone[1:],  # international form in callbacks (guide 5.3)
-        "status": status,
-        "event_time": (datetime.now(UTC) + EAT).strftime("%Y-%m-%d %H:%M:%S"),
-    }).encode()
-    req = urllib.request.Request(CALLBACK_URL, data=body, method="POST",
-                                 headers={"Content-Type": "application/json",
-                                          "Accept": "application/json"})
+    body = json.dumps(
+        {
+            "clientSecret": CALLBACK_SECRET,
+            "sms_id": int(sms_id),  # 8028 may send it as a number (guide 8.1)
+            "phone_number": "251" + phone[1:],  # international form in callbacks (guide 5.3)
+            "status": status,
+            "event_time": (datetime.now(UTC) + EAT).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    ).encode()
+    req = urllib.request.Request(  # noqa: S310 - CALLBACK_URL is checked to be https at start
+        CALLBACK_URL,
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
     for attempt in range(5):
         try:
+            # nosemgrep: dynamic-urllib-use-detected -- fixed https callback URL (checked at start)
             with urllib.request.urlopen(req, context=ctx, timeout=5) as r:  # noqa: S310
                 ok = json.loads(r.read()).get("success") is True
-                print(f"fake8028 callback sms_id={sms_id} status={status} http={r.status} "
-                      f"success={ok}", flush=True)
+                print(
+                    f"fake8028 callback sms_id={sms_id} status={status} http={r.status} "
+                    f"success={ok}",
+                    flush=True,
+                )
                 return
         except Exception as exc:  # retry like a gateway would
             print(f"fake8028 callback sms_id={sms_id} error={type(exc).__name__}", flush=True)
@@ -105,12 +116,24 @@ class Gateway(BaseHTTPRequestHandler):
             return self.reply(400, {"success": False, "message": "invalid request"})
         sms_id = str(next(IDS))
         with LOCK:
-            INBOX.append({"sms_id": sms_id, "phone": phones[0], "text": text,
-                          "pushdatetime": str(body.get("pushdatetime")),
-                          "received_at": datetime.now(UTC).isoformat()})
+            INBOX.append(
+                {
+                    "sms_id": sms_id,
+                    "phone": phones[0],
+                    "text": text,
+                    "pushdatetime": str(body.get("pushdatetime")),
+                    "received_at": datetime.now(UTC).isoformat(),
+                }
+            )
         print(f"fake8028 accepted sms_id={sms_id} chars={len(text)}", flush=True)
-        self.reply(201, {"success": True, "message": "SMS records queued successfully.",
-                         "data": [{"phone_number": phones[0], "sms_id": sms_id}]})
+        self.reply(
+            201,
+            {
+                "success": True,
+                "message": "SMS records queued successfully.",
+                "data": [{"phone_number": phones[0], "sms_id": sms_id}],
+            },
+        )
         threading.Thread(target=callback, args=(sms_id, phones[0]), daemon=True).start()
 
 

@@ -1,5 +1,10 @@
 # OAN Messaging integration trial: Credit (A2C) and DPI Consent Manager
 
+> **Historical record (15 November 2026).** The trial patches described here are now the
+> integration kits in `integrations/kits/`, rebased on later module commits and
+> re-tested on 17 November 2026; see each kit's README. Paths below are those of the
+> original trial workspace.
+
 15 November 2026. Prepared by the OAN Messaging project. Status: **Review**: trial evidence and patches for the
 owning teams. The patches live on local branches; nothing was pushed, deployed or sent to
 a real phone.

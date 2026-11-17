@@ -35,7 +35,7 @@ Inside `a2c-bench`:
    `bench set-config -g redis_queue redis://a2c-redis-queue:6379` and
    `bench set-config -g redis_socketio redis://a2c-redis-cache:6379`.
 2. `bench get-app` for `/repos/oan_auth_service`, `/repos/oan_messaging_connector` and
-   `/repos/oan_a2c_service` (branch `oan-messaging-sms`).
+   `/repos/oan_a2c_service` (with the Credit kit applied; see `trial/repos/README.md`).
 3. `bench new-site a2c.trial`, then install `oan_a2c` and `oan_messaging_connector`.
 4. `set-config oan_messaging_enabled / _base_url https://oan-api:8000 / _token /
    _ca_bundle`.

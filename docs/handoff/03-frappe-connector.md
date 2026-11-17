@@ -4,7 +4,7 @@ A reusable Frappe app that every Frappe module installs to send notices through 
 owns everything that is the same for all callers, so each module only adds its texts and
 its call sites.
 
-* **Status:** trial build, 34 tests passing; trial-tested end to end with Credit on
+* **Status:** trial build, 40 tests passing; trial-tested end to end with Credit on
   Frappe 16.56.0 and Python 3.14. Meets the checks of the OAN Frappe apps (pre-commit,
   Semgrep with the shared rules, pip-audit; report in `docs/evidence/`). Not released.
   MIT licence, as for other OAN services.
@@ -25,6 +25,7 @@ its call sites.
 | **OAN Messaging Settings** (single doctype) | Enabled, base URL, caller token (Password field), CA bundle, HTTP attempts, receipt window, content retention (days); hook purpose and expiry (used only by the `send_sms` hook, §7) |
 | `purge_content` | Daily: on finished rows older than the retention period (default 7 days), clears the text and masks the recipient. Delivery metadata stays. |
 | `queue_sms(...)` | The call your module makes (preferred) |
+| `send_now.send_sms_now(...)` | Sends one SMS at once without the outbox, for OTPs (the Auth kit uses it); errors are the client's, re-exported |
 | `sms_hook.send_sms` | Opt-in Frappe `send_sms` hook for modules that already use Frappe's SMS sender (§7) |
 | `dispatch_queued` | Runs right after your transaction commits, plus every minute as a safety net. `FOR UPDATE SKIP LOCKED` and one commit per row, so it is safe with several workers. |
 | `poll_statuses` | Every minute: GET on rows whose poll is due (backoff 1 min, capped at 6 h). Never resends. |
@@ -259,5 +260,4 @@ removes this compromise.
 | Limit | Plan |
 |---|---|
 | SMS only | Telegram support can be added the same way when a Frappe module needs it |
-| No send-now helper for OTPs | Add `send_otp_now()`, which keeps the text only in job arguments, for Auth |
 | Polling stops at 7 days for SMS (configurable) | Matches the receipt window |

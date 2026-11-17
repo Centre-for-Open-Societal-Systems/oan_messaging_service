@@ -2,9 +2,10 @@
 
 | | |
 |---|---|
-| **Pattern** | Frappe connector ([03](03-frappe-connector.md)): explicit `queue_sms` calls (**preferred**, §3). Interim option: the connector's `send_sms` hook (**supported**, §6). |
-| **Status** | Designed; **not built**. The connector and the Credit patch are the reference implementation. |
-| **Today** | SMS goes through Frappe core `_send_sms` from `services/notifications.py` (`_send_sms_row`), with no idempotency key, no expiry and no delivery status. Reviewed at `7118e82` and `4d03412`. |
+| **Pattern** | Frappe connector ([03](03-frappe-connector.md)): explicit `queue_sms` calls (**preferred**, §3). Interim option before the kit is merged: the connector's `send_sms` hook (**supported**, §6). |
+| **Status** | **Kit built and tested**: lint and Semgrep clean, 28 notification tests, full Grievance suite unchanged |
+| **Code** | Kit `code/kits/oan_grievance_service/` (one patch on `develop` `5bb42c4`, with its README) |
+| **Today** | SMS goes through Frappe core `_send_sms` from `services/notifications.py` (`_send_sms_row`), with no idempotency key, no expiry and no delivery status. Reviewed at `4d03412` and `5bb42c4`. |
 
 ![Grievance flow](diagrams/12-grievance.png)
 
@@ -31,35 +32,42 @@ step changes.**
 | # | Step | Owner | Done when |
 |---|---|---|---|
 | 1 | Install `oan_messaging_connector`; add it to `required_apps` | Grievance dev | App installed on every Grievance site |
-| 2 | In `_send_sms_row`, replace core `_send_sms([mobile], text)` with `queue_sms(recipient=…, text=row.message, purpose="transactional", source_reference=f"grievance:{gid}:{row.event}", reference_doctype="Grievance Notification Log", reference_name=row.name, event=row.event, language=row.language)` | Grievance dev | No call to core `_send_sms` remains for SMS rows |
-| 3 | Add a Link field `oan_message` (to **OAN Message**) to Grievance Notification Log, and the status options **Queued with OAN** and **Failed**. Set **Queued with OAN** when `queue_sms` returns a name, **Failed** when it returns `None`. Show the connector's Desk status and OAN status (from the linked OAN Message) beside it; never show "Sent" or "Submitted" before the OAN Message itself is Submitted. | Grievance dev | The Desk shows the connector status, never "Sent" on acceptance |
+| 2 | Apply the kit (`git am code/kits/oan_grievance_service/*.patch`). With OAN configured on the site, `_send_sms_row` calls `queue_sms(recipient=…, text=…, purpose="transactional", source_reference=f"grievance:{grievance}:{event}", reference_doctype="Grievance Notification Log", reference_name=row.name, event=row.event, language=row.language)`; without OAN, Frappe's sender as before | Grievance dev | The 28 notification tests pass |
+| 3 | Included in the kit: Grievance Notification Log gets the read-only link **OAN Message** and the status **Queued with OAN** (set when `queue_sms` returns a name; **Failed** with the reason when it returns `None`). The linked OAN Message shows Submitted, sent and delivered. | Grievance dev | The Desk never shows "Sent" on hand-over |
 | 4 | Key, outcome handling, polling, stop rules | **Covered by the connector** | — |
 | 5 | Template inventory. `anonymity_disclosure_requested` (204 characters) must be shortened; 7 of 12 English templates exceed 70, so their Amharic versions will too | Grievance content | Every template in every language fits one SMS with the longest real placeholders |
 | 6 | Normalise phones to an accepted form at send time (today they are only stripped) | Grievance dev | A bad number becomes a visible local failure |
 | 7 | Cut-over per site using `oan_messaging_enabled`. Drain Queued SMS rows first. Rollback: disable the connector; rows already Submitted stay with OAN (never resend them) | Grievance and DevOps | Runbook written |
-| 8 | OAN operator registers caller `grievance` (sms, transactional) and issues a token; set site config | OAN ops, DevOps | Rows reach Submitted |
+| 8 | OAN operator registers caller `grievance` (sms; `transactional`, plus `otp` for Auth's reset codes on this site) and issues a token; set site config | OAN ops, DevOps | Rows reach Submitted |
 | 9 | Acceptance: QA cases GR-01 to GR-15 and COMMON cases | QA | Evidence recorded |
 
-## 4. Sketch of the change (not run: the Grievance repository was not modified)
+## 4. How the kit does it
 
 ```python
-from oan_messaging_connector.api import queue_sms
+def _send_sms_row(row, grievance):
+    mobile = _deliverable_mobile(row.recipient, grievance)
+    if _oan_enabled():  # oan_messaging_connector configured on this site
+        return _queue_with_oan(row, mobile, strip_html_tags(row.message))
+    ...  # otherwise Frappe's own sender and its fail-closed checks, unchanged
 
-def _send_sms_row(row, mobile):
-    name = queue_sms(
-        recipient=normalise_et_mobile(mobile),
-        text=row.message,
-        purpose="transactional",
-        source_reference=f"grievance:{row.grievance}:{row.event}",
-        reference_doctype="Grievance Notification Log",
-        reference_name=row.name,
-        event=row.event,
-        language=row.language,
-    )
-    if name is None:
-        return mark_failed(row, "oan_not_queued")       # see the Error Log for why
-    row.db_set({"status": "Queued with OAN", "oan_message": name})
+
+def _queue_with_oan(row, mobile, text):
+    name = queue_sms(recipient=mobile, text=text, purpose="transactional",
+                     source_reference=f"grievance:{row.grievance}:{row.event}",
+                     reference_doctype="Grievance Notification Log", reference_name=row.name,
+                     event=row.event, language=row.language)
+    if not name:  # e.g. longer than one SMS part; the reason is in the Error Log
+        raise ValueError("OAN Messaging did not queue the SMS; see the Error Log for the reason.")
+    return {"status": "Queued with OAN", "oan_message": name}
 ```
+
+`dispatch_queued` stores the returned status and link on the row, or **Failed** with the
+error. The ticket form counts **Queued with OAN** as a way the complainant was reached.
+
+**Evidence (17 November 2026):** Grievance pre-commit and Semgrep clean; 28 notification
+tests pass (4 new); full suite 1,221 tests with the kit and 1,217 without, and every
+failure with the kit also fails without it (PDF export tests on a bench without a PDF
+library, and temporary-password tests).
 
 ## 5. Why explicit calls, not only the hook
 
@@ -75,11 +83,11 @@ OAN with one line. It is supported, but it is not the target, because Grievance 
 * share **one purpose and expiry** with every other `_send_sms` caller on the site,
   including Auth's reset OTPs.
 
-The explicit change in §3 and §4 removes all four.
+The kit (§3 and §4) removes all four.
 
 ## 6. Interim option: the `send_sms` hook
 
-Use it only if the explicit change cannot ship first. Details, settings and behaviour:
+Use it only if the kit cannot ship first. Details, settings and behaviour:
 [03 §7](03-frappe-connector.md).
 
 | # | Step | Owner | Done when |
@@ -95,7 +103,8 @@ Use it only if the explicit change cannot ship first. Details, settings and beha
 `_send_sms_row` needs **no code change** for the hook: with a hook registered it skips
 its gateway and SMS Log checks and treats the hook's exception as "not sent". The
 connector's tests run this logic (from `develop` `4d03412`) against the hook: accepted,
-refused, and connector disabled.
+refused, and connector disabled. Once the kit is merged, remove the hook line: with OAN
+configured the kit's explicit path is used and the hook is never reached.
 
 ## 7. Decisions Grievance owns
 

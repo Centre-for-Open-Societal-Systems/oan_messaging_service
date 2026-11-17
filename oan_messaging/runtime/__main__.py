@@ -146,6 +146,7 @@ async def run(
                 )
                 # The token is shown exactly once, alone on stdout, for the caller's secret
                 # store. The id is not secret: record it to revoke this token later.
+                # nosemgrep: python-logger-credential-disclosure -- the id is public
                 log.info(
                     "credential issued caller_id=%s credential_id=%s", opts.caller, credential_id
                 )
@@ -163,6 +164,7 @@ async def run(
                         sf, opts.caller, uuid.UUID(opts.credential), now
                     ):
                         raise ValueError("no such active credential for this caller")
+                    # nosemgrep: python-logger-credential-disclosure -- the id is public
                     log.info(
                         "credential revoked caller_id=%s credential_id=%s",
                         opts.caller,
@@ -170,6 +172,7 @@ async def run(
                     )
                 else:
                     count = await revoke_credentials(sf, opts.caller, now)
+                    # nosemgrep: python-logger-credential-disclosure -- a count, no secret
                     log.info("all credentials revoked caller_id=%s count=%s", opts.caller, count)
                 return
             if component == "status":

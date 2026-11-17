@@ -1,6 +1,6 @@
 """Helpers for the local integration trial (host side). Talks only to 127.0.0.1.
 
-    python stack/tools/trial.py smoke
+python stack/tools/trial.py smoke
 """
 
 from __future__ import annotations
@@ -24,10 +24,24 @@ INBOX = "http://127.0.0.1:18028/inbox"
 
 def runtime(*args: str) -> str:
     """Run an OAN operator command in the trial stack; returns stdout."""
-    out = subprocess.run(
-        ["docker", "compose", "run", "--rm", "-T", "oan-api", "python", "-m",
-         "oan_messaging.runtime", *args],
-        cwd=STACK, capture_output=True, text=True, check=True, timeout=120,
+    out = subprocess.run(  # noqa: S603 - fixed command; args are operator subcommands
+        [  # noqa: S607 - local trial: docker from PATH
+            "docker",
+            "compose",
+            "run",
+            "--rm",
+            "-T",
+            "oan-api",
+            "python",
+            "-m",
+            "oan_messaging.runtime",
+            *args,
+        ],
+        cwd=STACK,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=120,
     )
     return out.stdout.strip()
 
@@ -57,8 +71,12 @@ def wait_inbox(phone: str, count: int = 1, timeout: float = 30) -> list[dict[str
 
 
 def status(token: str, mid: str) -> dict[str, Any]:
-    r = httpx.get(f"{API}/api/v1/messages/{mid}", verify=CA,
-                  headers={"Authorization": f"Bearer {token}"}, timeout=10)
+    r = httpx.get(
+        f"{API}/api/v1/messages/{mid}",
+        verify=CA,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
     r.raise_for_status()
     return dict(r.json())
 
@@ -81,19 +99,29 @@ def smoke() -> None:
     token = onboard("smoke", "otp,transactional")
     clear_inbox()
     phone = "0900000501"
-    body = {"recipient": phone, "text": "Smoke test code 123456. It expires in 5 minutes.",
-            "source_reference": "smoke:1", "purpose": "otp",
-            "expires_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat()}
-    r = httpx.post(f"{API}/api/v1/messages/sms", json=body, timeout=10, verify=CA,
-                   headers={"Authorization": f"Bearer {token}",
-                            "Idempotency-Key": str(uuid.uuid4())})
+    body = {
+        "recipient": phone,
+        "text": "Smoke test code 123456. It expires in 5 minutes.",
+        "source_reference": "smoke:1",
+        "purpose": "otp",
+        "expires_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+    }
+    r = httpx.post(
+        f"{API}/api/v1/messages/sms",
+        json=body,
+        timeout=10,
+        verify=CA,
+        headers={"Authorization": f"Bearer {token}", "Idempotency-Key": str(uuid.uuid4())},
+    )
     assert r.status_code == 202, r.text
     mid = r.json()["id"]
     got = wait_inbox(phone)
     assert got[-1]["text"] == body["text"]
     final = wait_status(token, mid, "delivered")
-    print(f"smoke ok: accepted -> gateway (sms_id {got[-1]['sms_id']}) -> "
-          f"{final['status']} (final={final['final']})")
+    print(
+        f"smoke ok: accepted -> gateway (sms_id {got[-1]['sms_id']}) -> "
+        f"{final['status']} (final={final['final']})"
+    )
     print("ops alerts:", ops_status()["alerts"])
 
 

@@ -60,7 +60,7 @@
 | RP-D6 | Who runs RapidPro (version, upgrades, backups) | ATI DevOps | ATI DevOps or the RapidPro platform owner |
 | OQ-08 | Verification for status checks | ATI | Linked Farmer ID (§6.7) proposed; MOD-06/07 deferred until decided |
 | ID-01 | Registered phone lookup for OTPs (Consent Manager, Telegram linking) | Identity owner, DPI | Beneficiary API route, its access rules and what to do when there is no phone |
-| ID-02 | Auth linking routes and which Auth site hosts them | Auth | New service-client routes; caller naming (`auth-<site>` proposed) |
+| ID-02 | Auth linking routes and which Auth site hosts them | Auth | New service-client routes; they send with the hosting site's caller, which must allow `otp` |
 | ID-03 | DA backend data and routes D1–D7, R1–R4 | DA backend | Build them; until then the bot uses a stub with the same fields |
 | ID-04 | Registry kebele code | Identity owner, registry | The beneficiary API returns the Master Data kebele code (the registry holds names today, which are not unique) |
 | ID-05 | Who sets leave | DA team | The agent in the DA app, or their supervisor |

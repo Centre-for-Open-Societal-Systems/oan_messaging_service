@@ -26,11 +26,11 @@ defined yet; every host shown is an `example.invalid` placeholder.
 
 | Module | Stack | Pattern | What it sends | Status today | Guide |
 |---|---|---|---|---|---|
-| **Credit (A2C)** | Frappe v16 | Frappe connector | Application submitted, stage changes, approval, rejection, disbursal, agent visits | **Patch built and trial-tested** end to end | [10](10-credit-a2c.md) |
-| **DPI Consent Manager** | FastAPI | OTP sender | Consent and data-release OTPs; consent notices (later) | **Patch built and trial-tested** end to end | [11](11-dpi-consent.md) |
-| **Grievance** | Frappe | Frappe connector | 12 grievance notices (received, updates, closure, ...) | Designed; not built | [12](12-grievance.md) |
-| **DA Services** | Frappe | Frappe connector | Visit planned and rescheduled (farmer, development agent) | Designed; not built (no SMS sender today) | [13](13-da-services.md) |
-| **Auth** | Frappe | OTP sender | Password-reset OTP | Designed; not built | [14](14-auth.md) |
+| **Credit (A2C)** | Frappe v16 | Frappe connector | Application submitted, stage changes, approval, rejection, disbursal, agent visits | **Kit built and tested** (`code/kits/`); end to end | [10](10-credit-a2c.md) |
+| **DPI Consent Manager** | FastAPI | OTP sender | Consent and data-release OTPs; consent notices (later) | **Kit built and tested** (`code/kits/`); end to end | [11](11-dpi-consent.md) |
+| **Grievance** | Frappe | Frappe connector | 12 grievance notices (received, updates, closure, ...) | **Kit built and tested** (`code/kits/`) | [12](12-grievance.md) |
+| **DA Services** | Frappe | Frappe connector | Visit planned and rescheduled, to the farmer when the agent ticks the box | **Kit built and tested** (`code/kits/`) | [13](13-da-services.md) |
+| **Auth** | Frappe | OTP sender | Password-reset OTP | **Kit built and tested** (`code/kits/`); end to end | [14](14-auth.md) |
 | **eSignet** | eSignet (Java) | OTP sender | Login OTP for Farmer ID | Designed; eSignet team implements | [15](15-esignet.md) |
 | Telegram (OAN endpoint) | none in Phase 1 | Direct API (Telegram) | Not used in Phase 1 | **Closed:** the Telegram bot runs on RapidPro and is not an OAN caller | [16](16-telegram.md) |
 | Farmer registry API, VeriFayda | no code yet | OTP sender / notices | e-voucher notices; verification OTPs (expected) | Repositories empty | [11 §7](11-dpi-consent.md#7-farmer-registry-api-and-verifayda) |
@@ -69,7 +69,7 @@ access to anyone's disk:
 | Sample code | `code/examples/` | One reference implementation per module (Credit, Consent Manager, Grievance, DA, Auth, eSignet), a generic outbox, 12 JSON request/response/error bodies. See its README. |
 | Local trial | `trial/` | The OAN service source (clean export, in review) with its tests, the trial stack with a fake 8028, and end-to-end tests for Credit and Consent Manager. Start with `trial/README.md`. |
 | Frappe connector | `code/oan_messaging_connector.tar.gz` (source) and `.bundle` (git history, branch `develop`) | `bench get-app` from the unpacked folder or the bundle |
-| Module patches | `code/patches/oan_a2c_service/`, `code/patches/consent-management/` | `git am` onto the base commits named in guides 10 and 11 |
+| Integration kits | `code/kits/<module>/` | One patch per module (Credit, Consent Manager, Auth, Grievance, DA) with its README: `git am` onto the base commit it names. Start with `code/kits/README.md`. |
 | QA catalogue | `code/06-qa-cases.csv` | The case IDs cited in each guide |
 | Channels Specification | `CHANNELS-SPEC/OAN_Channels_Specification_v2.0.docx` | The design: SMS and Telegram together |
 
@@ -84,7 +84,7 @@ to end.
 |---|---|
 | `code/openapi.yaml` | `docs/openapi.yaml` |
 | `code/oan_client/`, `code/examples/` | `examples/oan_client/`, `examples/` (JSON bodies: `docs/integrations/examples/`) |
-| `code/patches/` | `integrations/patches/` |
+| `code/kits/` | `integrations/kits/` |
 | `code/06-qa-cases.csv` | `docs/handoff/qa-cases.csv` |
 | `code/oan_messaging_connector.*` | the separate `oan_messaging_connector` repository |
 | `trial/oan_messaging_services-msg08/` | the repository root |

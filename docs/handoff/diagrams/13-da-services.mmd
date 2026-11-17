@@ -1,8 +1,9 @@
-%% DA Services: visit planned / rescheduled
+%% DA Services: farmer SMS for planned / rescheduled visits (kit)
 flowchart TB
-  P1["plan visit call site"] --> EV["new event_id<br/>(planned / rescheduled)"]
-  P2["reschedule call site<br/>(only if time really changed)"] --> EV
-  EV --> R["one message per recipient role<br/>(farmer, development agent)"]
-  R --> DL["deadline = min(visit start, now + 7 days - 5 min)<br/>computed once, stored"]
-  DL --> C[["queue_sms(purpose = transactional,<br/>expires_at = deadline,<br/>source_reference = da:visit:V-77:event_id)"]]
-  C --> OAN["OAN Messaging"] --> PH(["Phones"])
+  P1["plan_visit()<br/>new visit inserted"] --> T{"Notify farmer by SMS<br/>ticked?"}
+  P2["reschedule_visit()<br/>new visit created"] --> T
+  T -->|"no"| N["no SMS"]
+  T -->|"yes"| G["visit still open and in the future;<br/>farmer phone from DA Farmer Reference"]
+  G --> DL["deadline = min(visit start, now + 7 days - 5 min)"]
+  DL --> C[["queue_sms(purpose = transactional,<br/>expires_at = deadline,<br/>source_reference = da:visit:VISIT:planned or rescheduled)"]]
+  C --> OAN["OAN Messaging"] --> PH(["Farmer phone"])

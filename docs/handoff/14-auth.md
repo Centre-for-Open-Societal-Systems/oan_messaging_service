@@ -2,8 +2,9 @@
 
 | | |
 |---|---|
-| **Pattern** | OTP sender ([04](04-otp-senders.md)), from a Frappe post-commit job (**preferred**, §3). Interim option: the connector's `send_sms` hook (**supported**, §6). |
-| **Status** | Designed; **not built**. Reviewed at `34c7306`. |
+| **Pattern** | OTP sender ([04](04-otp-senders.md)), from a Frappe post-commit job (**preferred**, §3). Interim option before the kit is merged: the connector's `send_sms` hook (**supported**, §6). |
+| **Status** | **Kit built and tested**: lint and Semgrep clean, 7 tests, full Auth suite unchanged, end to end through OAN |
+| **Code** | Kit `code/kits/oan_auth_service/` (one patch on `develop` `34c7306`, with its README); connector `develop` `d4a5a5f` or later |
 | **Today** | `_deliver_reset_by_sms` enqueues Frappe core `_send_sms` after commit. The code lives only in the job arguments (no outbox), which is correct and stays that way. |
 
 ![Auth reset flow](diagrams/14-auth.png)
@@ -22,65 +23,49 @@ Auth keeps everything except the transport:
 
 The connector stores message text on its outbox row. The reset SMS **contains the
 code**, and Auth deliberately never stores a code in plain text. So Auth sends from its
-own post-commit job, with the text only in the job arguments. It can reuse the
-connector's **settings and client** without the outbox (see §4).
+own post-commit job, with the text only in the job arguments, and sends with the
+connector's `send_sms_now` (no outbox; see §4).
 
 ## 3. Integration steps
 
 | # | Step | Owner | Done when |
 |---|---|---|---|
-| 1 | **Issue step:** create `delivery_id` (UUID4), `issued_at`, `otp_expires_at = issued_at + TTL` and an opaque `reset_request_id`; pass them in the job arguments with the phone and the rendered text | Auth dev | Unit test |
-| 2 | **Replace the enqueue target:** an Auth-owned OAN send job (`queue="short"`, `enqueue_after_commit=True`) instead of `_send_sms`. Never both. | Auth dev | No `_send_sms` call left on this path |
-| 3 | **Configuration gate:** "OAN configured for this site" replaces `_sms_gateway_configured()`; when not configured, no send and an unchanged response | Auth dev | Test with OAN disabled |
-| 4 | **Job body:** `purpose="otp"`, `expires_at=otp_expires_at`, key `delivery_id`, `source_reference=f"auth:password-reset:{reset_request_id}"`; retry an uncertain outcome with the same key; never re-issue automatically | Auth dev | AUTH tests |
-| 5 | **TTL check:** refuse `password_reset_otp_ttl` above the 30-minute OTP ceiling at settings validation | Auth dev | Validation test |
-| 6 | **Recipient format:** OAN accepts only Ethiopian mobiles; decide whether to pre-check before issuing | Auth owners | Decision recorded |
-| 7 | **Logging:** only `reset_request_id`, the OAN id and error codes. Never the code or the phone. | Auth dev | Log review |
-| 8 | **Credentials per site:** caller per site (`auth-a2c`, `auth-grievance`, …), **proposed**; token from a secret | OAN ops, DevOps | Tokens issued |
-| 9 | Acceptance: QA cases AUTH-01 to AUTH-14 | QA | Evidence recorded |
+| 1 | Apply the kit (`git am code/kits/oan_auth_service/*.patch`) | Auth dev | `run-tests --app oan_auth_service`: the 7 new tests pass, nothing else changes |
+| 2 | Install `oan_messaging_connector` (`d4a5a5f` or later) on the sites where reset codes should go through OAN. Auth does not require it: without it, Frappe's own sender is used as before | DevOps | Connector configured on the site |
+| 3 | The site's caller (for example `a2c`, `grievance`, `da`) must allow `otp` as well as `transactional`: Auth sends with that site's token | OAN ops | A reset produces an `otp` message |
+| 4 | Recipient format: OAN accepts only Ethiopian mobiles; decide whether to pre-check before issuing | Auth owners | Decision recorded |
+| 5 | Acceptance: QA cases AUTH-01 to AUTH-14 | QA | Evidence recorded |
 
-## 4. Sketch of the job (not run: the Auth repository was not modified)
+## 4. How the kit does it
+
+`_deliver_reset_by_sms` issues and hashes the code as before. When `reset_sms.oan_ready()`
+(the connector is installed and configured), it calls
+`reset_sms.enqueue_reset_sms(mobile_no, text, ttl)`, which enqueues one job after commit
+with a UUID4 `delivery_id`, an opaque `reset_request_id`, `issued_at` and `expires_at`
+(the code's TTL, capped at 30 minutes, OAN's OTP ceiling). The job:
 
 ```python
-import asyncio
-from datetime import datetime
-import frappe
-from oan_messaging_connector.outbox import _settings  # private today; a public settings()
-                                                      # or send_otp_now() is planned (22)
-from oan_messaging_connector.vendor.oan_client import (
-    ClientConfig, OanClient, OanUncertain, Secret, SmsDelivery)
-
-def send_reset_otp(delivery_id, reset_request_id, phone, text, issued_at, otp_expires_at):
-    s = _settings()
-    delivery = SmsDelivery(idempotency_key=delivery_id, recipient=phone, text=text,
-                           source_reference=f"auth:password-reset:{reset_request_id}",
-                           purpose="otp", expires_at=datetime.fromisoformat(otp_expires_at),
-                           first_submitted_at=datetime.fromisoformat(issued_at))
-    async def go():
-        cfg = ClientConfig(base_url=s["base_url"], token=Secret(s["token"]), ca_bundle=s["ca_bundle"])
-        async with OanClient(cfg) as client:
-            return await client.submit(delivery)
-    try:
-        sub = asyncio.run(go())
-        frappe.logger().info("reset OTP accepted reset_request_id=%s oan_id=%s", reset_request_id, sub.id)
-    except OanUncertain as e:              # timeout, 503, connection error (and its
-        requeue_later(not_before=e.retry_not_before)   # subclass OanRetryDeferred)
-    except ReconciliationRequired:         # guarantee window passed: never resubmit
-        frappe.logger().warning("reset OTP needs reconciliation reset_request_id=%s",
-                                reset_request_id)
-    except OanRejected as e:               # 4xx (includes OanConflict): never retry
-        frappe.logger().warning("reset OTP refused reset_request_id=%s code=%s",
-                                reset_request_id, e.code)
+submission = send_sms_now(
+    idempotency_key=delivery_id,
+    recipient=phone,
+    text=text,
+    source_reference=f"auth:password-reset:{reset_request_id}",
+    purpose="otp",
+    expires_at=datetime.fromisoformat(expires_at),
+    first_submitted_at=datetime.fromisoformat(issued_at),
+)
 ```
 
-Frappe's `enqueue` does **not** retry a failed job by itself. `requeue_later` (yours)
-enqueues the same job with the same arguments after a delay, and stops once
-`otp_expires_at` has passed. `retry_not_before` is `None` unless a
-gateway sent `Retry-After`; then wait about 30 seconds. Import `ReconciliationRequired`,
-`OanRejected` and `OanUncertain` from the same client module.
+* Accepted: an info log with `reset_request_id` and the OAN id.
+* Not configured, refused, or still uncertain after the client's same-key retries: an
+  Error Log entry with `reset_request_id` and a reason code. The job is not repeated; the
+  user can ask for a new code within the daily cap.
+* The code and the phone appear in no log. The requester's response never changes.
 
-A shared `send_otp_now()` helper in the connector is a planned follow-up
-([22](22-decisions-and-open-items.md)).
+**Evidence (17 November 2026):** Auth pre-commit (including gitleaks) and Semgrep clean;
+7 kit tests pass; full Auth suite 391 tests with the kit and 384 without, no failures; a
+real phone-only reset on the trial bench produced one `otp` message, one SMS at the
+gateway and no code in any log.
 
 ## 5. Why the explicit job, not only the hook
 
@@ -95,8 +80,9 @@ the reset OTP to OAN with no Auth change. It is supported, but it is not the tar
   inside the one job; it cannot requeue for later.
 * **No OAN id in Auth's log**, so a support question cannot be traced to one message.
 
-The explicit job in §3 and §4 sets `purpose="otp"`, `expires_at` from the code's TTL and
-a stable key, and logs the OAN id.
+The kit (§3 and §4) sets `purpose="otp"`, `expires_at` from the code's TTL and a stable
+key, and logs the OAN id. With the kit merged and OAN configured, the hook is never
+reached for reset codes.
 
 ## 6. Interim option: the `send_sms` hook
 
