@@ -1,6 +1,7 @@
 # Integration kits: validation report (17 November 2026)
 
-Five kits in `integrations/kits/`, one per module repository. Each was applied to the
+Six kits in `integrations/kits/`: a patch for each of five module repositories, and a
+Java sender for eSignet. Each was applied to the
 module's current branch head, checked with the module's own tooling, and tested with the
 module's full suite with and without the kit. Nothing was pushed to a module repository.
 
@@ -13,6 +14,7 @@ module's full suite with and without the kit. Nothing was pushed to a module rep
 | Auth `oan_auth_service` | `develop` `34c7306` | Clean | 7 passed | 391 passed / 384 passed | **Pass**: one `otp` SMS, no code in logs |
 | Grievance `oan_grievance_service` | `develop` `5bb42c4` | Clean | 29 notification tests passed (5 new) | 1,222 run / 1,217 run; every failure with the kit also fails without it | **Pass**: row Queued with OAN, SMS delivered |
 | DA Services `oan_da_app_services` | `develop` `ce156bf` | Clean | 8 passed | 930 passed / 922 passed | **Pass**: planned and rescheduled SMS delivered |
+| eSignet `OanOtpSender` (Java) | no source available | `javac -Xlint:all -Werror` clean | 13 passed | not applicable | **Pass**: accepted, same-key replay returned the same id, one SMS |
 
 Each base is the branch head on 17 November 2026, and each patch applies cleanly to it
 (`git am` on a fresh clone).
@@ -72,7 +74,8 @@ when it finishes.
 ## Not covered
 
 * The shared dev environment; the real 8028.
-* eSignet: the repository was not available.
+* eSignet's own code: its source was not available, so the kit is a sender for the
+  eSignet team to wire in, not a patch.
 * The Consent Manager on `develop` end to end: no image of that branch was available; its
   delivery module is the one tested end to end on `main`, and its 7 integration tests run
   the real API and database.

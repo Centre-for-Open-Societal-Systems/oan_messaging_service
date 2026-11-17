@@ -30,7 +30,7 @@ guide 03 §7.
 | `grievance` | Connector | transactional (+ otp for Auth) | 12 grievance notices (received, updates, closure) | Kit built and tested |
 | `da` | Connector | transactional (+ otp for Auth) | Visit planned and rescheduled, to the farmer when the agent ticks the box (agents are alerted on Telegram) | Kit built and tested |
 | The caller of the site Auth runs on | OTP sender (`send_sms_now`) | otp | Password-reset OTP (kit built, tested end to end); Telegram linking OTP (§6.6, designed) | Kit built and tested |
-| `esignet` | OTP sender | otp | Login OTP for Farmer ID | Designed; the eSignet team implements |
+| `esignet` | OTP sender | otp | Login OTP for Farmer ID | Java sender built and tested; the eSignet team wires it in |
 
 The OAN operator registers each caller, its channels and purposes, and issues its token
 (shown once). Tokens go straight into the caller's secret store.

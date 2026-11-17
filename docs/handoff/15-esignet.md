@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Pattern** | OTP sender ([04](04-otp-senders.md)) over plain HTTPS. eSignet is not Python; the Python example only illustrates the semantics. |
-| **Status** | Designed; **the eSignet team implements it**. OAN does not edit eSignet. |
+| **Status** | **Sender built and tested**: kit `code/kits/esignet/` (`OanOtpSender`, Java 17+, JDK only; 13 tests; end to end through OAN). **The eSignet team wires it in**; OAN does not edit eSignet. |
 | **Note** | No eSignet source was available. Field names marked *assumed* must be confirmed by the eSignet team. |
 
 ![eSignet flow](diagrams/15-esignet.png)
@@ -31,7 +31,7 @@
 
 | # | Step | Owner | Done when |
 |---|---|---|---|
-| 1 | At the existing delivery point, after the OTP state is stored, `POST /api/v1/messages/sms` instead of the current gateway. **Remove the old gateway call** for these OTPs. | eSignet | One sender only |
+| 1 | At the existing delivery point, after the OTP state is stored, call `OanOtpSender.send` (kit `code/kits/esignet/`) instead of the current gateway. **Remove the old gateway call** for these OTPs. | eSignet | One sender only |
 | 2 | Keep the key, the exact body and `expires_at` until expiry, for same-key retries | eSignet | Retry test |
 | 3 | Retry uncertain outcomes (timeout, 503 or other 5xx, a gateway 429, connection error) with the same key and body; never retry 401, 403, 409, 413, 415 or 422 | eSignet | Tests |
 | 4 | A user resend is a new OTP, a new sequence and a new key | eSignet | Test |

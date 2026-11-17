@@ -12,9 +12,10 @@ to a module repository.
 | [`oan_auth_service/`](oan_auth_service/) | Auth | `develop` `34c7306` | Password-reset codes | OTP sender, connector `send_sms_now` |
 | [`oan_grievance_service/`](oan_grievance_service/) | Grievance | `develop` `5bb42c4` | Every SMS row of the existing notification flow | Connector, `queue_sms` |
 | [`oan_da_app_services/`](oan_da_app_services/) | DA Services | `develop` `ce156bf` | Farmer SMS for planned and rescheduled visits | Connector, `queue_sms` |
+| [`esignet/`](esignet/) | eSignet (Java) | no source available | Login OTPs | OTP sender: `OanOtpSender`, a JDK-only Java class with tests |
 
-eSignet is not covered: its repository was not available. Guide 15 of the handoff pack
-describes the integration.
+The eSignet kit is not a patch: eSignet's source was not available, so it is the sender
+the eSignet team calls at its OTP delivery point (guide 15).
 
 ## Apply a kit
 

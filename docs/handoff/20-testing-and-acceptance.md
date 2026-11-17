@@ -92,4 +92,5 @@ Consent Manager cases are new here.
 | Auth kit | AUTH-01 end to end (one `otp` SMS, no code in logs); 7 kit tests; full Auth suite unchanged |
 | Grievance kit | GR-01 and GR-03 end to end (Queued with OAN, then delivered); GR-06 and GR-11 as tests; full suite unchanged |
 | DA kit | DA-01 and DA-02 end to end (planned and rescheduled SMS delivered); DA-03 to 06 as tests; full suite unchanged |
+| eSignet sender | 13 tests; end to end through OAN (accepted, same-key replay, one SMS) |
 | Not yet | Everything on the shared dev environment; CR-07, CR-08, CM-07 end to end; live 8028 cases |
