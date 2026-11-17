@@ -33,7 +33,9 @@ kit is one commit with a conventional title, so it passes the shared commit-titl
 1. `oan_messaging_connector` installed (`develop` at `4ad8507` or later). The Credit,
    Grievance and DA kits add it to `required_apps` and fetch it in the module's CI; until
    the connector is published under the organisation, set the repository variable
-   `OAN_MESSAGING_CONNECTOR_REPO` to a URL that CI can clone.
+   `OAN_MESSAGING_CONNECTOR_REPO` to a URL that CI can clone. The team is creating the
+   connector's shared repository: once it exists, set that variable to its URL in the
+   Credit, Grievance and DA repositories (or change the default URL in their `ci.yml`).
 2. The site's caller registered by the OAN operator, with the purposes the site sends:
    `transactional` for module notices, plus `otp` where the Auth kit sends reset codes
    (Auth runs on every module site and uses that site's token).
