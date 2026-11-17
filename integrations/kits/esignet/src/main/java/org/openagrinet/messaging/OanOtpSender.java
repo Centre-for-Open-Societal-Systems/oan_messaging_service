@@ -177,8 +177,38 @@ public final class OanOtpSender {
      * @throws InterruptedException when interrupted while waiting to retry
      */
     public Result send(OtpSms sms) throws InterruptedException {
-        String body = validateAndRender(sms);
-        HttpRequest request = HttpRequest.newBuilder(config.baseUrl().resolve("/api/v1/messages/sms"))
+        HttpRequest request = request(sms, validateAndRender(sms));
+        String last = "none";
+        for (int attempt = 1; attempt <= config.maxAttempts(); attempt++) {
+            Duration wait = config.backoff().multipliedBy(1L << (attempt - 1));
+            HttpResponse<String> response;
+            try {
+                response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            } catch (IOException e) {
+                response = null;
+                last = e.getClass().getSimpleName();
+            }
+            if (response != null) {
+                Result definite = definiteResult(response);
+                if (definite != null) {
+                    return definite;
+                }
+                last = "http_" + response.statusCode();
+                Duration retryAfter = retryAfter(response);
+                if (retryAfter != null && retryAfter.compareTo(config.maxRetryAfter()) > 0) {
+                    return new Uncertain(last + "_retry_after_too_long");
+                }
+                wait = longer(wait, retryAfter);
+            }
+            if (attempt < config.maxAttempts()) {
+                Thread.sleep(wait.toMillis());
+            }
+        }
+        return new Uncertain(last);
+    }
+
+    private HttpRequest request(OtpSms sms, String body) {
+        return HttpRequest.newBuilder(config.baseUrl().resolve("/api/v1/messages/sms"))
                 .timeout(config.readTimeout())
                 .header("Authorization", "Bearer " + config.token())
                 .header("Content-Type", "application/json")
@@ -186,38 +216,20 @@ public final class OanOtpSender {
                 .header("Idempotency-Key", sms.idempotencyKey())
                 .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                 .build();
-        String last = "none";
-        for (int attempt = 1; attempt <= config.maxAttempts(); attempt++) {
-            Duration wait = config.backoff().multipliedBy(1L << (attempt - 1));
-            try {
-                HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-                int status = response.statusCode();
-                if (status == 202 || status == 200) {
-                    Matcher id = MESSAGE_ID.matcher(response.body());
-                    if (!id.find()) {
-                        return new Uncertain("unexpected_response");
-                    }
-                    return new Accepted(id.group(1), status == 200);
-                }
-                if (!RETRYABLE.contains(status)) {
-                    return new Rejected(status);
-                }
-                last = "http_" + status;
-                Duration retryAfter = retryAfter(response);
-                if (retryAfter != null) {
-                    if (retryAfter.compareTo(config.maxRetryAfter()) > 0) {
-                        return new Uncertain(last + "_retry_after_too_long");
-                    }
-                    wait = retryAfter.compareTo(wait) > 0 ? retryAfter : wait;
-                }
-            } catch (IOException e) {
-                last = e.getClass().getSimpleName();
-            }
-            if (attempt < config.maxAttempts()) {
-                Thread.sleep(wait.toMillis());
-            }
+    }
+
+    /** Accepted or Rejected; null when the outcome is uncertain and worth retrying. */
+    private static Result definiteResult(HttpResponse<String> response) {
+        int status = response.statusCode();
+        if (status == 202 || status == 200) {
+            Matcher id = MESSAGE_ID.matcher(response.body());
+            return id.find() ? new Accepted(id.group(1), status == 200) : new Uncertain("unexpected_response");
         }
-        return new Uncertain(last);
+        return RETRYABLE.contains(status) ? null : new Rejected(status);
+    }
+
+    private static Duration longer(Duration a, Duration b) {
+        return b != null && b.compareTo(a) > 0 ? b : a;
     }
 
     private String validateAndRender(OtpSms sms) {
