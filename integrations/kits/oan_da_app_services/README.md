@@ -40,6 +40,7 @@ settings on each DA site.
 | Kit tests | 8 passed; DA's own visit tests 15 passed |
 | Full DA suite with the kit / without | 930 run, 0 failures / 922 run, 0 failures |
 | End to end on a DA site (`trial/stack/a2c/e2e/e2e_da.py`): a real `plan_visit` with the box ticked, then `reschedule_visit`, through the connector's after-commit job, OAN over HTTPS and the fake 8028 | Both messages `delivered`; the farmer received "will visit you on 18 Nov 2026 at 09:00" and then "has moved to 19 Nov 2026 at 10:30" |
+| Module CI simulated (`ci.yml` steps in a fresh bench, connector from `OAN_MESSAGING_CONNECTOR_REPO`) | Connector fetched and installed; no failure that the module does not already have without the kit |
 
 ## Decisions DA owns
 

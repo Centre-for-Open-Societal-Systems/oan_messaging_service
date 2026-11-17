@@ -96,11 +96,30 @@ cognitive complexity in the service internals and repeated literals in the contr
 examples; that code is under independent review and was not refactored for style. The
 eSignet sender's `send()` was split to bring it under the complexity limit.
 
+## Module CI, simulated (17 November 2026)
+
+Each module's `ci.yml` Install and Run Tests steps were run as written in a fresh bench,
+with `OAN_MESSAGING_CONNECTOR_REPO` pointing at a copy of the connector (as the repository
+variable will), then compared with the same steps on the module's upstream code on a fresh
+site. Differences from GitHub Actions: the database was the local MariaDB, and for Credit
+`bench build` was skipped (building Frappe `develop`'s assets ran out of memory locally).
+
+| Module | Connector fetched and installed by CI | Fresh-site result with the kit / without | Failures only with the kit |
+|---|---|---|---|
+| Credit | Yes | 308 run, 6 fail / 293 run, 6 fail | None; the 15 kit tests pass |
+| Grievance | Yes | 1,222 run, 45 fail / 1,217 run, 40 fail | None new in cause: the 5 kit tests use Grievance's own notification fixture, which already fails link validation on a fresh site for all 24 of Grievance's notification tests; on a seeded site all 29 pass |
+| DA | Yes | 930 run, 26 fail / 922 run, 26 fail | None; the 26 failures are the missing test geography, the same without the kit |
+
+So the CI change works once the variable is set (or the connector is published), and the
+kits add no new failures. The modules' CI already fails on a fresh site for their own
+reasons (test data not seeded, a PDF system library), which their teams own.
+
 ## Not covered
 
 * The shared dev environment; the real 8028.
-* The modules' own CI runs: they need the connector published under the organisation, or
-  `OAN_MESSAGING_CONNECTOR_REPO` set (a hand-off item for the COSS admins).
+* The modules' CI on GitHub itself: it needs the connector published under the
+  organisation, or `OAN_MESSAGING_CONNECTOR_REPO` set (a hand-off item for the COSS
+  admins); simulated above.
 * eSignet's own code: its source was not available, so the kit is a sender for the
   eSignet team to wire in, not a patch.
 * The Consent Manager on `develop` end to end: no image of that branch was available; its

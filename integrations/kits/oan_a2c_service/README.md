@@ -41,6 +41,7 @@ connector settings on each A2C site (see `../README.md`).
 | Kit tests | 15 passed |
 | Full A2C suite with the kit / without | 296 run, 7 fail / 281 run, 7 fail: the **same 7** pre-existing failures (`test_farmer_b2c` and loan-product checks), none from the kit |
 | End to end: `update_loan_status` (Verified, Approved, Disbursed), visit scheduled and cancelled, through the worker, OAN over HTTPS and the fake 8028 | 5 messages, each `delivered` after one poll, each reaching the gateway exactly once |
+| Module CI simulated (`ci.yml` steps in a fresh bench, connector from `OAN_MESSAGING_CONNECTOR_REPO`) | Connector fetched and installed; no failure that the module does not already have without the kit |
 
 ## Decisions A2C owns
 

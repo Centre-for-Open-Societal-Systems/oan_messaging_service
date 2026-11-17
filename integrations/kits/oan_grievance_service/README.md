@@ -41,3 +41,4 @@ not fit one SMS part (guide 12 §3 step 5): those rows fail visibly instead of s
 | Notification tests (with the 5 new ones) | 29 passed |
 | Full Grievance suite with the kit / without | 1,222 run / 1,217 run. Every failure with the kit also fails without it: PDF export tests (no PDF library on the test bench) and temporary-password tests |
 | End to end on a Grievance site (`trial/stack/a2c/e2e/e2e_grievance.py`): a real grievance and Notification through `queue()` and `dispatch_queued()`, the connector's after-commit job, OAN over HTTPS and the fake 8028 | Row **Queued with OAN**; its OAN Message Submitted, then `delivered`; one SMS at the gateway |
+| Module CI simulated (`ci.yml` steps in a fresh bench, connector from `OAN_MESSAGING_CONNECTOR_REPO`) | Connector fetched and installed; no new failure cause: the kit tests share Grievance's notification fixture, which fails on a fresh site for Grievance's own tests too |
