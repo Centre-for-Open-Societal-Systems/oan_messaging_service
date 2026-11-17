@@ -32,9 +32,8 @@ A new test checks that both sweeps claim rows with `FOR UPDATE SKIP LOCKED ... L
 
 ## Not done
 
-- **SonarQube.** A local SonarQube server is available, but no analysis token was
-  provided, so no scan was run. To run it:
-  `docker run --rm --network host -e SONAR_HOST_URL=http://localhost:9000 -e SONAR_TOKEN=<token> -v "$PWD:/usr/src" sonarsource/sonar-scanner-cli -Dsonar.projectKey=oan_messaging_connector -Dsonar.sources=oan_messaging_connector -Dsonar.exclusions=oan_messaging_connector/vendor/**`
+- **SonarQube** was run later the same day: quality gate passed, 0 bugs, 0 vulnerabilities,
+  A ratings (see `INTEGRATION-KITS-2026-11-17.md`).
 - **The shared workflow on GitHub.** It runs on pull requests; none has been opened yet.
 - **Several workers at once.** Covered by the query check above, not by a test with two
   real database connections.

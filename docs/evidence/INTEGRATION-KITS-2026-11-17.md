@@ -71,9 +71,36 @@ Also found while re-testing: a test helper's change to a fixture user leaked int
 tests (fixed), and the end-to-end Grievance script now deactivates its routing assignment
 when it finishes.
 
+## SonarQube (9.9 LTS, local server, 17 November 2026)
+
+| Project | Quality gate | Bugs | Vulnerabilities | Ratings (reliability, security, maintainability) | Coverage | Duplication |
+|---|---|---|---|---|---|---|
+| `oan_messaging_connector` (`develop` `d50bc1b`; vendored client excluded) | **Passed** | 0 | 0 | A, A, A | not uploaded (Frappe tests run in a bench) | 0.0% |
+| `oan_messaging_services` (`main` `77e8b7a`; service, examples, trial helpers, eSignet sender) | **Passed** | 0 | 0 | A, A, A | **82.0%** (pytest-cov and JaCoCo; trial helpers excluded) | 0.0% |
+
+Security hotspots, all reviewed:
+
+* **Connector:** the one hotspot (settings accepted `http://` "for local trials") was
+  fixed: the settings now require HTTPS, as the client always did.
+* **Services, safe as written:** logging set-up in three modules (the 8028 and Telegram
+  adapters install secret-redacting filters; the runtime installs the redaction at start);
+  the SHA-1 in the eSignet sender (UUID version 5 by definition, not a security hash); the
+  worker heartbeat file `/tmp/oan-msg-worker.alive` in `ops.py` (a per-pod `emptyDir`; the
+  image's root file system is read-only); and two trial-only items (`gen_certs.py` sets
+  0600 on throwaway keys; the Consent trial Dockerfile only adds one package to the
+  upstream image and keeps its user).
+
+Code smells: the connector has 2 minor ones, kept on purpose (`[0-9]` instead of `\d`: in
+Python `\d` also matches non-ASCII digits). The services repository has 57, mostly
+cognitive complexity in the service internals and repeated literals in the contract
+examples; that code is under independent review and was not refactored for style. The
+eSignet sender's `send()` was split to bring it under the complexity limit.
+
 ## Not covered
 
 * The shared dev environment; the real 8028.
+* The modules' own CI runs: they need the connector published under the organisation, or
+  `OAN_MESSAGING_CONNECTOR_REPO` set (a hand-off item for the COSS admins).
 * eSignet's own code: its source was not available, so the kit is a sender for the
   eSignet team to wire in, not a patch.
 * The Consent Manager on `develop` end to end: no image of that branch was available; its
