@@ -4,7 +4,7 @@ A reusable Frappe app that every Frappe module installs to send notices through 
 owns everything that is the same for all callers, so each module only adds its texts and
 its call sites.
 
-* **Status:** trial build, 40 tests passing; trial-tested end to end with Credit on
+* **Status:** trial build, 41 tests passing; trial-tested end to end with Credit on
   Frappe 16.56.0 and Python 3.14. Meets the checks of the OAN Frappe apps (pre-commit,
   Semgrep with the shared rules, pip-audit; report in `docs/evidence/`). Not released.
   MIT licence, as for other OAN services.
@@ -128,9 +128,9 @@ Rules:
 
 * **`language`** is informational (`en`, `am`, later `om`). Render the text in the
   recipient's language yourself; the connector does not translate.
-* **Phone format:** the connector checks the format (09…, 07…, 2519…, +2519…, +2517…)
-  and returns `None` with an Error Log for anything else. It does not normalise; strip
-  spaces and dashes before calling.
+* **Phone format:** the connector removes spaces, dashes, dots and brackets, then checks
+  the form OAN accepts (09…, 07…, 2519…, +2519…, 2517…, +2517…) and returns `None` with an
+  Error Log for anything else. `send_sms_now` refuses such a number with `ValueError`.
 * **Retries:** OAN Messaging Settings › HTTP attempts (default 3) applies per dispatch
   run; the sweep keeps retrying an uncertain row with the same key until it is
   accepted or expires.

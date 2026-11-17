@@ -29,8 +29,10 @@ kit is one commit with a conventional title, so it passes the shared commit-titl
 
 ## What every Frappe kit needs on the site
 
-1. `oan_messaging_connector` installed (`develop` at `d4a5a5f` or later). The Credit,
-   Grievance and DA kits add it to `required_apps`.
+1. `oan_messaging_connector` installed (`develop` at `4ad8507` or later). The Credit,
+   Grievance and DA kits add it to `required_apps` and fetch it in the module's CI; until
+   the connector is published under the organisation, set the repository variable
+   `OAN_MESSAGING_CONNECTOR_REPO` to a URL that CI can clone.
 2. The site's caller registered by the OAN operator, with the purposes the site sends:
    `transactional` for module notices, plus `otp` where the Auth kit sends reset codes
    (Auth runs on every module site and uses that site's token).
@@ -56,4 +58,6 @@ Each kit was applied to its base commit and checked with the module's own toolin
 * **End to end** (Credit, Consent, Auth): against a real OAN Messaging Service over HTTPS
   with the fake 8028 gateway and delivery callbacks.
 
-Results are in each kit's README and in `docs/evidence/`.
+Results are in each kit's README and in `docs/evidence/`. An independent code review of
+the kits followed; its findings and fixes are listed in
+`docs/evidence/INTEGRATION-KITS-2026-11-17.md`.

@@ -4,7 +4,7 @@
 |---|---|
 | **Repository** | `oan_da_app_services` |
 | **Base** | `develop` at `ce156bf` |
-| **Patch** | `0001-feat-visits-farmer-SMS-for-planned-and-rescheduled-v.patch` (4 files) |
+| **Patch** | `0001-feat-visits-farmer-SMS-for-planned-and-rescheduled-v.patch` (5 files) |
 | **Handoff guide** | 13 |
 
 ## What it changes
@@ -15,6 +15,7 @@
 | `da_services/services/visits.py` | `plan_visit` raises `planned` after the insert; `reschedule_visit` raises `rescheduled` for the new visit |
 | `da_services/hooks.py` | `required_apps` adds `oan_messaging_connector` |
 | `da_services/tests/test_visit_sms.py` (new) | 8 tests through the real plan and reschedule services |
+| `.github/workflows/ci.yml` | Fetches `oan_messaging_connector` before installing the app. Until the connector is published under the organisation, set the repository variable `OAN_MESSAGING_CONNECTOR_REPO` to a URL the CI can clone |
 
 Sent only when the Development Agent ticks **Notify farmer by SMS**
 (`notify_farmer_sms`, already on DA Visit), and only to the farmer, whose phone comes from
@@ -38,9 +39,7 @@ settings on each DA site.
 | Semgrep: Frappe rules, Python correctness, shared OAN rules | 0 findings |
 | Kit tests | 8 passed; DA's own visit tests 15 passed |
 | Full DA suite with the kit / without | 930 run, 0 failures / 922 run, 0 failures |
-
-Not run end to end: the path ends in the same connector `queue_sms` that the Credit kit
-ran end to end.
+| End to end on a DA site (`trial/stack/a2c/e2e/e2e_da.py`): a real `plan_visit` with the box ticked, then `reschedule_visit`, through the connector's after-commit job, OAN over HTTPS and the fake 8028 | Both messages `delivered`; the farmer received "will visit you on 18 Nov 2026 at 09:00" and then "has moved to 19 Nov 2026 at 10:30" |
 
 ## Decisions DA owns
 

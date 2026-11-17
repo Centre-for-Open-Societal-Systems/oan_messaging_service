@@ -28,8 +28,7 @@ and only when a module opts in from its own `hooks.py` ([03](03-frappe-connector
 | A2C `submit_application` end-to-end test | A2C / QA | Needs an approved-consent fixture |
 | 8028: `sms_id` is assumed never to repeat (receipts match on it) | OAN / 8028 contract | Confirm with 8028 |
 | OAN Messaging service | OAN | In independent review; not deployed. Release-blocker status: `EVIDENCE/RELEASE-BLOCKERS-STATUS.md` (12 of 16 fixed, pending review). Dev and staging will run the accepted version. |
-| Connector: phone normaliser | Connector | An Ethiopian-mobile normaliser (spaces, dashes, 251 forms) for callers such as Grievance |
-| Connector and client published as repositories | ATI, OAN | Today they ship as files in the developer package (`code/`) |
+| Connector and client published as repositories | ATI, OAN | Today they ship as files in the developer package (`code/`). The Credit, Grievance and DA kits fetch the connector in CI from the repository variable `OAN_MESSAGING_CONNECTOR_REPO` until then |
 | A2C pre-existing test failures (7 at `f6bb735`: `test_farmer_b2c` and loan-product checks) | A2C | Unrelated to messaging; identical with and without the Credit kit |
 | Controlled live acceptance with real 8028 and Telegram | QA, DevOps | After the dev environment |
 | Telegram notices from modules to linked farmers | Product, Telegram bot team | Not in Phase 1. Route to decide when needed: through the bot (RapidPro API) or OAN's Telegram endpoint ([16](16-telegram.md)) |

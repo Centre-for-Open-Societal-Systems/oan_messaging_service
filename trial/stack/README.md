@@ -44,6 +44,19 @@ Inside `a2c-bench`:
 
 Run `sites/e2e_a2c.py` (`e2e/e2e_a2c.py`), then `e2e/poll_wait.py`.
 
+The other Frappe kits run on the same bench, each on its own site with its own caller
+(`transactional` and `otp`) and the same four settings. Install the app on the bench
+**before** starting the worker (a running worker cannot import an app added later):
+
+* Auth kit: `e2e/e2e_auth_reset.py` on `a2c.trial` (the `a2c` caller needs `otp` too).
+* Grievance kit: `bench new-site grievance.trial`, install `oan_auth_service`,
+  `oan_messaging_connector` and `oan_grievance_service`; run `e2e/e2e_grievance.py`.
+* DA kit: `bench new-site da.trial`, install `oan_auth_service`, `oan_messaging_connector`
+  and `da_services`; run `bench --site da.trial execute da_services.setup.install.before_tests`
+  once for the test geography, then `e2e/e2e_da.py`.
+
+Copy each script into `sites/` and run it with `../env/bin/python <script>`.
+
 Tests: `bench --site a2c.trial run-tests --app oan_messaging_connector` and
 `--app oan_a2c`.
 

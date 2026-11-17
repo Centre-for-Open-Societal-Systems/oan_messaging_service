@@ -11,16 +11,41 @@ oan_messaging_connector.queue_sms: purpose transactional, expiring when the visi
 closed visit, a visit without a farmer phone, or an idempotent replan sends nothing.
 Development Agents are not sent SMS.
 
-Adds oan_messaging_connector to required_apps and eight tests.
+Adds oan_messaging_connector to required_apps, fetches it in CI (repository variable\nOAN_MESSAGING_CONNECTOR_REPO), and eight tests.
 ---
+ .github/workflows/ci.yml            |   5 ++
  da_services/hooks.py                |   2 +-
  da_services/services/visit_sms.py   | 110 +++++++++++++++++++++++
  da_services/services/visits.py      |   6 +-
  da_services/tests/test_visit_sms.py | 132 ++++++++++++++++++++++++++++
- 4 files changed, 248 insertions(+), 2 deletions(-)
+ 5 files changed, 253 insertions(+), 2 deletions(-)
  create mode 100644 da_services/services/visit_sms.py
  create mode 100644 da_services/tests/test_visit_sms.py
 
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 2d03732..659182e 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -110,14 +110,19 @@ jobs:
+         working-directory: /home/runner/frappe-bench
+         run: |
+           bench get-app oan_auth_service https://github.com/Centre-for-Open-Societal-Systems/oan_auth_service.git --branch develop || bench get-app oan_auth_service https://github.com/arnavam/oan_auth_service.git --branch develop
++          # oan_messaging_connector is a required app (farmer SMS); set the repository
++          # variable OAN_MESSAGING_CONNECTOR_REPO until it is published under this org.
++          bench get-app oan_messaging_connector "${OAN_MESSAGING_CONNECTOR_REPO:-https://github.com/Centre-for-Open-Societal-Systems/oan_messaging_connector.git}" --branch develop
+           bench get-app da_services $GITHUB_WORKSPACE
+           bench setup requirements --dev
+           bench new-site --db-root-password root --admin-password admin test_site
+           bench --site test_site install-app oan_auth_service
++          bench --site test_site install-app oan_messaging_connector
+           bench --site test_site install-app da_services
+           bench build
+         env:
+           CI: "Yes"
++          OAN_MESSAGING_CONNECTOR_REPO: ${{ vars.OAN_MESSAGING_CONNECTOR_REPO }}
+ 
+       - name: Run Tests
+         working-directory: /home/runner/frappe-bench
 diff --git a/da_services/hooks.py b/da_services/hooks.py
 index c1bc691..184cd8a 100644
 --- a/da_services/hooks.py

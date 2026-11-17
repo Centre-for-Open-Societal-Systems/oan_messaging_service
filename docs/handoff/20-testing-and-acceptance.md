@@ -86,10 +86,10 @@ Consent Manager cases are new here.
 | Module | Result |
 |---|---|
 | OAN | Smoke test: HTTPS API → worker → 8028 mTLS → receipt → `delivered`. Service suite 901 passed. |
-| Connector | 40 tests; Semgrep with the Frappe and shared OAN rules: 0 findings |
-| Credit kit | CR-01, 02, 04 and 06 end to end (5 messages, each delivered once); 12 kit tests; full A2C suite unchanged |
-| Consent Manager kit | CM-01 to CM-05 end to end (`main` build); on `develop`, 25 new tests including CM-01, 03, 04, 05, 06 and 08 through the API and database |
+| Connector | 41 tests; Semgrep with the Frappe and shared OAN rules: 0 findings |
+| Credit kit | CR-01, 02, 04 and 06 end to end (5 messages, each delivered once); 15 kit tests; full A2C suite unchanged |
+| Consent Manager kit | CM-01 to CM-05 end to end (`main` build); on `develop`, 21 new tests including CM-01, 03, 04, 05, 06 and 08 through the API and database |
 | Auth kit | AUTH-01 end to end (one `otp` SMS, no code in logs); 7 kit tests; full Auth suite unchanged |
-| Grievance kit | GR-01, 03, 06, 11 as tests on a Grievance site; full suite unchanged |
-| DA kit | DA-01 to 06 as tests through the real plan and reschedule services; full suite unchanged |
+| Grievance kit | GR-01 and GR-03 end to end (Queued with OAN, then delivered); GR-06 and GR-11 as tests; full suite unchanged |
+| DA kit | DA-01 and DA-02 end to end (planned and rescheduled SMS delivered); DA-03 to 06 as tests; full suite unchanged |
 | Not yet | Everything on the shared dev environment; CR-07, CR-08, CM-07 end to end; live 8028 cases |

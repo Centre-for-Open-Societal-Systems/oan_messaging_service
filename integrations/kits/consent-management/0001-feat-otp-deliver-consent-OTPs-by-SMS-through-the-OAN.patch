@@ -15,19 +15,23 @@ nobody received. The code and phone are never logged.
   resolve_phone), text that always fits one SMS part, one idempotency key per code.
 - oan_client/: the OAN Messaging client (contract 3.0.0), vendored unchanged apart from
   relative imports.
-- tests: 19 unit tests and 6 integration tests through the partner portal API.
+- otp_service.py, otp_consent_service.py: a send whose outcome is uncertain still counts
+  against the resend cooldown and the send budgets (a resend keeps the new code).
+- tests: 14 unit tests and 7 integration tests through the partner portal API.
 ---
  backend/src/openg2p_consent_manager/config.py |  38 +-
  .../oan_client/VENDORED.md                    |   3 +
  .../oan_client/__init__.py                    |  48 ++
  .../oan_client/client.py                      | 633 ++++++++++++++++++
  .../oan_client/keys.py                        |  64 ++
- .../services/otp_delivery.py                  | 166 +++++
- .../services/otp_provider.py                  |  44 +-
+ .../services/otp_consent_service.py           |   5 +-
+ .../services/otp_delivery.py                  | 158 +++++
+ .../services/otp_provider.py                  |  42 +-
+ .../services/otp_service.py                   |  16 +-
  .../services/sms_length.py                    |  17 +
- backend/tests/test_oan_otp_delivery.py        | 173 +++++
- backend/tests/test_otp_sms.py                 | 140 ++++
- 10 files changed, 1313 insertions(+), 13 deletions(-)
+ backend/tests/test_oan_otp_delivery.py        | 168 +++++
+ backend/tests/test_otp_sms.py                 | 154 +++++
+ 12 files changed, 1333 insertions(+), 13 deletions(-)
  create mode 100644 backend/src/openg2p_consent_manager/oan_client/VENDORED.md
  create mode 100644 backend/src/openg2p_consent_manager/oan_client/__init__.py
  create mode 100644 backend/src/openg2p_consent_manager/oan_client/client.py
@@ -865,12 +869,35 @@ index 0000000..a0f94df
 +    Refuses inputs that contain an Ethiopian mobile number as a guard against PII in
 +    keys."""
 +    return str(uuid.uuid5(OAN_KEY_NAMESPACE, key_material(service, event_id, role, channel)))
+diff --git a/backend/src/openg2p_consent_manager/services/otp_consent_service.py b/backend/src/openg2p_consent_manager/services/otp_consent_service.py
+index 5c17ac1..ebb14b5 100644
+--- a/backend/src/openg2p_consent_manager/services/otp_consent_service.py
++++ b/backend/src/openg2p_consent_manager/services/otp_consent_service.py
+@@ -33,7 +33,7 @@ from ..models import (
+ )
+ from .assisted_service import AssistedConsentService
+ from .lifecycle_service import LifecycleError
+-from .otp_service import OtpError, OtpService
++from .otp_service import UNCERTAIN_DELIVERY, OtpError, OtpService
+ from .partner_service import PartnerService
+ from .policy_service import PolicyService
+ from .receipt_service import ReceiptService
+@@ -132,6 +132,9 @@ class OtpConsentService(BaseService):
+             try:
+                 await self.otp.issue(req, req.subject_id_value)
+             except OtpError as exc:
++                if exc.reason == UNCERTAIN_DELIVERY:
++                    # The code may still arrive: keep it valid and keep the send counted.
++                    await session.commit()
+                 raise LifecycleError(exc.status, exc.reason) from exc
+             await session.commit()
+             await session.refresh(req)
 diff --git a/backend/src/openg2p_consent_manager/services/otp_delivery.py b/backend/src/openg2p_consent_manager/services/otp_delivery.py
 new file mode 100644
-index 0000000..44ee014
+index 0000000..b26b246
 --- /dev/null
 +++ b/backend/src/openg2p_consent_manager/services/otp_delivery.py
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,158 @@
 +"""Deliver issued OTPs by SMS through the OAN Messaging Service.
 +
 +Without it, the OTP providers only write the code to the service log (development). With
@@ -878,17 +905,18 @@ index 0000000..44ee014
 +
 +* purpose ``otp``; ``expires_at`` is the code's own ``otp_expires_at``, passed
 +  unchanged. OAN never sends it after that moment.
-+* Idempotency key: ``delivery_key("dpi-consent", <transaction>, "otp-<kind>-<issue>",
++* Idempotency key: ``delivery_key("dpi-consent", <request id>, "otp-consent-<issue>",
 +  "sms")``, where ``issue`` is the code's expiry in microseconds. Every re-issue is a new
 +  code and a new key; the client's own retries of one code reuse the key, so a farmer
 +  never receives the same code twice from OAN.
 +* The code is never logged, and neither is the phone.
 +
 +If the code cannot be handed to OAN (no phone for the subject, rejected, OAN unreachable
-+after the client's retries), ``OtpError`` is raised. The caller's transaction then rolls
-+back, so no unusable hash is stored, and the API answers with that status: the subject
-+asks for a new code. A code handed to OAN whose commit then fails is simply never valid;
-+the subject asks again.
++after the client's retries), ``OtpError`` is raised and the API answers with that status.
++A new request is cancelled; a failed resend leaves the previous code in place. When OAN
++may already hold the message (``otp_delivery_unavailable``), the send still counts
++against the resend cooldown and the per-request and per-subject budgets, so retries
++during an OAN slowdown cannot flood the farmer.
 +
 +Phone resolution: ``oan_phone_resolver = map`` reads ``oan_otp_phone_map`` (dev and
 +staging test numbers). Production needs a resolver approved by the identity owner, for
@@ -916,20 +944,15 @@ index 0000000..44ee014
 +_config = Settings.get_config()
 +_logger = logging.getLogger(_config.logging_default_logger_name)
 +
-+TEMPLATES = {
-+    "consent": "OAN: {code} is your code to allow {partner} to use your registry data. "
-+    "It expires in {minutes} minutes. Never share this code.",
-+    "data_release": "OAN: {code} is your code to release your registry data to {partner}. "
-+    "It expires in {minutes} minutes. Never share this code.",
-+}
++TEXT = (
++    "OAN: {code} is your code to allow {partner} to use your registry data. "
++    "It expires in {minutes} minutes. Never share this code."
++)
 +#: Used when the full text does not fit one SMS part, for example when the partner name has
 +#: Amharic letters (the limit is then 70 characters). No partner name, ASCII only.
-+SHORT_TEMPLATES = {
-+    "consent": "OAN: {code} is your consent code. It expires in {minutes} minutes. "
-+    "Never share this code.",
-+    "data_release": "OAN: {code} is your code to release your registry data. It expires in "
-+    "{minutes} minutes. Never share this code.",
-+}
++SHORT_TEXT = (
++    "OAN: {code} is your consent code. It expires in {minutes} minutes. Never share this code."
++)
 +PARTNER_MAX = 30
 +#: Tests may inject an httpx transport (e.g. ``httpx.MockTransport``).
 +_transport = None
@@ -962,12 +985,12 @@ index 0000000..44ee014
 +    return name if len(name) <= PARTNER_MAX else name[: PARTNER_MAX - 1].rstrip() + "."
 +
 +
-+def render_otp_text(kind: str, code: str, partner: str, minutes: int) -> str:
++def render_otp_text(code: str, partner: str, minutes: int) -> str:
 +    """The OTP text, guaranteed to fit one SMS part (OAN refuses anything longer)."""
-+    text = TEMPLATES[kind].format(code=code, partner=partner, minutes=minutes)
++    text = TEXT.format(code=code, partner=partner, minutes=minutes)
 +    if fits_one_sms(text):
 +        return text
-+    short = SHORT_TEMPLATES[kind].format(code=code, minutes=minutes)
++    short = SHORT_TEXT.format(code=code, minutes=minutes)
 +    if fits_one_sms(short):
 +        return short
 +    raise _otp_error(500, "otp_text_too_long", "the OTP text does not fit one SMS part")
@@ -979,8 +1002,7 @@ index 0000000..44ee014
 +        return None
 +    if not _config.oan_base_url or not _config.oan_token:
 +        raise _otp_error(500, "otp_delivery_misconfigured", "OAN delivery is not configured")
-+    kind = "data_release" if getattr(request, "correlation_id", None) else "consent"
-+    transaction = str(getattr(request, "correlation_id", None) or request.id)
++    transaction = str(request.id)
 +    expires_at = request.otp_expires_at
 +    if expires_at.tzinfo is None:
 +        expires_at = expires_at.replace(tzinfo=timezone.utc)
@@ -991,13 +1013,13 @@ index 0000000..44ee014
 +            422, "otp_destination_unknown", "no phone number is registered for this subject"
 +        )
 +    minutes = max(1, round((expires_at - now).total_seconds() / 60))
-+    text = render_otp_text(kind, code, await _partner_name(request.partner_id), minutes)
++    text = render_otp_text(code, await _partner_name(request.partner_id), minutes)
 +    issue = str(int(expires_at.timestamp() * 1_000_000))
 +    delivery = SmsDelivery(
-+        idempotency_key=delivery_key("dpi-consent", transaction, f"otp-{kind}-{issue}", "sms"),
++        idempotency_key=delivery_key("dpi-consent", transaction, f"otp-consent-{issue}", "sms"),
 +        recipient=phone,
 +        text=text,
-+        source_reference=f"dpi-consent:{transaction}:otp-{kind}",
++        source_reference=f"dpi-consent:{transaction}:otp-consent",
 +        purpose="otp",
 +        expires_at=expires_at,
 +        first_submitted_at=now,
@@ -1032,13 +1054,10 @@ index 0000000..44ee014
 +        raise _otp_error(
 +            503, "otp_delivery_unavailable", "the SMS service is unavailable; ask for a new code"
 +        ) from None
-+    request.otp_channel = "SMS"
-+    _logger.info(
-+        "OTP handed to OAN for request %s (message %s, %s)", request.id, submission.id, kind
-+    )
++    _logger.info("OTP handed to OAN for consent request %s (message %s)", request.id, submission.id)
 +    return submission.id
 diff --git a/backend/src/openg2p_consent_manager/services/otp_provider.py b/backend/src/openg2p_consent_manager/services/otp_provider.py
-index 9f68a5c..3343b28 100644
+index 9f68a5c..9b96677 100644
 --- a/backend/src/openg2p_consent_manager/services/otp_provider.py
 +++ b/backend/src/openg2p_consent_manager/services/otp_provider.py
 @@ -11,12 +11,13 @@ Two providers, one interface:
@@ -1101,17 +1120,16 @@ index 9f68a5c..3343b28 100644
  
      async def issue(self, request, destination: str) -> None:
          transaction_id = request.id
-@@ -115,7 +134,8 @@ class FaydaOtpProvider:
+@@ -115,6 +134,8 @@ class FaydaOtpProvider:
          # What the code was bound TO; verify() re-derives the hash from it.
          request.otp_destination = destination
          request.otp_provider = self.name
--        await _publish(request, code, destination)
-+        if not await _deliver(request, code, destination):
-+            await _publish(request, code, destination)
++        if await _deliver(request, code, destination):
++            return  # sent by SMS; the test harnesses are not needed
+         await _publish(request, code, destination)
          _announce(request, code, destination, self.name)
  
-     async def verify(self, request, code: str) -> None:
-@@ -141,11 +161,10 @@ class FaydaOtpProvider:
+@@ -141,11 +162,10 @@ class FaydaOtpProvider:
          request.otp_verified_at = datetime.now(timezone.utc)
  
  
@@ -1124,16 +1142,49 @@ index 9f68a5c..3343b28 100644
  
      @staticmethod
      def _hash(code: str, request_id: str) -> str:
-@@ -163,7 +182,8 @@ class InternalOtpProvider:
+@@ -163,6 +183,8 @@ class InternalOtpProvider:
          request.otp_channel = "log"
          request.otp_destination = destination
          request.otp_provider = self.name
--        await _publish(request, code, destination)
-+        if not await _deliver(request, code, destination):
-+            await _publish(request, code, destination)
++        if await _deliver(request, code, destination):
++            return  # sent by SMS; the test harnesses are not needed
+         await _publish(request, code, destination)
          _announce(request, code, destination, self.name)
  
-     async def verify(self, request, code: str) -> None:
+diff --git a/backend/src/openg2p_consent_manager/services/otp_service.py b/backend/src/openg2p_consent_manager/services/otp_service.py
+index 3220059..a76dd33 100644
+--- a/backend/src/openg2p_consent_manager/services/otp_service.py
++++ b/backend/src/openg2p_consent_manager/services/otp_service.py
+@@ -18,6 +18,9 @@ _logger = logging.getLogger(_config.logging_default_logger_name)
+ 
+ __all__ = ["OtpService", "OtpError", "OtpProvider"]
+ 
++#: OtpError reason when the SMS service did not answer clearly: the code may still arrive.
++UNCERTAIN_DELIVERY = "otp_delivery_unavailable"
++
+ 
+ class OtpService(BaseService):
+     def __init__(self, name="", **kwargs):
+@@ -56,7 +59,18 @@ class OtpService(BaseService):
+         if problem:
+             _logger.error("OTP not issued for consent request %s: %s", request.id, problem)
+             raise OtpError(503, "otp_unavailable", problem)
+-        await self._provider.issue(request, destination)
++        try:
++            await self._provider.issue(request, destination)
++        except OtpError as exc:
++            if exc.reason == UNCERTAIN_DELIVERY:
++                # The SMS service may still send this code: count it, so the resend
++                # cooldown and the send budgets hold during an outage.
++                self._count_send(request)
++            raise
++        self._count_send(request)
++
++    @staticmethod
++    def _count_send(request) -> None:
+         request.otp_send_count = (request.otp_send_count or 0) + 1
+         request.otp_last_sent_at = datetime.now(timezone.utc)
+ 
 diff --git a/backend/src/openg2p_consent_manager/services/sms_length.py b/backend/src/openg2p_consent_manager/services/sms_length.py
 new file mode 100644
 index 0000000..ed25827
@@ -1159,10 +1210,10 @@ index 0000000..ed25827
 +    return len(text.encode("utf-16-le")) // 2 <= 70
 diff --git a/backend/tests/test_oan_otp_delivery.py b/backend/tests/test_oan_otp_delivery.py
 new file mode 100644
-index 0000000..5900592
+index 0000000..55865f9
 --- /dev/null
 +++ b/backend/tests/test_oan_otp_delivery.py
-@@ -0,0 +1,173 @@
+@@ -0,0 +1,168 @@
 +"""OTP delivery through the OAN Messaging Service (services/otp_delivery.py).
 +
 +The OAN API is an in-process httpx MockTransport shaped like contract 3.0.0. No network,
@@ -1213,7 +1264,6 @@ index 0000000..5900592
 +def request(**kw):
 +    base = dict(
 +        id="req-1",
-+        correlation_id=None,
 +        partner_id="partner-1",
 +        subject_id_value="FIN-1001",
 +        otp_channel=None,
@@ -1245,7 +1295,7 @@ index 0000000..5900592
 +async def test_consent_otp_is_sent_as_otp_with_its_own_deadline(cfg):
 +    req = request()
 +    mid = await otp_delivery.deliver_otp(req, "482913")
-+    assert mid and req.otp_channel == "SMS"
++    assert mid and req.otp_channel is None  # the provider's configured channel is left alone
 +    body = json.loads(cfg.requests[0].content)
 +    assert body["purpose"] == "otp" and body["recipient"] == PHONE
 +    assert "482913" in body["text"] and "Awash Bank" in body["text"]
@@ -1255,15 +1305,13 @@ index 0000000..5900592
 +
 +
 +@pytest.mark.asyncio
-+async def test_reissue_is_a_new_key_and_data_release_differs(cfg):
++async def test_reissue_is_a_new_key(cfg):
 +    await otp_delivery.deliver_otp(request(), "111111")
 +    await otp_delivery.deliver_otp(
 +        request(otp_expires_at=datetime.now(timezone.utc) + timedelta(seconds=301)), "222222"
 +    )
-+    await otp_delivery.deliver_otp(request(correlation_id="corr-9"), "333333")
 +    keys = [r.headers["Idempotency-Key"] for r in cfg.requests]
-+    assert len(set(keys)) == 3
-+    assert "release your registry data" in json.loads(cfg.requests[2].content)["text"]
++    assert len(set(keys)) == 2
 +
 +
 +@pytest.mark.asyncio
@@ -1290,22 +1338,20 @@ index 0000000..5900592
 +
 +
 +def test_full_text_names_the_partner_when_it_fits():
-+    text = otp_delivery.render_otp_text("consent", "123456", "Awash Bank", 5)
++    text = otp_delivery.render_otp_text("123456", "Awash Bank", 5)
 +    assert "Awash Bank" in text and otp_delivery.fits_one_sms(text)
 +
 +
 +@pytest.mark.parametrize("partner", ["ሙከራ ባንክ", "Awash ባንክ", "Bank “Abay”", "Bank \u2013 Oromia"])
-+@pytest.mark.parametrize("kind", ["consent", "data_release"])
-+def test_non_gsm_partner_name_falls_back_to_a_text_that_fits(kind, partner):
-+    text = otp_delivery.render_otp_text(kind, "123456", partner, 30)
++def test_non_gsm_partner_name_falls_back_to_a_text_that_fits(partner):
++    text = otp_delivery.render_otp_text("123456", partner, 30)
 +    assert otp_delivery.fits_one_sms(text)
 +    assert partner not in text and "123456" in text
 +
 +
-+@pytest.mark.parametrize("kind", ["consent", "data_release"])
-+def test_longest_ascii_partner_still_fits(kind):
++def test_longest_ascii_partner_still_fits():
 +    partner = "W" * otp_delivery.PARTNER_MAX
-+    text = otp_delivery.render_otp_text(kind, "12345678", partner, 30)
++    text = otp_delivery.render_otp_text("12345678", partner, 30)
 +    assert partner in text and otp_delivery.fits_one_sms(text)
 +
 +
@@ -1338,10 +1384,10 @@ index 0000000..5900592
 +    assert not cfg.requests
 diff --git a/backend/tests/test_otp_sms.py b/backend/tests/test_otp_sms.py
 new file mode 100644
-index 0000000..1f1e5df
+index 0000000..1327b07
 --- /dev/null
 +++ b/backend/tests/test_otp_sms.py
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,154 @@
 +"""OTP consent codes delivered by SMS through the OAN Messaging Service.
 +
 +The real partner portal API and database (see conftest); the OAN Messaging API is an
@@ -1482,3 +1528,17 @@ index 0000000..1f1e5df
 +    status, body = as_partner(bank.audience)("POST", OTP, json=otp_body())
 +    assert status == 503 and body["error"] == "otp_unavailable"
 +    assert codes == [] and oan.requests == []
++
++
++def test_an_uncertain_resend_still_counts(portal, as_partner, bank, codes, oan, run):  # noqa: F811
++    """OAN may still send a code it did not confirm, so the cooldown must hold."""
++    pc = as_partner(bank.audience)
++    req = raise_request(pc)
++    backdate_last_send(run, req["id"])
++    oan.code = 503
++    status, body = pc("POST", f"{OTP}/{req['id']}/resend-otp")
++    assert status == 503 and body["error"] == "otp_delivery_unavailable"
++    oan.code = 202
++    status, body = pc("POST", f"{OTP}/{req['id']}/resend-otp")
++    assert status == 429 and body["error"] == "resend_too_soon"
++    assert len(oan.requests) == 2  # the first code and the uncertain resend; nothing more

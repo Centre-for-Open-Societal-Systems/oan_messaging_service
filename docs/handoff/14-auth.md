@@ -4,7 +4,7 @@
 |---|---|
 | **Pattern** | OTP sender ([04](04-otp-senders.md)), from a Frappe post-commit job (**preferred**, §3). Interim option before the kit is merged: the connector's `send_sms` hook (**supported**, §6). |
 | **Status** | **Kit built and tested**: lint and Semgrep clean, 7 tests, full Auth suite unchanged, end to end through OAN |
-| **Code** | Kit `code/kits/oan_auth_service/` (one patch on `develop` `34c7306`, with its README); connector `develop` `d4a5a5f` or later |
+| **Code** | Kit `code/kits/oan_auth_service/` (one patch on `develop` `34c7306`, with its README); connector `develop` `4ad8507` or later |
 | **Today** | `_deliver_reset_by_sms` enqueues Frappe core `_send_sms` after commit. The code lives only in the job arguments (no outbox), which is correct and stays that way. |
 
 ![Auth reset flow](diagrams/14-auth.png)
@@ -31,7 +31,7 @@ connector's `send_sms_now` (no outbox; see §4).
 | # | Step | Owner | Done when |
 |---|---|---|---|
 | 1 | Apply the kit (`git am code/kits/oan_auth_service/*.patch`) | Auth dev | `run-tests --app oan_auth_service`: the 7 new tests pass, nothing else changes |
-| 2 | Install `oan_messaging_connector` (`d4a5a5f` or later) on the sites where reset codes should go through OAN. Auth does not require it: without it, Frappe's own sender is used as before | DevOps | Connector configured on the site |
+| 2 | Install `oan_messaging_connector` (`4ad8507` or later) on the sites where reset codes should go through OAN. Auth does not require it: without it, Frappe's own sender is used as before | DevOps | Connector configured on the site |
 | 3 | The site's caller (for example `a2c`, `grievance`, `da`) must allow `otp` as well as `transactional`: Auth sends with that site's token | OAN ops | A reset produces an `otp` message |
 | 4 | Recipient format: OAN accepts only Ethiopian mobiles; decide whether to pre-check before issuing | Auth owners | Decision recorded |
 | 5 | Acceptance: QA cases AUTH-01 to AUTH-14 | QA | Evidence recorded |

@@ -48,7 +48,7 @@ Consent Manager ([11](11-dpi-consent.md)), never by A2C.
 | # | Step | Owner | Done when |
 |---|---|---|---|
 | 1 | Install `oan_messaging_connector` on each A2C site | A2C dev | `bench --site <site> list-apps` shows it |
-| 2 | Apply the kit (`git am code/kits/oan_a2c_service/*.patch`): `required_apps`, `oan_a2c/oan_messaging/{events,notify}.py`, 2 call sites, 2 visit hooks, tests | A2C dev | `run-tests --app oan_a2c`: the 12 new tests pass, and nothing that passed before fails |
+| 2 | Apply the kit (`git am code/kits/oan_a2c_service/*.patch`): `required_apps`, `oan_a2c/oan_messaging/{events,notify}.py`, 2 call sites, 2 visit hooks, tests | A2C dev | `run-tests --app oan_a2c`: the 15 new tests pass, and nothing that passed before fails |
 | 3 | Confirm, per bank, which stage label means "approved" (`event_for_transition`) | A2C product + banks | Labels recorded; the mapping adjusted if a bank uses another word |
 | 4 | Agree bank short names (at most 30 characters) and the display language source | A2C product | `bank_name` values checked |
 | 5 | Add Amharic, Afaan Oromo and other translations to `TEMPLATES` | A2C content | Each template, at maximum field lengths, fits one SMS (70 characters if Amharic): the test passes |
@@ -68,20 +68,26 @@ oan_a2c/hooks.py                        # required_apps + A2C Visit Schedule doc
 
 * Application events are raised from the API functions, **not** `on_update`, because A2C
   sets `status` with `db_set`, which skips `on_update`.
-* A status or stage that did not change sends nothing.
+* A status or stage that did not change sends nothing. A stage move on an application
+  that is already closed (Completed or Rejected) sends nothing, except a late "paid out".
+* The visit hooks never fail the visit action: an SMS problem is logged and the save goes
+  on.
+* The kit fetches the connector in A2C's CI: set the repository variable
+  `OAN_MESSAGING_CONNECTOR_REPO` until the connector is published under the organisation.
 
 ## 4. Evidence (17 November 2026)
 
 * A2C pre-commit hooks and Semgrep (Frappe rules, Python correctness, A2C rules) on the
   changed files: clean.
-* The 12 kit tests pass. Full A2C suite: 293 tests with the kit, 281 without; the same 7
+* The 15 kit tests pass. Full A2C suite: 296 tests with the kit, 281 without; the same 7
   pre-existing failures in both (`test_farmer_b2c` and loan-product checks), none from
   the kit.
 * End to end: three real `update_loan_status` calls (Verified, Approved, Disbursed) plus a
   visit scheduled and then cancelled. Each message reached the gateway once and showed
   **Submitted → delivered** in the Desk.
 * Not run end to end: `submit_application`, because A2C rightly requires an approved
-  consent first. It is covered by a unit test.
+  consent first. Its event (`notify_application`) is covered by a unit test; the call
+  site itself is two lines and was reviewed.
 
 ## 5. Decisions A2C owns
 

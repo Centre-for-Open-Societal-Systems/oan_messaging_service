@@ -68,6 +68,8 @@ request commits, so a rolled-back plan sends nothing.
 
 **Evidence (17 November 2026):** DA pre-commit and Semgrep clean; the 8 kit tests and DA's
 15 visit tests pass; full DA suite 930 tests with the kit and 922 without, no failures.
+End to end on a DA site, a planned and then rescheduled visit each reached the farmer's
+phone and showed `delivered`.
 
 ## 4. Decisions DA owns
 

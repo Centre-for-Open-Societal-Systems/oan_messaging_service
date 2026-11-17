@@ -18,18 +18,21 @@
 The code is sent once, after the request commits, by a job that holds it only in its
 arguments: `purpose="otp"`, a UUID4 key fixed at issue, expiring with the code (at most
 30 minutes, OAN's OTP ceiling), `source_reference = auth:password-reset:<reset_request_id>`.
-Logs and the Error Log carry `reset_request_id`, the OAN id and error codes only. An
+Logs and the Error Log carry `reset_request_id`, the OAN id and error codes only; the job
+catches every failure, so nothing it holds reaches Frappe's job-failure log. An
 uncertain outcome is retried by the client with the same key inside the job and is not
 repeated later: the user can ask for a new code within the daily cap. The requester's
 response never changes.
 
-Auth does **not** require the connector: on a site without it nothing changes.
+Auth does **not** require the connector: on a site without it nothing changes. Auth's own
+CI does not install the connector, so the 7 kit tests are skipped there; run them on a site
+with the connector (as here), or add it to that CI.
 
 ## Configure
 
 Auth uses the connector settings of the site it runs on. That site's caller must be
 allowed `otp` as well as `transactional` (for example `a2c`, `grievance`, `da`).
-Connector `develop` at `d4a5a5f` or later (`send_sms_now`).
+Connector `develop` at `4ad8507` or later (`send_sms_now`).
 
 ## Evidence (17 November 2026)
 
@@ -39,4 +42,4 @@ Connector `develop` at `d4a5a5f` or later (`send_sms_now`).
 | Semgrep: Frappe rules, Python correctness, Auth `.semgrep/rules.yml` | 0 findings |
 | Kit tests | 7 passed |
 | Full Auth suite with the kit / without | 391 run, 0 failures / 384 run, 0 failures |
-| End to end: a phone-only reset on the trial bench, through the worker, OAN over HTTPS and the fake 8028 | One `otp` message accepted and sent; one SMS at the gateway; no code in any log |
+| End to end (`trial/stack/a2c/e2e/e2e_auth_reset.py`): a phone-only reset on the trial bench, through the worker, OAN over HTTPS and the fake 8028 | One `otp` message accepted and sent; one SMS at the gateway; no code in any log |
