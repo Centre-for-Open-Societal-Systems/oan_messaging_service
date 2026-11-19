@@ -272,6 +272,7 @@ def make_worker(
     tg_limit: RateLimit | None = None,
     sleep: Any = None,
     lock_sleep: Any = None,
+    dispatch_tolerance: timedelta = timedelta(milliseconds=50),
     **cfg: Any,
 ) -> Worker:
     limiter = SharedRateLimiter(
@@ -280,7 +281,7 @@ def make_worker(
             Channel.SMS: sms_limit or RateLimit(requests=1000),
             Channel.TELEGRAM: tg_limit or RateLimit(requests=1000),
         },
-        dispatch_tolerance=timedelta(milliseconds=50),
+        dispatch_tolerance=dispatch_tolerance,
         time_source=clock_time_source(clock),  # explicit, shared simulated domain
         monotonic=clock.monotonic,
         sleep=lock_sleep or (sleep or clock.sleep),

@@ -121,8 +121,24 @@ async def test_two_competing_workers_never_dispatch_the_same_claim(
     ctx = await make_caller(sf, keys)
     ids = {(await submit_broadcast(repo, ctx, i)).id for i in range(40)}
     sms = FakeSms(clock)  # shared fake provider sees every call from both workers
-    w1 = make_worker(repo, engine, clock, sms=sms, worker_id="w1", batch_size=25)
-    w2 = make_worker(keys.repo(sf), engine, clock, sms=sms, worker_id="w2", batch_size=25)
+    # Both workers share one fake clock, and a worker waiting for the rate-limit lock
+    # advances it while the other is between begin and call. With the 50 ms test window
+    # that can push a call past the start window (a local non-send, retried later): a
+    # timing artefact of the shared fake clock, not what this test checks. A wide window
+    # keeps it about exclusivity.
+    wide = timedelta(seconds=30)
+    w1 = make_worker(
+        repo, engine, clock, sms=sms, worker_id="w1", batch_size=25, dispatch_tolerance=wide
+    )
+    w2 = make_worker(
+        keys.repo(sf),
+        engine,
+        clock,
+        sms=sms,
+        worker_id="w2",
+        batch_size=25,
+        dispatch_tolerance=wide,
+    )
     s1, s2 = await asyncio.gather(w1.run_once(), w2.run_once())
     assert s1.claimed + s2.claimed == 40 and s1.claimed and s2.claimed
     assert set(sms.counter) == ids and max(sms.counter.values()) == 1
@@ -655,9 +671,7 @@ async def test_rate_limited_claim_is_released_and_keeps_its_place(
 ) -> None:
     ctx = await make_caller(sf, keys)
     first = await submit_sms(repo, ctx, recipient="0900000301")
-    older = await submit_sms(
-        repo, ctx, at=T0 + timedelta(milliseconds=1), recipient="0900000302"
-    )
+    older = await submit_sms(repo, ctx, at=T0 + timedelta(milliseconds=1), recipient="0900000302")
     sms = FakeSms(clock)
 
     async def frozen(_s: float) -> None:
