@@ -69,10 +69,22 @@ provider URL or priority.
 ## 3.4 Sending
 
 * **Workers** claim due messages with `FOR UPDATE SKIP LOCKED`, one at a time by
-  default, in priority order (`otp` before `transactional` before `alert`). Each worker
-  claims only the channels it can send.
+  default, in priority order (`otp` before `transactional` before `alert` before
+  `broadcast`). Each worker claims only the channels it can send.
+* **Broadcast ageing (SMS-03 fix, decided 19 Nov 2026):** a `broadcast` message that has
+  waited longer than `broadcast_max_wait` (configuration, proposed default 180 seconds) is
+  claimed ahead of newer non-OTP traffic, so sustained higher-priority load can delay a
+  broadcast but never starve it. The OTP reserve is unchanged; there is no reserved share
+  for broadcasts. `broadcast` is enabled once this passes the starvation test.
+* **Batching (decided 19 Nov 2026):** queued messages with exactly the same text are sent
+  in one 8028 request of up to `batch_max_recipients` numbers (configuration, default
+  **100**). Each recipient stays its own message (own key, status and receipt); the
+  `sms_id`s in the response are matched back in order. 8028 requests are all or nothing,
+  so a batch that may have left without a response makes every message in it `unknown`,
+  never resent. OTPs and personal notices are sent one per request.
 * **Expiry** is checked again immediately before each network call.
-* **Rate limit:** 8028 allows 20 requests a second. The worker reserves a slot inside
+* **Rate limit:** 8028's second guide states 20 requests a second and 1,000 numbers per
+  request; v1.1 states none (ID-12). We design to the stricter figures. The worker reserves a slot inside
   the same database transaction that records the attempt (a transaction-scoped
   advisory lock), so the limit holds across workers. With the default 200 ms tolerance
   the service sends at most about 14.3 a second.
@@ -92,12 +104,16 @@ provider URL or priority.
   `200 {"success": true}`. Receipts are matched on `sms_id` and a fingerprint of the
   recipient (sent as `251…`) within 7 days of sending.
 
-  | 8028 `status` | OAN status |
+  The three 8028 documents name the field differently (`status` in guide v1.1,
+  `sms_status` in Postman v1.3 and the second guide). The listener reads `status`, then
+  `sms_status`, until 8028 confirms production's format (ID-12).
+
+  | 8028 value | OAN status |
   |---|---|
-  | `Pending` | `sent` (never overwrites a final status) |
+  | `Pending`, `Sent` | `sent` (never overwrites a final status) |
   | `Delivered` | `delivered` |
-  | `Rejected` | `failed` (`provider_rejected`) |
-  | `Sent`, `Expired` (earlier guide) | `sent`, `failed` (`provider_delivery_expired`) |
+  | `Rejected`, `Failed` | `failed` (`provider_rejected`) |
+  | `Expired` | `failed` (`provider_delivery_expired`) |
   | anything else, including null | recorded, no change |
 
 * **Content** (text and recipient) is encrypted at rest and deleted in the same
@@ -136,5 +152,6 @@ channels and purposes), `issue-credential` (token shown once), `list-credentials
 `revoke-credentials --credential ID | --all`, `suspend`, `resume`, `status`,
 `cleanup`.
 
-**Pilot limits:** `broadcast` disabled; no Telegram caller; receipts need 8028's
+**Pilot limits:** `broadcast` disabled until broadcast ageing is built and tested; no
+Telegram caller; receipts need 8028's
 callback configuration and certificates.

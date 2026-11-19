@@ -11,10 +11,12 @@
 | **Frappe connector** (`oan_messaging_connector`) | A shared Frappe app that gives every Frappe module an outbox, safe retries and status polling | SMS |
 | **Beneficiary API** (farmer registry) | The farmer's registered phone | Both |
 | **RapidPro** (courier, mailroom, web) | Receiving Telegram through the webhook, contacts, flows (language, notice, location, menus, prices, question intake, linking), sending replies, the Stop flow | Telegram |
-| **OAN Bot Services** (new, small API with its own PostgreSQL) | Adapters to Master Data, Marketplace and the DA backend; Development Agent routing, relay and reminders; question store; Development Agent linking; farmer linking | Telegram |
+| **OAN Bot Services** (new, small API with its own PostgreSQL) | Adapters to Master Data, Marketplace and the DA backend; Development Agent routing, relay and reminders; question store; Development Agent linking; farmer linking; area broadcasts for the DA web app; weekly figures for Reports Central | Telegram |
+| **Garage** (S3-compatible object storage) | Media for RapidPro, with one GET-only public route for media sent to Telegram (§5.9) | Telegram |
+| **Reports Central** | The weekly DA report, emailed by scope (§6.4.4) | Telegram |
 | **Auth service** | Issues and verifies the farmer-linking OTP; sends it as an ordinary OTP SMS | SMS |
 | **API gateway (APISIX)** | The single public Telegram webhook path and its controls (Design 1) | Telegram |
-| **Telegram channels** | Broadcasts by DA Communications Officers (no code) | Telegram |
+| **Telegram channels** | Broadcasts by DA Communications Officers (no code); targeted area broadcasts go through the bot (§6.8) | Telegram |
 
 ## 2.2 SMS flow
 
@@ -46,7 +48,7 @@
 |---|---|---|
 | Registered phone | The farmer's phone in the farmer registry | Beneficiary API, the sending module, OAN Messaging (encrypted, purged after sending) |
 | Alternate Telegram number | The number on the farmer's own Telegram account, approved by an OTP to the registered phone | OAN Bot Services link record only. Never in the registry, never used for SMS, never logged. |
-| Farmer ID | The registry identifier | Beneficiary API, OAN Bot Services link record. Never in RapidPro. |
+| Farmer ID | The registry identifier | Beneficiary API, OAN Bot Services link record and subscription row. In RapidPro only inside messages shown to Development Agents (RP-D4) and in short-lived webhook logs (§5.4); never as a contact field. |
 | `chat_id` | Telegram chat identifier, needed to reply | RapidPro contact (as its URN) |
 | `contact_ref` | HMAC-SHA256 of `chat_id` with a secret key | Logs, metrics, audit events, the question store and calls to OAN services |
 | `da_ref` | Development Agent reference from the DA backend | Question store, routing state |
@@ -54,8 +56,9 @@
 
 ## 2.5 Trust boundaries
 
-* **Public:** only the Telegram webhook path (Design 1) and, for 8028, the receipt
-  listener behind pinned mutual TLS.
+* **Public:** the Telegram webhook path (Design 1); the GET-only media route that
+  Telegram fetches relayed media from (§5.9); and, for 8028, the receipt listener behind
+  pinned mutual TLS.
 * **Internal, authenticated:** module services to OAN Messaging (bearer token per caller,
   HTTPS with strict certificate checks); RapidPro flows to OAN Bot Services (service
   credential); OAN Bot Services to OAN services (Keycloak service account).

@@ -15,10 +15,10 @@ It also summarises the OAN Messaging Service design (`docs/architecture.md`, con
 
 | Item | Status |
 |---|---|
-| Document | **Review.** Version 2.0, 16 November 2026. Not yet reviewed by ATI, security or the module teams. |
+| Document | **Review.** Version 2.0, 16 November 2026; Telegram chapters 5, 6 and 8 revised 19 November 2026 (RapidPro decisions, area broadcasts, availability, weekly report), then again the same day: broadcasts follow the DA web app and reach linked farmers, welcome SMS, DA backend roster, closing and Supervisor rules, and SMS changes in chapters 3, 4 and 7 (broadcast ageing, batching, receipt formats, purposes). Not yet reviewed by ATI, security or the module teams. |
 | SMS: OAN Messaging Service | Built and tested: the full suite (896 tests) passes on Python 3.13 after the 15 November test-certificate fix, and passed on Python 3.12 before it (3.11 and 3.12 not yet re-run after the fix). In independent review; not deployed. 12 of 16 release blockers fixed pending review (§7.5). |
 | SMS: Frappe connector | Trial build; tested end to end with Credit (A2C) in a local trial stack. Not released. |
-| Telegram bot | Specified only. Platform decision (RapidPro) depends on open decisions RP-D1, RP-D2, RP-D4 and RP-D6 (§8.3). |
+| Telegram bot | Specified only. Platform: RapidPro with OAN Bot Services; RP-D1, RP-D2, RP-D4 and RP-D6 decided on 19 November 2026 (§8.2). Delivered in one phase, built in two waves (§8.1). |
 
 ## 0.3 Who reads what
 

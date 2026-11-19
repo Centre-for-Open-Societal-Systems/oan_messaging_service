@@ -1,6 +1,7 @@
 # Appendix A: v1.0 custom router (fallback)
 
-If RP-D1, RP-D2, RP-D4 or RP-D6 is not accepted, the bot is built as a custom service
+RP-D1, RP-D2, RP-D4 and RP-D6 were accepted on 19 November 2026 (§8.2). If RapidPro is
+later rejected, the bot is built as a custom service
 instead of on RapidPro. Every rule in chapters 5.4 to 5.7 and chapter 6 still applies.
 Only the platform changes.
 

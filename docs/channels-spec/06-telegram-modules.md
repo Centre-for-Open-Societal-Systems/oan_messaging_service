@@ -2,9 +2,10 @@
 
 ## 6.1 MOD-02: Broadcast channels and onboarding
 
-Broadcasts need no bot code: DA Communications Officers post to official read-only
-Telegram channels. The same printed materials bring farmers to the bot, because a bot
-cannot send the first message.
+Channel broadcasts need no bot code: DA Communications Officers post to official
+read-only Telegram channels. Broadcasts from the DA web app, to the linked farmers or the
+Development Agents of a zone, woreda or kebele, go through the bot (§6.8). A bot cannot
+send the first message, so a **welcome SMS** and printed materials bring farmers to it.
 
 **Steps**
 1. ATI creates one official account that owns the bot and every channel, with two-step
@@ -18,14 +19,25 @@ cannot send the first message.
    start code: `t.me/<bot>?start=k_<kebele code>` pre-selects the kebele;
    `?start=src_<code>` records where the farmer came from (counted by source only).
 5. Development Agents share the links at Farmer Training Centres and kebele meetings.
-6. Main menu has "Official updates", which opens the most local channel for the
+6. **Welcome SMS.** Every registered farmer with a phone receives one SMS announcing
+   OpenAgriNet with the bot link, for example "OpenAgriNet ተጀምሯል። ዝማኔዎችን፣ ዋጋዎችን
+   በቴሌግራም ያግኙ፦ t.me/<bot>". It must fit **one SMS part in English and in Amharic**
+   (160 GSM-7 characters, or 70 with Amharic); the fuller welcome is shown in the bot.
+   The link is the same for everyone (no personal token). It is sent from the DA web
+   app's Broadcast screen, woreda by woreda over about two weeks, as SMS purpose
+   `broadcast`, so it waits for the SMS-03 fix (§8.2).
+7. Main menu has "Official updates", which opens the most local channel for the
    farmer's kebele: woreda, else zone, else region.
 
-**On `/start`:** no code: language, privacy notice, location menus. `k_` code: language,
-privacy notice, then "Is your kebele X?" with Yes / Choose another kebele.
+**On `/start`:** language, privacy notice, then **"Link your Farmer ID"** with Link now /
+Later (§6.6). Link now: the OTP steps, after which the kebele comes from the registry.
+Later, or no registry kebele: location menus (with a `k_` code, "Is your kebele X?" with
+Yes / Choose another kebele). Linked farmers receive their area's broadcasts unless they
+turn updates off in Main menu (§6.8); farmers who chose Later are offered linking again
+from Main menu and when a broadcast would have reached them.
 
-**Acceptance:** a kebele QR code reaches Main menu with that kebele set, in two taps
-after the notice; only the area's Communications Officer can post; Official updates
+**Acceptance:** the welcome SMS fits one part in English and in Amharic; a kebele QR code
+reaches Main menu with that kebele set, after the notice and Later, in two taps; only the area's Communications Officer can post; Official updates
 opens the most local existing channel.
 
 ## 6.2 MOD-01: Market prices
@@ -68,7 +80,8 @@ system.
 0. Coverage check when the farmer opens "Ask a Development Agent" (§6.4.1). If the
    kebele is not covered, the farmer sees the "coming soon" message and no question is
    taken.
-1. Topic menu: Crops, Livestock, Pests and diseases, Seed and fertilizer, Other.
+1. Topic menu: Crops, Livestock, Pests and diseases, Seed and fertilizer, Soil, water
+   and forests, Other (mapped to specialisations in §6.4.2).
 2. Intake: "Send your question as a voice note, photos or text. Tap Done when finished."
    Up to 5 items within 10 minutes; other file types refused politely.
 3. Confirm: show who receives it ("the Development Agent for Kebele X") with Send and
@@ -77,7 +90,9 @@ system.
    routing mode (§6.4). If no one is eligible, the farmer is told kindly and offered Main
    menu.
 5. It creates the question record, delivers it to the Development Agent's chat with the
-   bot (a header with the question number, kebele and topic; media as attachments), and
+   bot (a header with the question number, kebele, topic and the farmer's name under
+   RP-D4: registered name and Farmer ID if linked, otherwise the Telegram first name
+   marked "not verified"; media as attachments), and
    acknowledges: "Your question has reached your Development Agent. Your question number
    is {handover_no}. You will get a reply here."
 6. The Development Agent's reply (text, voice note or photo) is relayed to the farmer with
@@ -92,7 +107,7 @@ system.
    All alerts and reminders are Telegram messages; there is no SMS alert.
 
 **Delivery port:** one interface, two implementations. Phase 1 builds Option A
-(Development Agent's Telegram). Option B (DA app inbox, media in MinIO with short-lived
+(Development Agent's Telegram). Option B (DA app inbox, media in Garage with short-lived
 links) follows when the DA backend inbox is ready.
 
 **Question lifecycle**
@@ -102,16 +117,21 @@ links) follows when the DA backend inbox is ready.
 | `created` | Farmer taps Send | `delivered`, or `unavailable` |
 | `delivered` | Sent to the assigned agent, or offered in kebele-inbox mode | `claimed` (inbox only), `replied`, `with_officer` |
 | `claimed` | "I will answer" in kebele-inbox mode | `replied`, `with_officer` |
-| `with_officer` | The no-answer chain reached the Woreda Officer (§6.4.3) | `delivered` (officer assigns an agent), `replied`, `closed` |
+| `with_officer` | The no-answer chain reached the woreda's Supervisors (§6.4.3) | `delivered` (an officer assigns an agent), `replied`, `closed` |
+| `waiting` | Nobody at woreda level can take it (§6.4.3) | `with_officer` when a Supervisor or cover becomes eligible; `closed` |
 | `replied` | First reply relayed | stays `replied`; or `escalated`, `visit_planned`, `closed` |
 | `escalated` | "Sent to Crop Specialist" | `replied`, `closed` |
 | `visit_planned` | "Visit planned" | `replied`, `closed` |
-| `closed` | "Mark as answered", or the farmer stops | none; a new message starts a new question |
+| `closed` | The farmer taps "Thank you, that answers it"; the agent or officer taps "Mark as answered"; **2 working days after the last reply with no follow-up** (configurable); or the farmer stops | none; a new message starts a new question, sent first to the agent who answered (§6.4.2) |
 | `unavailable` | No one could receive it | none (farmer told kindly) |
 
-While a question is open, each reply carries "Ask a follow-up", which goes to the same
-agent under the same number. When closed, the farmer is told "Your Development Agent has
-marked question {handover_no} as answered."
+Each reply reaches the farmer with **"Thank you, that answers it"** and **"I have a
+follow-up"**. Thank you closes the question at once. A follow-up while the question is open
+goes to **whoever holds it now** (the agent who replied, or the agent or officer it was
+passed to) under the same number, and restarts the no-answer waits. With no response the
+question closes 2 working days after the last reply. When closed, the farmer is told
+"Question {handover_no} is now closed. Send a new question any time." The weekly report
+counts a question as answered when the first reply is sent, not when it closes.
 
 **Question store** (OAN Bot Services PostgreSQL; message content and media are never
 stored there; routing additions in §6.4.6)
@@ -151,12 +171,15 @@ roster (R1, cached). The kebele is **covered** when at least one Development Age
 eligible.
 
 * **Eligible Development Agent:** listed for the kebele in R1, status `active`, Telegram
-  linked, and not already passed over on this question.
+  linked, not marked unavailable in the bot (§6.4.7), and not already passed over on
+  this question.
+* If the kebele has Development Agents but every one is unavailable, the kebele still
+  counts as covered and new questions go straight to the Woreda Officer (§6.4.3).
 * **Not covered:** the menu item still shows. Tapping it shows "The Development Agent
   service is coming soon to Kebele {kebele}. Meanwhile you can see market prices and
   official channels." with Market prices, Channels and Main menu. No question is taken.
 * **Covered:** topic, intake and confirm as in §6.3. The roster is read again just
-  before delivery, so leave and transfers since the menu opened are respected.
+  before delivery, so transfers since the menu opened are respected.
 
 ### 6.4.2 Routing modes
 
@@ -164,19 +187,42 @@ Set per kebele by an administrator in the DA backend (D5).
 
 | Mode | How the receiver is chosen |
 |---|---|
-| `specialism` (default) | Map the topic to a specialism: Crops, Pests and diseases, Seed and fertilizer → `crops`; Livestock → `livestock`; Other → any. **(a) Same Development Agent first:** the agent who last *answered* this farmer (same `contact_ref`, kebele and specialism, within the retention period) gets it if eligible; the turn pointer does not move. **(b)** Otherwise the next eligible agent in turn for that specialism (pointer per kebele and specialism). **(c)** If none has the specialism, the next eligible agent in turn across the kebele. |
+| `specialism` (default) | Map the topic to an ordered list of specialisation codes (table below). **(a) Same Development Agent first:** the agent who last *answered* this farmer (same `contact_ref`, kebele and topic, within the retention period) gets it if eligible; the turn pointer does not move. **(b)** Otherwise the next eligible agent in turn for the first code in the list that has one (pointer per kebele and code); a kebele may have several agents with the same specialisation (the Dev DA Registry already does), and they take turns. **(c)** If no code in the list has one, the next eligible agent in turn across the kebele. |
 | `kebele_inbox` | **Private-chat inbox.** The question is offered to every eligible Development Agent of the kebele, each in their own chat with the bot, with a reply-keyboard button "I will answer Q-123". The first tap claims it; the others are sent "Q-123 is being answered by {name}." No Telegram groups are used. |
 
-* Follow-ups to an open question go to the agent handling it.
-* Only the agent who answered (or, in inbox mode, the claimer or the Woreda Officer) can
-  close it.
-* An agent who goes on leave, is transferred or unlinks while holding a question counts
-  as passed over; their open questions move at once under the same rule.
+**Topic to specialisation** (codes from the DA registry list `DA_SPECIALISATION`; the
+mapping is Bot Services configuration, changed without a release):
+
+| Topic | Specialisation codes, in order |
+|---|---|
+| Crops | `CROP_PRODUCTION`, `AGRONOMY`, `HORTICULTURE` |
+| Pests and diseases | `CROP_PRODUCTION`, `AGRONOMY` |
+| Seed and fertilizer | `AGRONOMY`, `CROP_PRODUCTION` |
+| Livestock | `LIVESTOCK` |
+| Soil, water and forests | `NATURAL_RESOURCES` |
+| Other | any |
+
+* Follow-ups to an open question go to whoever holds it now, also after it has been passed
+  on; the question closes on "Thank you", on "Mark as answered" or 2 working days after the
+  last reply (§6.3).
+* An agent who is transferred, made inactive or unlinks while holding a question counts
+  as passed over. The bot finds this when it next reads the roster: before every
+  delivery and timer step, and in a **sweep every 8 hours** of the kebeles that have
+  open questions. Their unanswered questions then move under the same rule (within 8
+  hours). The DA backend publishes no change events for postings, so the sweep stays. A reply from the old holder before the sweep is
+  still relayed.
+* An agent who marks themselves unavailable (§6.4.7) is handled at the start of the
+  window.
 
 ### 6.4.3 When nobody answers
 
 A question is never left with a silent Development Agent. The **Extension Department
-Woreda Officer** is the end of the chain.
+Woreda Officer** is the end of the chain. In the DA app this is the **Supervisor** role
+with a woreda scope (D6), taken from DA app roles, not from the registry's `position`
+or `reports_to`. A woreda may have **several Supervisors**: an escalation is offered to
+every linked, available one, each in their own chat; the first "I will answer" or
+"Assign to a Development Agent" claims it and the others are told it is taken. An
+unavailable Supervisor is replaced by the Development Agents they named (§6.4.7).
 
 ![No-answer chain](diagrams/t5-no-answer-chain.png)
 
@@ -189,12 +235,14 @@ question sent outside working hours starts its wait at the next working hour.
 |---|---|---|
 | Specialism mode: assigned agent has not replied | 1 working day | Reminds the agent once; tells the farmer the question is still with their Development Agent |
 | Still no reply | 1 more working day | Marks the agent as passed over and tells them "Question {no} has been passed to a colleague."; assigns the next eligible agent in turn; tells the farmer once: "Your question {no} has been passed to another Development Agent, who will reply here." |
-| **2 agents passed over**, or no eligible agent left | Immediately | Sends the question to the Woreda Officer's own chat with **Assign to a Development Agent** and **I will answer**; tells the farmer: "Your question {no} has been passed to the Extension Department Woreda Officer, who will make sure it is answered." |
+| **2 agents passed over**, or no eligible agent left | Immediately | Offers the question to every eligible Supervisor of the woreda (or their cover) with **Assign to a Development Agent** and **I will answer**; tells the farmer: "Your question {no} has been passed to the Extension Department Woreda Officer, who will make sure it is answered." |
+| Nobody at woreda level can take it (no linked Supervisor, all unavailable with no cover) | Immediately | Status `waiting`; tells the farmer once that it may take longer than usual and that they can also visit their kebele office; every 8-hour sweep tries the woreda again; shown in the weekly report. No escalation above the woreda |
 | Inbox mode: nobody has tapped "I will answer" | 1 working day | One reminder to every offered agent |
 | Still unclaimed | 1 more working day | To the Woreda Officer, as above |
 | Inbox mode: claimed, but the claimer has not replied | 1 working day after the claim | Reminds the claimer once |
 | Still no reply | 1 more working day | Releases the claim (the claimer counts as passed over) and sends the question to the Woreda Officer |
-| Woreda Officer has not acted | 1 working day | Reminds the officer once; the question stays with the officer |
+| Offered to Supervisors, nobody has claimed it | 1 working day | One reminder to every offered Supervisor or cover; then it stays offered and counts as unanswered |
+| Claimed by an officer who has not acted | 1 working day | Reminds that officer once; the question stays with them |
 
 **Rules**
 * A reply at any step ends the chain.
@@ -205,58 +253,82 @@ question sent outside working hours starts its wait at the next working hour.
   moved to a colleague." This prevents two answers.
 * "Same Development Agent" (§6.4.2) means the one who answered, never one who was passed
   over.
-* Every move is recorded (who held it, from when, why it moved) for the weekly summary
+* Every move is recorded (who held it, from when, why it moved) for the weekly report
   and audit.
 
-### 6.4.4 Weekly summary of unanswered questions
+### 6.4.4 Weekly report of unanswered questions (Reports Central)
 
-Every **Friday at 16:00 East Africa Time** (configurable), the bot sends each Woreda
-Officer, zone extension head and regional extension head a summary for their area in
-their own chat with the bot.
+The weekly summary is an **executive report, emailed through Reports Central** (the OAN
+Report Center, category **DA**). It is not a Telegram message.
 
-**Unanswered** = no reply from a Development Agent or officer one working day after the
-question was sent. It includes questions now with the Woreda Officer and questions
-closed as unavailable during the week.
+* **Snapshot.** Every **Friday at 16:00 East Africa Time** (configurable), Bot Services
+  freezes the week's figures into `weekly_da_summary` (counts per kebele, no farmer
+  data). The emailed report and the on-screen report show the same numbers, and past
+  weeks stay comparable after the 90-day purge.
+* **Data source.** Bot Services is an upstream chart service for Reports Central
+  (`UPSTREAM_DA_BASE_URL`): `GET /api/v1/charts/{key}?level=woreda|zone|region&code=…&week=YYYY-Www`.
+  Charts: unanswered by kebele, by woreda and by zone (count, working days the oldest
+  waited, question numbers at woreda level); questions now with the officer; Development
+  Agents unavailable and officers covered during the week.
+* **Unanswered** = no reply from a Development Agent or officer one working day after the
+  question was sent. It includes questions now with the Woreda Officer, questions
+  `waiting` with nobody at woreda level (their own heading) and questions closed as
+  unavailable during the week. A question counts as answered when the first reply is
+  sent.
 
-| Recipient | Rows | Each row shows |
+| Recipient (DA app role and scope) | Rows | Each row shows |
 |---|---|---|
-| Extension Department Woreda Officer | One per kebele in the woreda | Unanswered count, working days the oldest has waited, question numbers |
-| Zone extension head | One per woreda in the zone | Unanswered count, working days the oldest has waited |
-| Regional extension head | One per zone, then per woreda | Unanswered count, working days the oldest has waited |
+| Supervisor with a woreda scope (Woreda Officer) | One per kebele in the woreda | Unanswered count, working days the oldest has waited, question numbers |
+| Executive with a zone scope | One per woreda in the zone | Unanswered count, working days the oldest has waited |
+| Executive with only a region scope | One per zone, then per woreda | Unanswered count, working days the oldest has waited |
 
 * Never included: farmer names, chat ids, phone numbers or message content.
-* A week with nothing unanswered sends one line: "No unanswered questions this week".
-* A recipient who has not linked Telegram gets nothing; the miss is logged for the Admin
-  team.
-* Built from the question records and assignment history; the only extra DA backend call
-  is R4 for recipients.
+* A week with nothing unanswered shows one line: "No unanswered questions this week".
+* Reports Central schedules the report, resolves recipients and their scopes from DA RBAC
+  Assignment and sends the email. Its current specification lists scheduled email and
+  role-scoped delivery as out of scope, so these are dependencies on that team (ID-08).
+  If Reports Central is not ready when Ask a Development Agent goes live, the emailed report waits:
+  snapshots keep accumulating and past weeks can be sent later. Bot Services sends no
+  interim email.
 
 ### 6.4.5 What the DA backend must provide
 
-The DA backend owns every fact routing depends on; OAN Bot Services only reads it, caches
-it and reports dead links. Until these exist, the bot is built and tested against a stub
-with exactly these fields.
+The **DA backend** (`oan_da_app_services`) owns every fact routing depends on and is the
+bot's only source for them; it takes the agents' details from the **DA Registry**
+(OpenG2P, register `DA`) and keeps the postings the registry cannot hold yet.
+OAN Bot Services only reads them, caches them and reports dead links. Until every route
+exists, the bot is built and tested against a stub with exactly these fields.
 
 | # | Data | Requirement |
 |---|---|---|
-| D1 | Development Agent ↔ kebele assignment | Many-to-many, keyed by the Master Data kebele code (never the name), with start and end dates. One agent can cover several kebeles. |
-| D2 | Specialism | One value per agent from a fixed shared list of codes: `crops`, `livestock` (extendable). Codes, not display labels. |
-| D3 | Status | `active`, `on_leave` (optional return date) or `inactive` |
+| D1 | Development Agent ↔ kebele posting | DA backend `DA Kebele Assignment`, state `Effective`: one posting in force per agent, on a Master Data kebele code (for example `ET01010805`). Created from the registry's `kebele_code` when the agent's account is made; transfers and postings by hand are kept here, because the registry has no API for them yet. The same rows decide Development Agent broadcast recipients in the DA backend. |
+| D2 | Specialisation | DA Registry `specialisation`, read through the DA backend; required for positions `DEVELOPMENT_AGENT` and `SENIOR_DA`, from `DA_SPECIALISATION`: `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER`. Codes, not display labels. |
+| D3 | Status | An active Development Agent grant in the DA backend (`DA RBAC Assignment`, within its effective dates). Agents without one are not eligible. |
 | D4 | Telegram link | The linked chat against the person's ref; one active link per person; a new link replaces the old one |
 | D5 | Routing mode per kebele | `specialism` (default) or `kebele_inbox`, set by an administrator |
-| D6 | Extension Department Woreda Officer | The officer for each woreda (woreda code), with their Telegram link |
-| D7 | Zone and regional extension heads | The head for each zone and region (Master Data codes), with their Telegram link |
+| D6 | Extension Department Woreda Officer | The DA app role **Supervisor** with a woreda scope (`DA RBAC Assignment`, with effective dates), with their Telegram link |
+| D7 | Executives above the woreda | The DA app role **Executive** with a zone scope, or with only a region scope; used as report recipients (§6.4.4) |
 
 | # | Route (behind APISIX; bot service account scoped to these only) | In → out |
 |---|---|---|
-| R1 | Roster for kebele | kebele code → routing mode; for each person currently assigned: `da_ref`, display name, specialism, status, linked yes/no, delivery address. Unknown kebele → empty roster, not an error. |
-| R2 | Link a person | one-time code + chat → ref, role (`development_agent`, `woreda_extension_officer`, `zone_extension_head`, `regional_extension_head`) and confirmed; or invalid / expired. Each code works once. |
+| R1 | Roster for kebele | DA backend route: one or more kebele codes → per kebele the routing mode (D5) and its agents with an `Effective` posting and an active Development Agent grant: `da_ref` (registry DA-ID), display name, specialisation and Telegram linked yes/no (D4). Same rule the DA backend uses for broadcast recipients. Unknown kebele → empty roster, not an error. |
+| R2 | Link a person | one-time code + chat → ref, role (`development_agent`, `supervisor`, `executive`) and confirmed; or invalid / expired. Each code works once. |
 | R3 | Report unreachable chat | ref + reason (blocked the bot, chat deleted) → link marked inactive until the person links again |
-| R4 | Officers for area | woreda, zone or region code → the officer or head: ref, role, display name, linked yes/no, delivery address |
+| R4 | Officers for area | woreda, zone or region code → Supervisor or Executive: ref, role, display name, linked yes/no, delivery address |
 
-* **Freshness:** R1 and R4 are cached 5 minutes and R1 is read again before every
-  delivery and every timer. Change events (the DA Registry's planned WebSub) may replace
-  this later; not needed for Phase 1.
+Checked 19 Nov 2026 against `oan_da_app_services` (`develop`, `2ae3d13`) and the
+Development DA Registry: D1–D3 exist in the DA backend (postings and role grants); D6
+and D7 exist as DA app roles; **D4, D5 and routes R1–R4 do not exist yet** (ID-03). The
+bot does not call the registry. The registry's own `telegram_number` (optional, unverified, mostly
+empty) and `reports_to` are not used. There is no individual agent–farmer link: every
+Development Agent of a kebele serves every farmer in it (KR-18), so `DA Farmer Link` is
+not used.
+
+* **Freshness:** R1 and R4 are cached 5 minutes for menus and coverage checks. Deliveries,
+  timer steps, broadcasts and the 8-hour sweep (§6.4.2) **bypass the cache** and read
+  the DA backend directly, falling back to the cached copy only when it is down. There is no
+  bulk copy of the roster. The DA register publishes no change events
+  (`outgest_applicable` is off), so the 8-hour sweep stays.
 * **Outage:** if the DA backend is down, the last roster is used for up to 24 hours,
   then the kebele is treated as not covered.
 * **Privacy:** the bot never sends the DA backend a farmer's chat id, phone number or
@@ -270,23 +342,67 @@ are only caches.
 | Store | Addition |
 |---|---|
 | Cache | Roster per kebele (R1) and officer per area (R4): 5 minutes fresh; last copy kept 24 hours for outages |
-| `handovers` (new columns) | `holder_ref`, `holder_role`, `next_timer_at`, `timer_kind` (`reminder`, `reassign`, `claim_reminder`, `officer_reminder`), `pass_count`, `routing_kebele_code` |
-| `handover_assignments` (new) | `handover_id`, `ref`, `role`, `assigned_at`, `reminded_at`, `ended_at`, `end_reason` (`answered`, `passed_over`, `claim_released`, `on_leave`, `transferred`, `unlinked`, `claimed_by_colleague`, `assigned_by_officer`) |
-| `handover_offers` (new, inbox mode) | `handover_id`, `ref`, `offered_at`, `outcome` (`claimed`, `claimed_by_colleague`, `expired`) |
-| `weekly_summaries` (new) | `recipient_ref`, `week_start`, `sent_at`, `status` |
-| `working_calendar` (new) | region code, working hours, public holidays |
+| `handovers` (new columns) | `holder_ref`, `holder_role`, `next_timer_at`, `timer_kind` (`reminder`, `reassign`, `claim_reminder`, `officer_reminder`, `auto_close`), `pass_count`, `routing_kebele_code`, `last_reply_at` |
+| `handover_assignments` (new) | `handover_id`, `ref`, `role` (`development_agent`, `officer`, `officer_cover`), `assigned_at`, `reminded_at`, `ended_at`, `end_reason` (`answered`, `passed_over`, `claim_released`, `unavailable`, `transferred`, `unlinked`, `claimed_by_colleague`, `assigned_by_officer`) |
+| `handover_offers` (new, inbox mode and officer cover) | `handover_id`, `ref`, `offered_at`, `outcome` (`claimed`, `claimed_by_colleague`, `expired`) |
+| `staff_unavailability` (new) | `ref`, `from`, `until`, `set_at`, `cancelled_at` |
+| `officer_cover` (new) | `officer_ref`, `woreda_code`, `covering_refs`, `from`, `until` |
+| `outbound_queue` (new) | `contact`, `text_key`, `params`, `created_at`, `released_at` (§5.8) |
+| `weekly_da_summary` (new) | `week`, `kebele_code`, `woreda_code`, `zone_code`, counts, oldest wait, question numbers (§6.4.4) |
+| `working_calendar` (new) | region code, working hours, public holidays; loaded at start from a YAML file in the Helm values, maintained by ATI DevOps from ATI's yearly holiday list |
 
-* **Timer job:** once a minute, a single worker picks questions whose `next_timer_at`
-  has passed and applies §6.4.3. Each step is idempotent, so a crash or a second run does
-  no harm. `next_timer_at` is computed from the working calendar.
-* **Summary job:** weekly, from `handover_assignments`; once per recipient per week.
-* **Lifecycle:** one new status, `with_officer` (next: `delivered` when the officer
-  assigns an agent, `replied`, or `closed`). Passing a question between agents is an
+* **Worker:** one deployment, separate from the API pods, one active replica holding a
+  PostgreSQL advisory lock (a second copy stays passive). It runs:
+  * the **timer job** once a minute: picks questions whose `next_timer_at` has passed and
+    applies §6.4.3; each step is idempotent, so a crash or a second run does no harm;
+    `next_timer_at` is computed from the working calendar;
+  * the **queue retry** once a minute (§5.8);
+  * the **roster sweep** every 8 hours (§6.4.2);
+  * the **weekly snapshot** on Friday at 16:00 EAT (§6.4.4);
+  * the **retention purge** daily.
+* **Lifecycle:** two new statuses, `with_officer` (next: `delivered` when an officer
+  assigns an agent, `replied`, or `closed`) and `waiting` (nobody at woreda level; next:
+  `with_officer` or `closed`); replied questions auto-close through the `auto_close`
+  timer (§6.3). Passing a question between agents is an
   assignment change, not a status change.
 * Logs, metrics and audit events use `contact_ref` only; officer and agent refs may
   appear, chat ids never.
 
-### 6.4.7 Acceptance criteria
+### 6.4.7 Availability and officer cover
+
+Development Agents and officers mark their own unavailability in the bot. It is stored in Bot Services
+only and nothing is written to the DA backend.
+
+**Development Agents**
+* The staff menu has "Set unavailable": from (today, tomorrow or a date), until (return
+  date, at most 60 days), confirm; plus "View or cancel" and "I'm back early".
+* During the window the agent is not eligible for new questions, inbox offers, "same
+  Development Agent first" or Development Agent broadcasts (§6.8).
+* Questions the agent holds when the window starts move at once to the next eligible
+  agent (`end_reason = unavailable`; this does not count towards the 2 passed over); the
+  farmer is told once.
+* If every agent of a kebele is unavailable, new questions go straight to the Woreda
+  Officer.
+* The window ends on the return date; the agent is told "Welcome back, you will receive
+  questions again."
+* An agent who is away without saying so is handled by the no-answer chain (KR-07).
+
+**Woreda Officers**
+* "Set unavailable" adds a step: choose the covering Development Agents from the
+  woreda's agents (Master Data kebeles of the woreda → R1 for each; active and linked
+  only; pages of 8). At least one is required.
+* During the window, questions that reach the end of the chain are **offered to every
+  covering agent**, each in their own chat, with "I will take Q-123"; the first tap
+  claims it and the others are told. The claimer has the officer's buttons for that
+  question (Assign to a Development Agent, I will answer).
+* Questions the officer holds when the window starts are offered to the covering agents
+  at once.
+* Silent cover: one reminder after 1 working day, then it stays (as KR-10). If no
+  covering agent is still eligible, the question waits and goes to the officer on the
+  return date.
+* Moves are recorded with `role = officer_cover` and who named them.
+
+### 6.4.8 Acceptance criteria
 
 Tested against the DA backend stub, with a fake clock and a test working calendar.
 
@@ -298,7 +414,20 @@ Tested against the DA backend stub, with a fake clock and a test working calenda
   from different farmers take turns; a kebele with no agent of that specialism takes
   turns across all.
 * A farmer's new question goes to the agent who last answered them when eligible, and to
-  the next in turn when that agent is on leave, unlinked or transferred.
+  the next in turn when that agent is unavailable, unlinked or transferred.
+* A "Soil, water and forests" question goes to the `NATURAL_RESOURCES` agent; a "Seed and
+  fertilizer" question with no `AGRONOMY` agent goes to the `CROP_PRODUCTION` agent.
+* An agent who sets themselves unavailable gets no new questions in the window; their
+  held questions move at the start without counting as passed over; they get questions
+  again after the return date.
+* A transferred agent's unanswered questions move at the next 8-hour sweep.
+* A transfer made in the DA app (a new `Effective` posting) changes the roster even if
+  the DA Registry still shows the old kebele.
+* An officer who is unavailable: escalations are offered to all covering agents and the
+  first tap claims; with no eligible covering agent the question waits for the officer's
+  return date.
+* A message queued for a contact who is in a flow is delivered when the flow ends, in
+  order, and the working-day wait starts at delivery.
 * No reply: reminder after 1 working day; reassignment after 2 with the farmer told once;
   after 2 agents are passed over the question reaches the Woreda Officer; a passed-over
   agent's late reply is not relayed.
@@ -310,22 +439,36 @@ Tested against the DA backend stub, with a fake clock and a test working calenda
 * The officer can assign or answer; the officer is reminded once after 1 working day.
 * DA backend unavailable: routing continues on the cached roster for 24 hours, then the
   kebele shows "coming soon".
-* Weekly summary on Friday 16:00: correct counts per kebele, woreda and zone for a seeded
-  week; no farmer name, chat id or message text in any summary or log line.
+* Weekly snapshot on Friday 16:00: correct counts per kebele, woreda and zone for a seeded
+  week; the chart API returns the same figures for that week afterwards; no farmer name,
+  chat id or message text in any chart response or log line.
 * Restart during a wait: the timer still fires once, at the right time.
+* "Thank you, that answers it" closes the question; with no response it closes 2 working
+  days after the last reply; a follow-up after the question was passed on reaches the
+  current holder.
+* A woreda with two linked Supervisors: both are offered the escalation, the first tap
+  claims it and the other is told.
+* No linked Supervisor and no cover: the question is `waiting`, the farmer is told once,
+  the next sweep after a Supervisor links offers it, and it appears in the weekly report.
+* Two agents with the same specialisation in one kebele take turns.
 
 ## 6.5 Linking Development Agents and officers
 
 1. In the DA app the person opens "Link Telegram"; the DA backend issues a one-time code
-   (8 characters, valid 15 minutes, tied to their ref). This covers Development Agents,
-   Extension Department Woreda Officers and zone and regional extension heads.
+   (8 characters, valid 15 minutes, tied to their ref). This covers Development Agents
+   and Supervisors (Woreda Officers). Executives receive the weekly report by email
+   (§6.4.4) and do not need to link. Communications Officers send from the DA web app
+   (§6.8) and do not need to link.
 2. The person opens the bot and sends the code; OAN Bot Services calls R2, and the DA
    backend stores the chat as their delivery address.
 3. A new phone or account repeats this; the new chat replaces the old. Someone who leaves
-   or moves drops out of the roster and their open questions move (§6.4.2).
-4. A wrong or expired code is refused kindly; 5 failures in an hour lock linking for that
+   or moves drops out of the roster and their open questions move at the next sweep
+   (§6.4.2).
+4. After linking, Bot Services adds the contact to the RapidPro group `staff`, so their
+   messages go through the staff flow (§5.8).
+5. A wrong or expired code is refused kindly; 5 failures in an hour lock linking for that
    chat for an hour (the lockout stays in the bot).
-5. A person who blocks the bot or deletes the chat is reported through R3.
+6. A person who blocks the bot or deletes the chat is reported through R3.
 
 **Option B** (later): the DA app inbox, with "Post question" (`handover_id`,
 `contact_ref`, kebele, topic, text, media links, language → message id) behind the same
@@ -338,13 +481,16 @@ tells the farmer once.
 
 ## 6.6 MOD-08: Farmer linking (OTP to the registered phone)
 
-Linking tells the bot which registered farmer it is talking to. It is optional: menus
-and prices work without it; MOD-06 and MOD-07 need it.
+Linking tells the bot which registered farmer it is talking to. It is offered during
+onboarding, right after the privacy notice (§6.1), and from Main menu. Menus, prices and
+questions work without it; **broadcasts on Telegram (§6.8)** and MOD-06/07 need it. It is
+built in the first Telegram release, with broadcasts (§8.1).
 
 ![Farmer linking](diagrams/t4-farmer-linking.png)
 
 **Steps**
-1. The farmer chooses Main menu › Link my Farmer ID and types their Farmer ID.
+1. The farmer chooses Link now at onboarding (or Main menu › Link my Farmer ID) and types
+   their Farmer ID.
 2. The farmer taps Share my phone number (Telegram's contact button). OAN Bot Services
    accepts it only if the shared contact's user id equals the sender's.
 3. OAN Bot Services gets the registered phone and the registered **kebele code** for the
@@ -356,8 +502,10 @@ and prices work without it; MOD-06 and MOD-07 need it.
 5. The farmer types the code; OAN Bot Services asks Auth to verify it.
 6. On success OAN Bot Services stores the link (contact, Farmer ID, linked phone, a
    fingerprint of the registered phone, registered kebele code, time) and sets only
-   `linked = yes` on the RapidPro contact. If the registered kebele differs from the one
-   the farmer chose, the bot asks which one to send questions to (§6.4.1).
+   `linked = yes` on the RapidPro contact, and creates the subscription row with updates
+   on (§6.8.1). If the registered kebele differs from one the farmer chose earlier, the
+   bot asks which one to send questions to (§6.4.1); broadcasts always use the registry
+   kebele.
    * **Same number:** the Telegram number equals the registered phone.
    * **Alternate number:** the Telegram number differs; the OTP to the registered phone
      approves it. It is used only for Telegram-specific updates, never written to the
@@ -368,7 +516,7 @@ and prices work without it; MOD-06 and MOD-07 need it.
 
 | Call | Inputs and outputs |
 |---|---|
-| Beneficiary API: registered phone and kebele | Farmer ID → phone and Master Data kebele code, or not found (new lookup) |
+| Beneficiary API: registered phone, kebele and name | Farmer ID → phone, Master Data kebele code and registered name, or not found (new lookup). The name is read again when a question is delivered (RP-D4) and is not stored in Bot Services. |
 | Auth: issue linking OTP | Farmer ID, registered phone, link request id → sent, or rate-limited (new service-client route) |
 | Auth: verify linking OTP | link request id, code → valid, invalid or expired |
 
@@ -380,7 +528,8 @@ it sits in RapidPro's history under RP-D1 retention; it is single-use and short-
 
 ## 6.7 MOD-06 and MOD-07: Verified status checks (deferred)
 
-Do not build in Phase 1; reserve the menu slot and the adapter interface.
+Do not build in Phase 1; reserve the menu slot and the adapter interface. Verification
+is decided (TG-30): linked Farmer ID only.
 
 * Interface: `check_status(reference, farmer_id) -> {status_label, updated_date} | not_verified`.
 * The farmer must be linked (§6.6); the check uses the Farmer ID from the link.
@@ -388,3 +537,118 @@ Do not build in Phase 1; reserve the menu slot and the adapter interface.
   failed check returns the same message as an unknown reference; lock out after 3
   failures in an hour.
 * Needs new bot-only routes in both backends, behind the APISIX gateway.
+
+## 6.8 Area broadcasts through the bot
+
+The **DA web app** is the design: its Broadcast screen (`oan_da_app_ui`, `/broadcast`,
+FR-10) and its Knowledge Base "Send to farmers" (FR-11). Senders write, choose the area,
+recipients and channels there; the bot only delivers the Telegram copy, as OAN Messaging
+delivers the SMS copy. Nobody uses RapidPro screens to send. Bot Services adds no rule the
+app does not have; a change to the app's behaviour is a decision for the DA team and ATI,
+not for this specification.
+
+| Sender (role in the DA app) | Recipients | Area |
+|---|---|---|
+| Communications Officer, OAN Administrator | All farmers or all Development Agents | A woreda (chosen Region → Zone → Woreda), or a whole zone |
+| Supervisor | All farmers or all Development Agents | Their own woreda |
+| Development Agent | All farmers or all Development Agents | Their own kebele |
+| Knowledge Base "Send to farmers" | Farmers | One woreda; English or Amharic |
+
+**What a broadcast carries (from the app):** signal source (Knowledge, Emergency, Weather,
+Informational), title (3–140 characters), one message, optional evidence files (PDF, JPG
+or PNG up to 5 MB each), the channels ticked (In-app, SMS, Telegram) and the app's
+`client_op_id`. There is no approval step and no priority field.
+
+**Language.** The message is sent **as written**, in one language, to every recipient,
+and the SMS copy is the same text. A text per language (each farmer in their own) is a
+later enhancement that needs DA app changes; it is not built in Phase 1.
+
+### 6.8.1 Who receives it
+
+* **Farmers: linked farmers only** (§6.6), on their **registry kebele code**, whose updates
+  are on. A farmer who has not linked gets no broadcasts on Telegram; the bot invites them
+  to link. Nobody is asked about updates at onboarding: the privacy notice says that
+  linked farmers receive official updates for their area, and "Updates on/off" in Main
+  menu turns them off and on again.
+* Bot Services keeps one subscription row per linked farmer: RapidPro contact UUID,
+  `contact_ref`, Farmer ID, registry kebele, woreda and zone codes, language, updates on
+  or off. No name, chat id or phone. The row lives as long as the link: Stop, unlinking or
+  a deleted Telegram account removes it at once, and 12 months without any activity
+  (configurable) removes the row and the link.
+* **Development Agents:** the roster (R1) of the kebele, or of every kebele in the woreda or
+  zone: active and linked agents, minus the sender, each in their chosen bot language.
+
+### 6.8.2 `POST /broadcasts`
+
+Caller: the DA backend with its Keycloak service account, only when Telegram is ticked.
+The contract follows OAN Messaging's (§3.1–3.4) wherever it can, so one client handles
+both channels.
+
+| Field | Notes |
+|---|---|
+| `Idempotency-Key` (header) | The app's `client_op_id`. First request `202`; the same key and body returns the original (`200`); the same key with a different body is `409 idempotency_conflict`. Bindings kept at least 30 days; compared by keyed HMAC fingerprint |
+| `recipients` | `farmers` or `das` |
+| `scope` | `{level: zone, woreda or kebele, code}` (Master Data codes) |
+| `sender_ref`, `sender_role` | The DA web app has already checked the role and area; Bot Services records both in the audit |
+| `source` | `Knowledge`, `Emergency`, `Weather` or `Informational` |
+| `source_reference` | Names the business event (for example `da_broadcast:BC-2210`); never personal data |
+| `title`, `body` | Sent as one Telegram message: title in bold, then the message; `language` when the app sends one (Knowledge Base), recorded for reporting only |
+| `evidence` | Optional files, sent after the message as photos or documents through the media route (§5.9) |
+| `expires_at` | Optional, RFC 3339 with an offset, at most 7 days ahead, set by the caller and never extended (as for SMS) |
+
+* Response `202`: `broadcast_id`, `recipients`, and `not_on_telegram` (refs of Development
+  Agents not linked to the bot).
+* `GET /broadcasts/{id}`: counts per status, with OAN Messaging's names: `accepted`,
+  `sending`, `sent`, `failed`, `expired`, `unknown`. Telegram gives no delivery receipt,
+  so a successful send ends at `sent`; the app's "delivered" count shows `sent`.
+* `GET /broadcasts/{id}/telegram-recipients`: the Farmer IDs whose Telegram copy is `sent`,
+  for the SMS step below. Available once the broadcast is finished or after
+  `sms_fallback_wait` (configuration, default 15 minutes), whichever is first.
+* Errors are `application/problem+json` with OAN Messaging's `code` values
+  (`unauthenticated`, `forbidden`, `not_found`, `validation_failed` with `errors[{field,
+  code}]`, `idempotency_conflict`, `payload_too_large`, `unsupported_media_type`,
+  `service_unavailable`). No `429`; unknown fields are rejected; submitted values are
+  never echoed.
+
+### 6.8.3 SMS copy: Telegram first
+
+When both channels are ticked, the DA backend sends the Telegram copy first, then the SMS
+copy through OAN Messaging to every registered farmer of the area with a phone **except**
+the Farmer IDs returned by `telegram-recipients`. A farmer whose Telegram copy failed,
+expired, is `unknown` or is still pending after `sms_fallback_wait` gets the SMS. This is
+the app's own wording: "farmers without connectivity receive it by SMS". Development
+Agents in `not_on_telegram` get the SMS copy the same way.
+
+SMS purpose (§3.1): `Emergency` and `Weather` go as `alert`; `Knowledge` and
+`Informational` as `broadcast` (SMS-03 revised, §8.2). The DA backend's caller is allowed
+both.
+
+### 6.8.4 Delivery
+
+* Batches through the RapidPro broadcasts API, which does not disturb a flow the farmer is
+  in (§5.8).
+* `Emergency` broadcasts go ahead of other broadcasts, never ahead of conversation
+  replies; several running broadcasts of the same kind take turns batch by batch, so a
+  zone sent as many woredas makes progress in every woreda.
+* Pace: at most `broadcast_max_per_second` (configuration, **default 20**, never above
+  Telegram's 30 for the bot), leaving room for conversation replies. The SMS copy is paced
+  by OAN Messaging.
+* `expires_at` is checked before every send; recipients not reached by then are `expired`
+  and get the SMS copy.
+* An attempt whose outcome cannot be proven (a timeout after the request left) is
+  `unknown` and **never resent**, as in OAN Messaging; it counts as not delivered for the
+  SMS copy.
+* A farmer who blocked the bot or deleted their account is `failed`, marked so later
+  broadcasts skip them, and never retried. Temporary errors (429, network before the
+  request left): retried with Telegram's `retry_after` up to 3 times, then `failed`.
+* Link previews off for farmers.
+
+**Acceptance:** a broadcast with Telegram ticked reaches the linked farmers (or the
+Development Agents) of that zone, woreda or kebele, and nobody else; an unlinked farmer of
+the area gets nothing on Telegram; a repeat `Idempotency-Key` sends nothing twice and
+returns `200`; `GET /broadcasts/{id}` shows the counts the app's history shows; the SMS
+copy skips exactly the farmers in `telegram-recipients` and reaches those whose Telegram
+copy failed, expired or stayed pending; an expired broadcast stops sending; an `unknown`
+send is never repeated; an Emergency broadcast overtakes a running Informational one;
+replies to farmers stay under 5 seconds during a running broadcast; a Development Agent
+broadcast skips the sender and returns agents not on Telegram.

@@ -29,6 +29,7 @@ guide 03 §7.
 | `dpi-consent` | OTP sender | otp, transactional | Consent and data-release OTPs; consent notices later | Kit built; tested end to end |
 | `grievance` | Connector | transactional (+ otp for Auth) | 12 grievance notices (received, updates, closure) | Kit built and tested |
 | `da` | Connector | transactional (+ otp for Auth) | Visit planned and rescheduled, to the farmer when the agent ticks the box (agents are alerted on Telegram) | Kit built and tested |
+| `da` (Broadcast screen) | Connector | alert, broadcast | The SMS copy of DA web app broadcasts (§6.8.3): `Emergency` and `Weather` as `alert`, `Knowledge` and `Informational` as `broadcast`, one message per farmer with a phone except those reached on Telegram; also the welcome SMS (§6.1) | Designed; `broadcast` waits for the SMS-03 fix |
 | The caller of the site Auth runs on | OTP sender (`send_sms_now`) | otp | Password-reset OTP (kit built, tested end to end); Telegram linking OTP (§6.6, designed) | Kit built and tested |
 | `esignet` | OTP sender | otp | Login OTP for Farmer ID | Java sender built and tested; the eSignet team wires it in |
 
