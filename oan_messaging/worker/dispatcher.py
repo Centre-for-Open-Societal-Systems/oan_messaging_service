@@ -14,8 +14,10 @@ One ``run_once`` cycle:
       caller authorization re-checked, before any network call.
       ``DispatchNotAuthorized`` leaves the message held. ``MessageExpired`` leads to
       ``mark_expired``. ``LeaseLost`` means skip. If rate-limited, wait (bounded,
-      within the lease) or abandon the claim.
-   c. Call the provider adapter, outside any database transaction.
+      within the lease) or give the claim back (``release_claim``), so the message
+      is claimable again at once in priority order.
+   c. Call the provider adapter, outside any database transaction, with an overall
+      deadline that ends before the lease does (a timeout is ``unknown``).
    d. ``finish_attempt``. A retryable ``not_sent`` is rescheduled with backoff; the
       provider's ``retry_after`` always wins. Retries stop after ``max_attempts``.
       ``unknown`` is never retried.
@@ -70,8 +72,12 @@ class WorkerConfig:
     batch_size: int = 1
     broadcast_enabled: bool = False
     lease: timedelta = timedelta(minutes=2)
-    #: A provider call must finish well inside the lease (adapter timeouts are 15 s).
+    #: A provider call may only start while at least this much lease is left.
     lease_safety_margin: timedelta = timedelta(seconds=30)
+    #: Lease kept back after a provider call for recording its result; the call's
+    #: overall deadline is the remaining lease minus this. Default: 5 s, or half
+    #: the safety margin when that is smaller.
+    finish_reserve: timedelta | None = None
     #: Total attempts allowed for retryable NOT_SENT outcomes before giving up (failed).
     max_attempts: int = 5
     backoff: tuple[timedelta, ...] = DEFAULT_BACKOFF
@@ -87,6 +93,10 @@ class WorkerConfig:
             raise ValueError("timing settings must be positive")
         if self.lease <= self.lease_safety_margin or not self.backoff:
             raise ValueError("lease must exceed the safety margin; backoff required")
+        if self.finish_reserve is None:
+            self.finish_reserve = min(timedelta(seconds=5), self.lease_safety_margin / 2)
+        elif not zero < self.finish_reserve < self.lease_safety_margin:
+            raise ValueError("finish_reserve must be positive and below the safety margin")
         if any(step <= zero for step in self.backoff):
             raise ValueError("backoff steps must be positive")
 
@@ -250,10 +260,20 @@ class Worker:
             if self._expired(claim, self._clock()):
                 await self._expire(claim, self._clock(), stats)
                 return
-            # Never began an attempt: provably unsent. The lease lapses and the message
-            # becomes claimable again (recover_stale clears abandoned claims).
+            # Never began an attempt: provably unsent. Give the claim back so the
+            # message is claimable again at once, in priority order; otherwise a
+            # newer message could overtake it until the lease lapsed. If the release
+            # fails, the lease lapses as before (recover_stale clears it).
             stats.rate_limited_abandoned += 1
-            log.info("rate limited; claim abandoned (message_id=%s)", mid)
+            try:
+                await self._repo.release_claim(claim, self._clock())
+            except (SQLAlchemyError, OSError, TimeoutError) as exc:
+                log.warning(
+                    "claim release failed; lease will lapse (message_id=%s error_type=%s)",
+                    mid,
+                    type(exc).__name__,
+                )
+            log.info("rate limited; claim released (message_id=%s)", mid)
             return
 
         # Re-check current timing after begin, immediately before the provider call. If
@@ -269,9 +289,25 @@ class Worker:
             )
             return
 
-        # Provider call: outside any database transaction.
+        # Provider call: outside any database transaction, with an overall deadline
+        # that ends before the lease does. Adapter timeouts are per phase, so a slow
+        # provider could otherwise outlast the lease and lose a known result.
+        reserve = self._cfg.finish_reserve or timedelta(0)  # set in __post_init__
+        budget = (claim.lease_expires_at - call_at - reserve).total_seconds()
         try:
-            result = await adapter.send(claim.send_request)
+            result = await asyncio.wait_for(adapter.send(claim.send_request), timeout=budget)
+        except TimeoutError:
+            # The request may have reached the provider: ambiguous, never resent.
+            at = self._clock()
+            result = ProviderResult(
+                outcome=ProviderOutcome.UNKNOWN,
+                provider=adapter.provider,
+                provider_status="call_deadline",
+                failure_code=FailureCode.TIMEOUT,
+                started_at=call_at,
+                finished_at=at,
+                detail="provider call exceeded the lease deadline",
+            )
         except Exception as exc:  # contract says adapters never raise; stay conservative
             at = self._clock()
             result = ProviderResult(

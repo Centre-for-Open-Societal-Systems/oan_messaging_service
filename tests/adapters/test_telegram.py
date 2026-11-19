@@ -250,7 +250,8 @@ async def test_no_parse_mode_so_markup_is_sent_literally() -> None:
 
 @pytest.mark.parametrize(
     ("params", "expected"),
-    [({"retry_after": 17}, 17), ({"retry_after": 1.2}, 2), ({"retry_after": 0}, 0),
+    [({"retry_after": 17}, 17), ({"retry_after": 10**12}, 3600),
+     ({"retry_after": 1.2}, 2), ({"retry_after": 0}, 0),
      ({}, None), ({"retry_after": -5}, None), ({"retry_after": "9"}, None),
      ({"retry_after": True}, None)],
 )

@@ -40,6 +40,7 @@ from oan_messaging.contracts import (
     COMPLETED_BINDING_STATUSES,
     CONTENT_REQUIRED_STATUSES,
     IDEMPOTENCY_KEY_PATTERN,
+    MAX_RETRY_AFTER_SECONDS,
     PURGEABLE_STATUSES,
     PURPOSE_PRIORITY,
     RECEIPT_STATUS_MAP,
@@ -740,6 +741,11 @@ class PostgresMessageRepository:
                     # A lost COMMIT acknowledgement: return current state, including
                     # any stronger receipt evidence; never downgrade or send again.
                     return row_to_message(row)
+            retry_after = (
+                None
+                if result.retry_after_seconds is None
+                else min(result.retry_after_seconds, MAX_RETRY_AFTER_SECONDS)
+            )
             late_success = (
                 row["status"] == MessageStatus.UNKNOWN.value
                 and row["provider_status"] == "interrupted"
@@ -765,10 +771,10 @@ class PostgresMessageRepository:
                         changes["ambiguous_count"] = 0
                 elif result.outcome is ProviderOutcome.SENT:
                     changes["ambiguous_count"] = 0
-                if result.retry_after_seconds is not None:
+                if retry_after is not None:
                     changes["cooldown_until"] = max(
                         gate["cooldown_until"] or now,
-                        now + timedelta(seconds=result.retry_after_seconds),
+                        now + timedelta(seconds=retry_after),
                     )
                 await s.execute(
                     update(dispatch_controls)
@@ -804,9 +810,9 @@ class PostgresMessageRepository:
                 )
             else:  # NOT_SENT: provably never reached the provider
                 retry_at = max(now, next_not_before or now)
-                if result.retry_after_seconds is not None:
-                    # Never shorten the provider's required wait.
-                    retry_at = max(retry_at, now + timedelta(seconds=result.retry_after_seconds))
+                if retry_after is not None:
+                    # Never shorten the provider's required wait (bounded above).
+                    retry_at = max(retry_at, now + timedelta(seconds=retry_after))
                 expires = row["expires_at"]
                 if result.failure_code is FailureCode.EXPIRED_BEFORE_SEND or (
                     result.retryable and expires is not None and retry_at >= expires
@@ -839,7 +845,7 @@ class PostgresMessageRepository:
                     failure_code=result.failure_code.value if result.failure_code else None,
                     provider_message_id=result.provider_message_id,
                     retryable=result.retryable,
-                    retry_after_seconds=result.retry_after_seconds,
+                    retry_after_seconds=retry_after,
                     detail=result.detail,
                 )
             )
@@ -885,6 +891,27 @@ class PostgresMessageRepository:
             assert row is not None
             stored = row_to_message(row)
         return stored
+
+    async def release_claim(self, claim: Claim, now: datetime) -> bool:
+        """Give back a claim that never began an attempt (provably unsent).
+
+        Clears the lease only while it is still ours and the message is still
+        ``accepted``, so the message is claimable again at once, in its normal
+        priority order, instead of after the lease lapses. Returns False when the
+        claim no longer owns the message; that is harmless.
+        """
+        async with self._sf() as s, s.begin():
+            res = await s.execute(
+                update(messages)
+                .where(
+                    messages.c.id == claim.message.id,
+                    messages.c.lease_token == claim.claim_token,
+                    messages.c.status == MessageStatus.ACCEPTED.value,
+                )
+                .values(lease_token=None, lease_owner=None, lease_expires_at=None, updated_at=now)
+                .returning(messages.c.id)
+            )
+            return res.scalar_one_or_none() is not None
 
     async def recover_stale(self, now: datetime) -> int:
         async with self._sf() as s, s.begin():

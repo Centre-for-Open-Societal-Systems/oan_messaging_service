@@ -50,6 +50,7 @@ import httpx
 from pydantic import SecretStr
 
 from oan_messaging.contracts import (
+    MAX_RETRY_AFTER_SECONDS,
     TELEGRAM_MAX_TEXT_UTF16_UNITS,
     Channel,
     FailureCode,
@@ -417,7 +418,7 @@ def _retry_after(body: dict[str, Any] | None) -> int | None:
         return None
     if not math.isfinite(value) or value < 0:
         return None
-    return math.ceil(value)
+    return min(math.ceil(value), MAX_RETRY_AFTER_SECONDS)
 
 
 def _classify_rejection(status: int, body: dict[str, Any] | None) -> tuple[FailureCode, str]:

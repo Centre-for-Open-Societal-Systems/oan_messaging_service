@@ -447,6 +447,73 @@ async def test_provider_retry_after_wins_over_shorter_backoff(
     assert len(tg.calls) == 2
 
 
+async def test_huge_provider_retry_after_is_capped_and_worker_survives(
+    engine: AsyncEngine,
+    sf: async_sessionmaker[AsyncSession],
+    keys: Keys,
+    repo: PostgresMessageRepository,
+    clock: FakeClock,
+) -> None:
+    ctx = await make_caller(sf, keys)
+    m = await submit_telegram(repo, ctx)
+
+    def absurd_wait(req: Any, now: Any) -> Any:
+        return outcome(
+            Provider.TELEGRAM,
+            now,
+            ProviderOutcome.NOT_SENT,
+            FailureCode.RATE_LIMITED,
+            "tg_429",
+            retryable=True,
+            retry_after=10**12,  # would overflow datetime arithmetic
+        )
+
+    w = make_worker(repo, engine, clock, tg=FakeTelegram(clock, absurd_wait))
+    await w.run_once()
+    assert (await status_of(sf, m.id))["not_before"] == T0 + timedelta(hours=1)
+    async with sf() as s:
+        cooldown = (
+            await s.execute(
+                text("SELECT cooldown_until FROM dispatch_controls WHERE channel = 'telegram'")
+            )
+        ).scalar_one()
+    assert cooldown == T0 + timedelta(hours=1)
+
+
+async def test_provider_call_past_the_lease_deadline_is_unknown(
+    engine: AsyncEngine,
+    sf: async_sessionmaker[AsyncSession],
+    keys: Keys,
+    repo: PostgresMessageRepository,
+    clock: FakeClock,
+) -> None:
+    ctx = await make_caller(sf, keys)
+    m = await submit_broadcast(repo, ctx, 1)
+
+    async def trickle() -> Any:
+        await asyncio.sleep(30)  # a provider that never finishes in time
+        raise AssertionError("deadline did not fire")
+
+    sms = FakeSms(clock, lambda req, now: trickle())
+    w = make_worker(
+        repo,
+        engine,
+        clock,
+        sms=sms,
+        lease=timedelta(seconds=2),
+        lease_safety_margin=timedelta(seconds=1),
+        finish_reserve=timedelta(milliseconds=500),
+    )
+    assert (await w.run_once()).outcomes == {"unknown": 1}
+    r = await status_of(sf, m.id)
+    assert (r["status"], r["failure_code"], r["provider_status"]) == (
+        "unknown",
+        "timeout",
+        "call_deadline",
+    )
+    assert len(sms.calls) == 1
+
+
 async def test_retry_wait_reaching_expiry_expires_without_sending(
     engine: AsyncEngine,
     sf: async_sessionmaker[AsyncSession],
@@ -579,6 +646,38 @@ async def test_rate_limit_is_shared_across_workers(
         assert sum(1 for u in times if t - timedelta(seconds=1) < u <= t) <= 5
 
 
+async def test_rate_limited_claim_is_released_and_keeps_its_place(
+    engine: AsyncEngine,
+    sf: async_sessionmaker[AsyncSession],
+    keys: Keys,
+    repo: PostgresMessageRepository,
+    clock: FakeClock,
+) -> None:
+    ctx = await make_caller(sf, keys)
+    first = await submit_sms(repo, ctx, recipient="0900000301")
+    older = await submit_sms(
+        repo, ctx, at=T0 + timedelta(milliseconds=1), recipient="0900000302"
+    )
+    sms = FakeSms(clock)
+
+    async def frozen(_s: float) -> None:
+        await asyncio.sleep(0)
+
+    w = make_worker(repo, engine, clock, sms=sms, sleep=frozen, sms_limit=RateLimit(requests=1))
+    stats = await w.run_once()
+    assert [c.message_id for c in sms.calls] == [first.id]
+    assert stats.rate_limited_abandoned == 1
+    r = await status_of(sf, older.id)
+    # Given back at once: no lease left to wait out.
+    assert (r["status"], r["lease_token"], r["lease_expires_at"]) == ("accepted", None, None)
+    clock.advance(seconds=2)  # the next one-second window
+    newer = await submit_sms(repo, ctx, at=clock.now, recipient="0900000303")
+    await w.run_once()
+    # The older OTP goes before the newer one, without waiting for a lease to lapse.
+    assert [c.message_id for c in sms.calls][1] == older.id
+    assert sms.counter[newer.id] == 0
+
+
 async def test_otp_priority_and_reserved_capacity(
     engine: AsyncEngine,
     sf: async_sessionmaker[AsyncSession],
@@ -655,6 +754,8 @@ def test_worker_config_validation() -> None:
         {"max_attempts": 0},
         {"lease": timedelta(seconds=10)},
         {"backoff": ()},
+        {"finish_reserve": timedelta(seconds=30)},
+        {"finish_reserve": timedelta(0)},
     ):
         with pytest.raises(ValueError):
             WorkerConfig(**bad)

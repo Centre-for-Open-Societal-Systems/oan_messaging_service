@@ -99,6 +99,11 @@ PURPOSE_PRIORITY: Mapping[Purpose, int] = {
     Purpose.BROADCAST: 30,
 }
 
+#: Upper bound on a provider's ``retry_after`` that the service honours. A larger
+#: value (a misbehaving upstream) would otherwise pause a channel for years or
+#: overflow the date arithmetic and stop the worker.
+MAX_RETRY_AFTER_SECONDS = 3600
+
 
 class MessageStatus(StrEnum):
     """Public lifecycle state returned by ``GET /api/v1/messages/{id}``."""
@@ -1100,6 +1105,11 @@ class MessageRepository(Protocol):
 
     async def mark_expired(self, claim: Claim, now: datetime) -> StoredMessage:
         """-> EXPIRED / expired_before_send, purging content in the same transaction."""
+        ...
+
+    async def release_claim(self, claim: Claim, now: datetime) -> bool:
+        """Clear the lease of a claim that never began an attempt (still ACCEPTED and
+        still ours), so the message is claimable again at once. False if not ours."""
         ...
 
     async def recover_stale(self, now: datetime) -> int:
