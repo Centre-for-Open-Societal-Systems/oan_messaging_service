@@ -9,7 +9,10 @@
 # Dependencies are installed from deploy/docker/requirements.txt, exported from uv.lock
 # with hashes (pip --require-hashes). No secrets, keys or certificates are baked in.
 
-ARG PYTHON_IMAGE=python:3.11-slim-bookworm
+# Base image pinned by digest (multi-arch index of python:3.11-slim-bookworm, 19 Nov 2026),
+# so a rebuild gets the same OS layer the hashed Python dependencies were tested on.
+# Refresh deliberately: docker buildx imagetools inspect python:3.11-slim-bookworm
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39
 
 FROM ${PYTHON_IMAGE} AS build
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1

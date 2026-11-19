@@ -22,8 +22,8 @@ oan-msg = "oan_messaging.runtime.__main__:main"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.2,<9.0",
-    "pytest-asyncio>=0.23,<1.0",
+    "pytest>=9.0.3,<10.0",
+    "pytest-asyncio>=1.2,<2.0",
     "respx>=0.21,<1.0",
     "openapi-spec-validator>=0.7,<1.0",
     "jsonschema>=4.22,<5.0",
