@@ -20,7 +20,7 @@ You see what the "handset" got at `http://127.0.0.1:18028/inbox`. Nothing leaves
 machine.
 
 In the package it is in `trial/`: the stack (`trial/oan_integration_trials/stack/`)
-builds the OAN service from the sibling folder `trial/oan_messaging_services-msg08/`.
+builds the OAN service from the sibling folder `trial/oan_messaging_services/`.
 Keep that layout. For the Credit and Consent Manager stacks, prepare
 `trial/oan_integration_trials/repos/` as its README says. `trial/README.md` has the
 full recipe.

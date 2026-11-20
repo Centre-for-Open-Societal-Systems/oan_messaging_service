@@ -84,8 +84,8 @@ access to anyone's disk:
 | QA catalogue | `code/06-qa-cases.csv` | The case IDs cited in each guide |
 | Channels Specification | `CHANNELS-SPEC/OAN_Channels_Specification_v2.0.docx` | The design: SMS and Telegram together |
 
-The OAN service itself is in independent review (working version "msg08", which includes
-the reliability work "msg07b"). Its source is in `trial/` only so you can run it locally;
+The OAN service source (`main` of 20 November 2026, contract 3.1.0) is in `trial/` only so
+you can run it locally;
 dev and staging will run the accepted version. Use the local trial (guide 20) to test end
 to end.
 
@@ -98,7 +98,7 @@ to end.
 | `code/kits/` | `integrations/kits/` |
 | `code/06-qa-cases.csv` | `docs/handoff/qa-cases.csv` |
 | `code/oan_messaging_connector.*` | the separate `oan_messaging_connector` repository |
-| `trial/oan_messaging_services-msg08/` | the repository root |
+| `trial/oan_messaging_services/` | the repository root |
 | `trial/oan_integration_trials/stack/`, `repos/` | `trial/stack/`, `trial/repos/` |
 | `CHANNELS-SPEC/`, `DEV-HANDOFF/`, `EVIDENCE/` | `docs/channels-spec/`, `docs/handoff/`, `docs/evidence/` |
 
