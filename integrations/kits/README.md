@@ -34,7 +34,8 @@ kit is one commit with a conventional title, so it passes the shared commit-titl
 
 ## What every Frappe kit needs on the site
 
-1. `oan_messaging_connector` installed (`develop` at `4ad8507` or later). The Credit,
+1. `oan_messaging_connector` installed (`develop` at `4ad8507` or later; the DA broadcast
+   kit needs `96fc5d1` or later). The Credit,
    Grievance and DA kits add it to `required_apps` and fetch it in the module's CI; until
    the connector is published under the organisation, set the repository variable
    `OAN_MESSAGING_CONNECTOR_REPO` to a URL that CI can clone. The team is creating the

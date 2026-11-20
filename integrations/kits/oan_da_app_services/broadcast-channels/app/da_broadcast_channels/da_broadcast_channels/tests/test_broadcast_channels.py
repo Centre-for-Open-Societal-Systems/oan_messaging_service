@@ -244,6 +244,11 @@ class TestBroadcastChannels(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("DA Broadcast", doc.broadcast, "recipients"), 6)
 		self.assertEqual(dispatch.status(name)["sms"]["by_status"], {"queued": 5})
 
+	def test_a_multi_part_sms_copy_is_queued(self):
+		name = self.dispatch_of(self.send(COMMS, body="ቅ" * 150))  # 3 parts
+		dispatch.run(name)
+		self.assertEqual(frappe.db.get_value(dispatch.DOCTYPE, name, ["sms_queued", "sms_not_queued"]), (5, 0))
+
 	def test_informational_goes_as_broadcast_purpose(self):
 		name = self.dispatch_of(self.send(COMMS, source="Informational"))
 		dispatch.run(name)

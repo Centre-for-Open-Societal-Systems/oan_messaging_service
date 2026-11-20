@@ -55,8 +55,9 @@ now belongs to the Communications Officer and the Admin only, as the FSD says.
 
 ## Install (DA team)
 
-1. **Connector:** `oan_messaging_connector` `develop` at `48ea624` or later. That version
-   accepts the `broadcast` purpose and 3-part texts.
+1. **Connector:** `oan_messaging_connector` `develop` at `96fc5d1` or later. That version
+   accepts the `broadcast` purpose and lets a caller ask for up to 3 parts (`max_parts`);
+   other modules keep one part.
 2. **Backend:** copy `app/da_broadcast_channels` into `apps/`, then:
    - `pip install -e apps/da_broadcast_channels`
    - `bench --site <site> install-app da_broadcast_channels`

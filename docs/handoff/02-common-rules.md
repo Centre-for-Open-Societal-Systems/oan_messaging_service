@@ -1,6 +1,6 @@
 # 02 Common rules (every caller)
 
-The full contract is `code/openapi.yaml` (contract 3.0.0). This page is
+The full contract is `code/openapi.yaml` (contract 3.1.0). This page is
 what a developer must get right.
 
 ## 1. Endpoints
@@ -50,14 +50,15 @@ SMS body (unknown fields are rejected):
    * **70 if the text has any Amharic** (Ethiopic) character, curly quote, en dash or
      emoji.
 
-   Measure every template in every language with the longest real values. Longer text is
-   rejected (`422 validation_failed`, with `errors[].code = too_long_for_single_sms`),
-   never split.
+   Measure every template in every language with the longest real values. The connector
+   refuses longer text by default. (Since contract 3.1.0 OAN itself accepts up to 3 parts,
+   for DA broadcasts only; an OTP must always be one part,
+   `errors[].code = too_long_for_single_sms`.) Nothing changes for your module.
 6. **Purpose:**
    * `otp`: needs `expires_at`, at most 30 minutes ahead; highest priority.
    * `transactional`: case updates and notices.
    * `alert`: urgent notices.
-   * `broadcast`: disabled in the pilot.
+   * `broadcast`: DA broadcasts only; not for module notices.
 
    Your caller is allowed only the purposes the operator granted.
 7. **Expiry is yours and never extended.** Pass the deadline after which the message is

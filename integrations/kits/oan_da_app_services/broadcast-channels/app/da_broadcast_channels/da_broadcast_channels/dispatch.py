@@ -32,6 +32,7 @@ from da_services.services import notifications as notif
 from da_services.utils import audit as audit_log
 from da_services.utils.permissions import ScopeContext
 from oan_messaging_connector.api import queue_sms
+from oan_messaging_connector.sms import MAX_PARTS
 
 DOCTYPE = "DA Broadcast Dispatch"
 SETTINGS = "DA Broadcast Channel Settings"
@@ -385,6 +386,7 @@ def _queue_one(doc, phone, text, who, language, expires, counts) -> None:
 		event="broadcast_sms",
 		language=language,
 		expires_at=expires,
+		max_parts=MAX_PARTS,  # broadcasts may be multi-part (SMS-09); module notices stay one
 	)
 	counts["sms_queued" if name else "sms_not_queued"] += 1
 

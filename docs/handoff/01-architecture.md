@@ -52,7 +52,9 @@ OAN and later ask for its status.
 
 * No status push or webhook: callers poll.
 * No batch endpoint and no cancel endpoint.
-* No multi-part SMS: one SMS part only.
-* No broadcast in the pilot.
+* Module notices are one SMS part. OAN accepts up to 3 parts only for callers that ask for
+  it (DA broadcasts, `max_parts` in the connector).
+* Broadcast (`broadcast` purpose) is for DA broadcasts only, switched on per environment.
+* OAN sends to 8028 at 4 SMS a second; OTPs always go first.
 * It does not choose recipients, templates, languages or business rules. Those stay with
   each module.
