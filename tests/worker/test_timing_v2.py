@@ -155,7 +155,13 @@ async def test_skewed_workers_real_call_spacing_with_database_time(
     repo: PostgresMessageRepository,
 ) -> None:
     """Two workers whose wall clocks differ by 4 s (more than the 1 s window), sharing a
-    2/s limit through database time: real monotonic call spacing never exceeds 2/s."""
+    2/s limit through database time: real monotonic call spacing never exceeds 2/s.
+
+    On a slow runner the gap between reserving a slot and the call can pass the 200 ms
+    dispatch tolerance; the worker then records a late start and backs the message off
+    (30 s by default), which outlasted the old 20 s deadline (CI, 20 Nov 2026). A 1 s
+    backoff and a 60 s deadline let such a message be retried; the checks are unchanged:
+    every message sent exactly once, never more than 2 calls in any real second."""
     start = await db_now(engine)
     ctx = await make_caller(sf, keys)
     ids = {
@@ -175,11 +181,16 @@ async def test_skewed_workers_real_call_spacing_with_database_time(
                 keys.repo(sf),
                 {Channel.SMS: sms},
                 limiter,
-                WorkerConfig(broadcast_enabled=True, worker_id=f"w{i}", batch_size=3),
+                WorkerConfig(
+                    broadcast_enabled=True,
+                    worker_id=f"w{i}",
+                    batch_size=3,
+                    backoff=(timedelta(seconds=1),),  # a late start retries quickly
+                ),
                 clock=wall,
             )
         )
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + 60
     while set(sms.counter) != ids and time.monotonic() < deadline:
         await asyncio.gather(*(w.run_once() for w in workers))
     assert set(sms.counter) == ids and max(sms.counter.values()) == 1
