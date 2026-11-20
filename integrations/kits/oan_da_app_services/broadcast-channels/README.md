@@ -87,7 +87,7 @@ now belongs to the Communications Officer and the Admin only, as the FSD says.
 
 | Check | Result |
 |---|---|
-| Add-on tests (`bench run-tests --module da_broadcast_channels.tests.test_broadcast_channels`) | **16 passed**: role and area rules, SMS length, paging and resume, Telegram first, the wait, agents not on Telegram, sender skipped, replay and conflict, upstream failures, expiry |
+| Add-on tests (`bench run-tests --module da_broadcast_channels.tests.test_broadcast_channels`) | **17 passed**: role and area rules, SMS length (a 3-part copy is queued), paging and resume, Telegram first, the wait, agents not on Telegram, sender skipped, replay and conflict, upstream failures, expiry |
 | Full DA suite with the add-on installed | 856 integration + 139 unit tests, **0 failures** |
 | Connector suite (with the 3-part change) | **44 passed** |
 | UI (`npm run typecheck`, `eslint .`, `vitest run`) | Typecheck clean. Lint 0 errors (2 old warnings elsewhere). 429 tests, of which **20 new pass**. The **11 failures in `grievances/evidence.test.ts` also fail on clean `develop`** |
