@@ -76,3 +76,21 @@ phone and showed `delivered`.
 * Templates and translations.
 * Whether cancellation is a message.
 * The cut-over date.
+
+## 5. Broadcasts on SMS and Telegram (added 20 November 2026)
+
+A second DA kit, `integrations/kits/oan_da_app_services/broadcast-channels/`, wires the DA
+app's Broadcast screen to SMS and Telegram (spec §6.8, ID-09). It is an add-on Frappe app
+installed next to `da_services`, plus one UI patch, and changes nothing in `da_services`:
+
+* All farmers of a region, zone or woreda (Communications Officer and Admin only), and the
+  agents of an area as today.
+* Telegram first through Bot Services, then the SMS copy through the connector to everyone
+  not reached on Telegram. Farmers come from the farmer registry's beneficiary API, whose
+  required routes are in the kit's `docs/BENEFICIARY-API-REQUIREMENTS.md`.
+* SMS of up to 3 parts (OAN Messaging 3.1.0); purposes `alert` (Emergency, Weather) and
+  `broadcast` (Knowledge, Informational). Caller `da` needs both.
+
+Read the kit's `docs/VALIDATION-REPORT.md` first: it lists what the DA code does today
+against the spec and which findings the kit fixes.
+

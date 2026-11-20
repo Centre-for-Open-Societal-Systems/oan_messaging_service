@@ -5,7 +5,7 @@ sends them from background workers through the 8028 SMS gateway, and reports hon
 outcomes. It does **not** generate or check OTPs, validate identities, receive SMS, run
 conversations or decide who should receive what.
 
-The frozen interfaces are `docs/openapi.yaml` (HTTP, contract 3.0.0) and
+The frozen interfaces are `docs/openapi.yaml` (HTTP, contract 3.1.0) and
 `oan_messaging/contracts.py` (Python). 8028 specifics are in `docs/8028-contract.md`.
 
 ## 3.1 API
@@ -33,7 +33,7 @@ provider URL or priority.
 |---|---|
 | `Idempotency-Key` (header) | 8–128 characters of `[A-Za-z0-9._:-]`, starting with a letter or digit. One per intended message: a random UUID4 stored with the caller's record, or, for a sender with no outbox (OTP senders), the deterministic `delivery_key` UUID5 from the client library. Never contains personal data. |
 | `recipient` | `09XXXXXXXX`, `07XXXXXXXX`, `2519…`, `+2519…` or `+2517…`; stored as E.164 |
-| `text` | Not blank; no control characters except line breaks. **One SMS part:** 160 GSM-7 characters, or 70 if the text contains any character outside GSM-7 (any Amharic letter, curly quote, en dash or emoji). Longer text is refused (`422`, error `too_long_for_single_sms`), never split. |
+| `text` | Not blank; no control characters except line breaks. **Up to 3 SMS parts (SMS-09):** one part is 160 GSM-7 characters, or 70 if the text contains any character outside GSM-7 (any Amharic letter, curly quote, en dash or emoji); a longer text is sent as one concatenated message at 153 / 67 per part, so at most 459 / 201, and a two-unit character is never split between parts. **An `otp` text must fit one part** (`422`, error `too_long_for_single_sms`). Longer text is refused (`422`, error `too_long_for_sms`), never cut. |
 | `source_reference` | 1–128 characters of `[A-Za-z0-9._:-]`, starting with a letter or digit. Names the business event (for example `grievance:G-1042:deadline_extended`). Not unique. Never contains personal data. |
 | `purpose` | `otp`, `transactional`, `alert` or `broadcast` (`broadcast` is disabled in the pilot). The caller must be allowed it. |
 | `expires_at` | RFC 3339 with an offset. **Required for `otp`**, at most 30 minutes ahead. Other purposes: optional, at most 7 days ahead. OAN never extends or rewrites it. |

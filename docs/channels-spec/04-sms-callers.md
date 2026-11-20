@@ -47,8 +47,9 @@ The OAN operator registers each caller, its channels and purposes, and issues it
    new message someone asked for gets a new key.
 3. **Never resubmit `unknown`.** Flag it for a person.
 4. **`202` means accepted, not sent.** Show "Submitted" until the status changes.
-5. **One SMS part.** Measure every template in every language with the longest real
-   values: 160 characters, or 70 with any Amharic character.
+5. **Count the parts.** OAN accepts up to 3 parts (SMS-09) and an OTP in one part. Keep
+   notices to one part where you can (each part is charged): measure every template in every
+   language with the longest real values, 160 characters or 70 with any Amharic character.
 6. **Expiry is yours.** Compute it once from the business deadline (the OTP's expiry, the
    visit time capped below 7 days ahead), store it, reuse it on retries.
 7. **`source_reference`** names the business event, never a person.
@@ -77,7 +78,7 @@ The OAN operator registers each caller, its channels and purposes, and issues it
 | `queue_sms(...)` | The only call a module makes, inside its business transaction. It only inserts a row and **never raises**: if disabled, invalid, or settings, the database or the queue fail, it returns `None` and writes an Error Log. **It refuses OTPs**, because the outbox stores the text. |
 | `dispatch_queued` | Runs after commit, and every minute as a safety net; `FOR UPDATE SKIP LOCKED`, one commit per row |
 | `poll_statuses` | Every minute for due rows (back-off 1 minute to 6 hours); never resends; SMS polling stops after the receipt window |
-| One-SMS check | Refuses text that does not fit one part before calling OAN |
+| Length check | `sms.sms_parts()` counts parts as OAN does; `queue_sms` refuses more than 3 parts, `send_sms_now` (OTPs) more than one |
 | `purge_content` | Daily: on finished rows older than the retention period (default 7 days), clears the text and masks the recipient; delivery metadata stays |
 
 ![Outbox states](diagrams/04-connector-states.png)

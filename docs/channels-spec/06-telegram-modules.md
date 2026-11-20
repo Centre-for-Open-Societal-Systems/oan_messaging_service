@@ -549,10 +549,16 @@ not for this specification.
 
 | Sender (role in the DA app) | Recipients | Area |
 |---|---|---|
-| Communications Officer, OAN Administrator | All farmers or all Development Agents | A woreda (chosen Region → Zone → Woreda), or a whole zone |
-| Supervisor | All farmers or all Development Agents | Their own woreda |
-| Development Agent | All farmers or all Development Agents | Their own kebele |
-| Knowledge Base "Send to farmers" | Farmers | One woreda; English or Amharic |
+| Communications Officer, OAN Administrator | All farmers | A whole region, zone or woreda |
+| Communications Officer, OAN Administrator | All Development Agents | Within their grant (none = national desk) |
+| Supervisor or Executive with the DA role | All Development Agents | Their own woreda |
+| Development Agent | All Development Agents | Their own kebele |
+| Knowledge Base "Send to farmers" | Farmers | One woreda; English or Amharic (not wired yet) |
+
+Farmer broadcasts belong to the Communications Officer (the FSD; checked with the user 20
+November 2026). The DA app offered "All farmers" to every sender; the DA broadcast kit
+limits it (`integrations/kits/oan_da_app_services/broadcast-channels/`, VALIDATION-REPORT
+V-01).
 
 **What a broadcast carries (from the app):** signal source (Knowledge, Emergency, Weather,
 Informational), title (3–140 characters), one message, optional evidence files (PDF, JPG
@@ -614,7 +620,11 @@ both channels.
 
 When both channels are ticked, the DA backend sends the Telegram copy first, then the SMS
 copy through OAN Messaging to every registered farmer of the area with a phone **except**
-the Farmer IDs returned by `telegram-recipients`. A farmer whose Telegram copy failed,
+the Farmer IDs returned by `telegram-recipients`. The farmers of the area, with their
+registered phones, come from the farmer registry's **beneficiary API** by Master Data area
+code (`GET /api/v1/farmers?level=&code=`, cursor paging; ID-01 and ID-04, and the kit's
+`docs/BENEFICIARY-API-REQUIREMENTS.md`). The SMS copy is the message as written and may take
+up to 3 SMS parts (SMS-09); the app warns when it turns multi-part. A farmer whose Telegram copy failed,
 expired, is `unknown` or is still pending after `sms_fallback_wait` gets the SMS. This is
 the app's own wording: "farmers without connectivity receive it by SMS". Development
 Agents in `not_on_telegram` get the SMS copy the same way.

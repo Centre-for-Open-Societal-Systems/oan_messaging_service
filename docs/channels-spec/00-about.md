@@ -6,7 +6,7 @@ This is the single specification for how OAN reaches farmers and staff through
 **SMS** and **Telegram**.
 
 It also summarises the OAN Messaging Service design (`docs/architecture.md`, contract
-3.0.0) and the Frappe connector, so the SMS channel is specified in the same place.
+3.1.0) and the Frappe connector, so the SMS channel is specified in the same place.
 
 **Not in this document:** step-by-step integration for each module team. That is the
 *OAN Messaging integration handoff* pack, which follows the rules here.

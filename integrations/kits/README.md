@@ -12,7 +12,11 @@ to a module repository.
 | [`oan_auth_service/`](oan_auth_service/) | Auth | `develop` `34c7306` | Password-reset codes | OTP sender, connector `send_sms_now` |
 | [`oan_grievance_service/`](oan_grievance_service/) | Grievance | `develop` `5bb42c4` | Every SMS row of the existing notification flow | Connector, `queue_sms` |
 | [`oan_da_app_services/`](oan_da_app_services/) | DA Services | `develop` `ce156bf` | Farmer SMS for planned and rescheduled visits | Connector, `queue_sms` |
+| [`oan_da_app_services/broadcast-channels/`](oan_da_app_services/broadcast-channels/) | DA Services and DA app UI | `develop` `2ae3d13` / UI `4e9dd4d` | Broadcasts on SMS and Telegram: farmers (Communications Officer) and agents | Add-on Frappe app `da_broadcast_channels` + one UI patch; connector `queue_sms`, Bot Services `/broadcasts` |
 | [`esignet/`](esignet/) | eSignet (Java) | no source available | Login OTPs | OTP sender: `OanOtpSender`, a JDK-only Java class with tests |
+
+The DA broadcast kit is not a patch to `da_services`: it is an add-on app installed next to it, so
+nothing in `da_services` changes until the DA team folds it in (see its README).
 
 The eSignet kit is not a patch: eSignet's source was not available, so it is the sender
 the eSignet team calls at its OTP delivery point (guide 15).
