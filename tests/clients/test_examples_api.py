@@ -193,6 +193,27 @@ def test_delivery_keys_are_stable_opaque_and_distinct() -> None:
     assert delivery_key("svc", "123e4567-e89b-12d3-a456-426614174000", "u", "sms")
 
 
+async def test_da_visit_beyond_the_horizon_expires_inside_it_and_is_accepted(
+    api_client: OanClient, api_store: ApiStore,
+) -> None:
+    """OI-30: a visit 20 days ahead is notified now, with an expiry capped 5 minutes inside
+    the 7-day horizon (never the visit time), so the real API accepts it. A retry built
+    from the same first_submitted_at gives the same key and the same deadline."""
+    event = VisitEvent("ve-far", "V-90", "planned", (
+        VisitRecipient("farmer", "0900000004", "DA visit planned: 21 Sep 09:00."),
+    ), T0 + timedelta(days=20))
+    [d] = to_deliveries(event, T0)
+    assert d.expires_at == T0 + timedelta(days=7) - timedelta(minutes=5)
+    sub = await api_client.submit(d)
+    assert sub.status == "accepted"
+    assert api_store.by_id[uuid.UUID(sub.id)].expires_at == d.expires_at
+    [again] = to_deliveries(event, T0)
+    assert (again.idempotency_key, again.expires_at) == (d.idempotency_key, d.expires_at)
+    # A visit already started sends nothing.
+    with pytest.raises(ValueError):
+        to_deliveries(VisitEvent("ve-past", "V-91", "planned", event.recipients, T0), T0)
+
+
 def test_da_events_need_unique_roles() -> None:
     with pytest.raises(ValueError):
         to_deliveries(VisitEvent("ve-2", "V-1", "rescheduled", (

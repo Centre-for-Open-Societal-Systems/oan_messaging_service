@@ -64,7 +64,7 @@ from pydantic import (
     model_validator,
 )
 
-CONTRACT_VERSION = "3.1.0"
+CONTRACT_VERSION = "3.2.0"
 
 # --------------------------------------------------------------------------------------
 # Enumerations
@@ -576,6 +576,8 @@ class CallerContext(_Frozen):
     #: Configured bot key for Telegram sends (maps to a secret token in config). None means
     #: the caller may not use Telegram even if the channel is listed.
     telegram_bot: str | None = None
+    #: May read GET /api/v1/charts (statistics). Readers have no channels or purposes.
+    can_read_stats: bool = False
 
 
 # --------------------------------------------------------------------------------------

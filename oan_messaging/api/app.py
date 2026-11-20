@@ -31,6 +31,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from oan_messaging.api.problems import problem, validation_items
 from oan_messaging.contracts import (
+    CONTRACT_VERSION,
     IDEMPOTENCY_KEY_PATTERN,
     CallerContext,
     Channel,
@@ -74,6 +75,8 @@ class ApiDependencies:
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     max_body_bytes: int = 16 * 1024
     broadcast_enabled: bool = True  # injected harnesses may exercise future coverage
+    #: GET /api/v1/charts (statistics for the OAN dashboards); None = not available.
+    stats: Any = None
 
 
 def _submission_response(m: StoredMessage) -> dict[str, Any]:
@@ -119,9 +122,11 @@ def create_app(deps: ApiDependencies | None = None) -> FastAPI:
         async def auth(token: str) -> CallerContext | None:
             return await authenticate(sf, secrets.credential_pepper, token)
 
+        from oan_messaging.stats.charts import StatsService
+
         app.state.deps = ApiDependencies(
             repository=repo, authenticate=auth, max_body_bytes=settings.max_body_bytes,
-            broadcast_enabled=settings.broadcast_enabled
+            broadcast_enabled=settings.broadcast_enabled, stats=StatsService(sf),
         )
         try:
             yield
@@ -130,7 +135,7 @@ def create_app(deps: ApiDependencies | None = None) -> FastAPI:
 
     app = FastAPI(
         title="OAN Messaging Service",
-        version="3.0.0",
+        version=CONTRACT_VERSION,
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
@@ -310,5 +315,55 @@ def create_app(deps: ApiDependencies | None = None) -> FastAPI:
             return problem(404, "not_found")
         view: MessageStatusView = to_status_view(stored)
         return JSONResponse(content=view.model_dump(mode="json", exclude_none=True))
+
+    # ------------------------------------------------------------------ charts (statistics)
+    # The dashboard service contract of the OAN dashboards (oan_messaging/stats/charts.py):
+    # read-only, counts only, for statistics readers (callers created with --stats-reader).
+
+    async def charts(request: Request, chart_ids: list[str]) -> Response | dict[str, Any]:
+        """The chart data, or the problem response that refuses it."""
+        from oan_messaging.stats.charts import ChartQueryError
+
+        caller = await caller_of(request)
+        if caller is None:
+            return unauthenticated()
+        if not caller.can_read_stats:
+            return problem(403, "forbidden", [ErrorItem(code="stats_not_permitted")])
+        d: ApiDependencies = request.app.state.deps
+        if d.stats is None:
+            return problem(503, "service_unavailable")
+        if not chart_ids:
+            return problem(422, "validation_failed", [ErrorItem(field="charts", code="required")])
+        try:
+            result: dict[str, Any] = await d.stats.charts(chart_ids, dict(request.query_params))
+        except KeyError:
+            return problem(404, "not_found")
+        except ChartQueryError as exc:
+            return problem(422, "validation_failed", [ErrorItem(field=exc.field, code=exc.code)])
+        return result
+
+    @app.get("/api/v1/charts/{chart_id}")
+    async def get_chart(request: Request, chart_id: str) -> Response:
+        async def one() -> Response:
+            result = await charts(request, [chart_id])
+            if isinstance(result, Response):
+                return result
+            meta = {**result["meta"], "chart": chart_id}
+            return JSONResponse({"success": True, "data": result["data"][chart_id], "meta": meta})
+
+        return await guarded(one())
+
+    @app.get("/api/v1/charts")
+    async def get_charts(request: Request) -> Response:
+        async def many() -> Response:
+            raw = request.query_params.get("charts", "")
+            ids = list(dict.fromkeys(c.strip() for c in raw.split(",") if c.strip()))[:20]
+            result = await charts(request, ids)
+            if isinstance(result, Response):
+                return result
+            data = {cid: {"chartName": cid, "data": rows} for cid, rows in result["data"].items()}
+            return JSONResponse({"success": True, "data": data, "meta": result["meta"]})
+
+        return await guarded(many())
 
     return app

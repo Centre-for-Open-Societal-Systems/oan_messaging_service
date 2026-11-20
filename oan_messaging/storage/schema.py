@@ -13,6 +13,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Identity,
@@ -66,6 +67,9 @@ callers = Table(
     Column("telegram_bot", Text, nullable=True),
     Column("enabled", Boolean, nullable=False, server_default=text("true")),
     Column("created_at", TZ, nullable=False, server_default=text("now()")),
+    #: A statistics reader (Reports Central, the OAN dashboards): may read /api/v1/charts.
+    #: Readers are created with no channels and no purposes, so they can never send.
+    Column("can_read_stats", Boolean, nullable=False, server_default=text("false")),
     CheckConstraint("char_length(caller_id) BETWEEN 1 AND 64", name="caller_id_length"),
 )
 
@@ -296,3 +300,72 @@ dispatch_controls = Table(
     Column("updated_at", TZ, nullable=False),
     CheckConstraint("channel IN ('sms', 'telegram')", name="control_channel"),
 )
+
+# ----------------------------------------------------------------------------- statistics
+# Snapshot behind GET /api/v1/charts (oan_messaging.stats), rebuilt every 15 minutes by the
+# cleanup component. Counts and latency histograms only: no recipient, text or reference.
+# Days are calendar days in Ethiopia (Africa/Addis_Ababa) of the message's acceptance.
+
+stats_daily = Table(
+    "stats_daily",
+    metadata,
+    Column("day", Date, nullable=False),
+    Column("caller_id", Text, nullable=False),
+    Column("channel", Text, nullable=False),
+    Column("purpose", Text, nullable=False),
+    Column("accepted", Integer, nullable=False),
+    Column("open", Integer, nullable=False),
+    Column("sent", Integer, nullable=False),
+    Column("delivered", Integer, nullable=False),
+    Column("failed", Integer, nullable=False),
+    Column("unknown", Integer, nullable=False),
+    Column("expired", Integer, nullable=False),
+    #: Counts per latency bucket (oan_messaging.stats.snapshot.BUCKET_EDGES_S).
+    Column("send_hist", ARRAY(Integer), nullable=False),
+    Column("deliver_hist", ARRAY(Integer), nullable=False),
+    PrimaryKeyConstraint("day", "caller_id", "channel", "purpose", name="pk_stats_daily"),
+)
+
+stats_failures = Table(
+    "stats_failures",
+    metadata,
+    Column("day", Date, nullable=False),
+    Column("caller_id", Text, nullable=False),
+    Column("channel", Text, nullable=False),
+    Column("purpose", Text, nullable=False),
+    Column("failure_code", Text, nullable=False),
+    Column("total", Integer, nullable=False),
+    PrimaryKeyConstraint(
+        "day", "caller_id", "channel", "purpose", "failure_code", name="pk_stats_failures"
+    ),
+)
+
+stats_campaigns = Table(
+    "stats_campaigns",
+    metadata,
+    #: The first two ``:``-separated parts of source_reference (e.g. ``da_broadcast:BC-1``).
+    Column("campaign", Text, nullable=False),
+    Column("caller_id", Text, nullable=False),
+    Column("purpose", Text, nullable=False),
+    Column("first_at", TZ, nullable=False),
+    Column("last_at", TZ, nullable=False),
+    Column("recipients", Integer, nullable=False),
+    Column("open", Integer, nullable=False),
+    Column("sent", Integer, nullable=False),
+    Column("delivered", Integer, nullable=False),
+    Column("failed", Integer, nullable=False),
+    Column("unknown", Integer, nullable=False),
+    Column("expired", Integer, nullable=False),
+    PrimaryKeyConstraint("caller_id", "campaign", "purpose", name="pk_stats_campaigns"),
+)
+
+stats_state = Table(
+    "stats_state",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("as_of", TZ, nullable=False),
+    CheckConstraint("id = 1", name="stats_state_single_row"),
+)
+
+Index("ix_messages_created_at", messages.c.created_at)
+

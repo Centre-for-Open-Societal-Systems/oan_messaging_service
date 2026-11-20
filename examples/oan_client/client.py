@@ -367,6 +367,8 @@ ERROR_CODES = frozenset({
     "invalid_et_mobile", "too_long_for_single_sms", "too_long_for_sms", "too_long", "blank",
     "control_characters", "invalid_chat_id", "required_for_otp", "invalid",
     "unknown_field", "timezone_required",
+    # GET /api/v1/charts (statistics readers)
+    "stats_not_permitted", "after_to", "range_too_long",
     # storage expiry checks
     "not_in_future", "beyond_ceiling",
     # pydantic error types passed through unchanged

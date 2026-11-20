@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OAN Messaging Service
-  version: 3.1.0
+  version: 3.2.0
   summary: Outbound SMS (8028) and Telegram with durable acceptance and honest outcomes.
   description: |
     Frozen by MSG-01 (contract 3.0.0). Python mirror: `oan_messaging/contracts.py`.
@@ -357,6 +357,86 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/charts/{chartId}:
+    get:
+      operationId: getChart
+      summary: Statistics for the OAN dashboards (one chart)
+      description: |
+        The dashboard service contract of the OAN dashboards (as A2C and Grievance), read by
+        Reports Central. Only for a statistics reader: a credential created with
+        `caller --stats-reader`, which has no channels and no purposes and cannot send.
+        Rows are counts only, never a recipient, text or reference. Charts other than
+        `msgQueueNow`, `msgProviderHealth` and `msgFilterCallers` come from a snapshot
+        rebuilt every 15 minutes; `meta.as_of` says when (null before the first rebuild).
+        Days are Ethiopian calendar days (Africa/Addis_Ababa) of acceptance. Unknown query
+        parameters are ignored.
+
+        Charts: `msgKpis`, `msgTrend`, `msgByCaller`, `msgByPurpose`, `msgFailureReasons`,
+        `msgOtpLatency`, `msgCampaigns`, `msgQueueNow`, `msgProviderHealth`,
+        `msgFilterCallers`.
+      tags: [charts]
+      parameters:
+        - name: chartId
+          in: path
+          required: true
+          schema: {type: string}
+        - $ref: '#/components/parameters/ChartFrom'
+        - $ref: '#/components/parameters/ChartTo'
+        - $ref: '#/components/parameters/ChartGranularity'
+        - $ref: '#/components/parameters/ChartCaller'
+        - $ref: '#/components/parameters/ChartPurpose'
+        - $ref: '#/components/parameters/ChartChannel'
+      responses:
+        '200':
+          description: Chart rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChartResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/charts:
+    get:
+      operationId: getCharts
+      summary: Several charts at once
+      description: |
+        `charts` is a comma-separated list of chart ids (at most 20). `data` maps each id
+        to `{chartName, data}`. Same filters, access and errors as one chart.
+      tags: [charts]
+      parameters:
+        - name: charts
+          in: query
+          required: true
+          schema: {type: string}
+        - $ref: '#/components/parameters/ChartFrom'
+        - $ref: '#/components/parameters/ChartTo'
+        - $ref: '#/components/parameters/ChartGranularity'
+        - $ref: '#/components/parameters/ChartCaller'
+        - $ref: '#/components/parameters/ChartPurpose'
+        - $ref: '#/components/parameters/ChartChannel'
+      responses:
+        '200':
+          description: Chart rows by chart id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChartsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
 components:
   securitySchemes:
     serviceToken:
@@ -367,6 +447,35 @@ components:
         caller-scoped access to its own messages and an allow-list of channels and
         purposes.
   parameters:
+    ChartFrom:
+      name: from
+      in: query
+      description: First Ethiopian calendar day, YYYY-MM-DD (default 29 days before `to`).
+      schema: {type: string, format: date}
+    ChartTo:
+      name: to
+      in: query
+      description: Last day, YYYY-MM-DD (default today). At most 366 days in all.
+      schema: {type: string, format: date}
+    ChartGranularity:
+      name: granularity
+      in: query
+      schema: {type: string, enum: [day, week, month], default: day}
+    ChartCaller:
+      name: caller
+      in: query
+      description: Comma-separated caller ids (modules).
+      schema: {type: string}
+    ChartPurpose:
+      name: purpose
+      in: query
+      description: Comma-separated purposes.
+      schema: {type: string}
+    ChartChannel:
+      name: channel
+      in: query
+      description: Comma-separated channels.
+      schema: {type: string}
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -528,6 +637,37 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    ChartResponse:
+      type: object
+      required: [success, data, meta]
+      properties:
+        success: {type: boolean, const: true}
+        data:
+          type: array
+          items: {type: object}
+        meta: {$ref: '#/components/schemas/ChartMeta'}
+    ChartsResponse:
+      type: object
+      required: [success, data, meta]
+      properties:
+        success: {type: boolean, const: true}
+        data:
+          type: object
+          additionalProperties:
+            type: object
+            required: [chartName, data]
+            properties:
+              chartName: {type: string}
+              data: {type: array, items: {type: object}}
+        meta: {$ref: '#/components/schemas/ChartMeta'}
+    ChartMeta:
+      type: object
+      properties:
+        as_of: {type: [string, 'null'], format: date-time}
+        chart: {type: string}
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        granularity: {type: string, enum: [day, week, month]}
     Channel:
       type: string
       enum: [sms, telegram]

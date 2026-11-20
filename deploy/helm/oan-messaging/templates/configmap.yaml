@@ -15,6 +15,7 @@ data:
   OAN_MSG_BROADCAST_MAX_WAIT_SECONDS: {{ .Values.config.broadcastMaxWaitSeconds | int | quote }}
   OAN_MSG_SMS_RATE_PER_SECOND: {{ .Values.config.smsRatePerSecond | int | quote }}
   OAN_MSG_SMS_OTP_RESERVE: {{ .Values.config.smsOtpReserve | int | quote }}
+  OAN_MSG_STATS_REFRESH_SECONDS: {{ .Values.config.statsRefreshSeconds | int | quote }}
   {{- with .Values.config.sms8028BaseUrl }}
   OAN_MSG_SMS8028_BASE_URL: {{ . | quote }}
   {{- end }}

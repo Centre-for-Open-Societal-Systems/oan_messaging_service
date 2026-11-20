@@ -57,6 +57,8 @@ class StorageSettings(BaseSettings):
     #: slots of each second only an OTP may use.
     sms_rate_per_second: int = Field(default=4, gt=0)
     sms_otp_reserve: int = Field(default=1, ge=0)
+    #: How often the cleanup component rebuilds the statistics snapshot (GET /api/v1/charts).
+    stats_refresh_seconds: int = Field(default=900, gt=0)
 
     policy_max_otp_ttl_seconds: int | None = None
     policy_max_expiry_horizon_seconds: int | None = None

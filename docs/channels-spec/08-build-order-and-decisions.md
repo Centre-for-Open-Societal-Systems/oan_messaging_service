@@ -59,7 +59,8 @@ and then switched on kebele by kebele.
 | SMS-08 | Volume declared to 8028 (19 Nov 2026) | About 50,000 SMS a day; welcome campaign about 1 million over 2 weeks; peak about 40 SMS a second for 2 hours. **20 Nov 2026:** the operator sends 2–5 SMS a second, so the peak is not available: a region-wide Emergency of 300,000 SMS takes about 21 hours at 4 a second. Everyday volume and the welcome campaign (about 70,000 a day) fit |
 | SMS-10 | Pacing to 8028 (20 Nov 2026) | 4 SMS a second, counted per SMS, one slot kept for OTP, configurable; so messages wait in OAN in priority order rather than in 8028's queue (§3.4) |
 | SMS-11 | HTTP 500 from 8028 (20 Nov 2026) | 8028 confirmed a 500 queues nothing: retried with the normal backoff. Other 5xx stay `unknown`, never resent |
-| SMS-04 | Alerting | Status CronJob and pod signals; no metrics endpoint |
+| SMS-04 | Alerting | Status CronJob and pod signals |
+| SMS-12 | Statistics (20 Nov 2026) | User: a metrics or statistics API is needed, modelled on the other services' dashboard APIs. `GET /api/v1/charts` with the OAN dashboard contract; read-only statistics reader token (user's choice); charts: KPIs, trend, by module, by purpose, failure reasons, OTP speed, broadcast campaigns, live queue and channel health (all chosen). Reports Central needs a static-token option to read it |
 | SMS-09 | Multi-part SMS (20 Nov 2026) | User: "allow multi-part but alert on screen when the message appears to be turning multi-part". OAN accepts up to 3 parts (160/70 in one part, 153/67 per part beyond); an OTP stays one part. The DA app warns when the SMS turns multi-part and blocks Send beyond 3. Contract 3.1.0 |
 | KR-01 | Routing key | A Master Data kebele code: the chosen kebele, or for a linked farmer the registry kebele (KR-13) |
 | KR-02 | Kebele not covered | The option shows; "coming soon" message; offers prices and channels |

@@ -61,7 +61,7 @@ ROOT = Path(__file__).resolve().parents[2]
 T0 = datetime(2026, 9, 1, 5, 12, 13, tzinfo=UTC)
 ALL_TABLES = (
     "dispatch_controls, receipts, message_attempts, message_content, messages, api_credentials, "
-    "callers, retired_key_versions"
+    "callers, retired_key_versions, stats_daily, stats_failures, stats_campaigns, stats_state"
 )
 OTP_TEXT = "Your OAN code is 482913."
 SMS_BASE_URL = "https://8028.invalid/sms-api/v1"
@@ -179,9 +179,18 @@ async def make_caller(
     purposes: frozenset[Purpose] = frozenset(Purpose),
     bot: str | None = "grievance",
     enabled: bool = True,
+    stats_reader: bool = False,
 ) -> str:
+    if stats_reader:
+        channels, purposes, bot = frozenset(), frozenset(), None
     await upsert_caller(
-        sf, caller_id, channels=channels, purposes=purposes, telegram_bot=bot, enabled=enabled
+        sf,
+        caller_id,
+        channels=channels,
+        purposes=purposes,
+        telegram_bot=bot,
+        enabled=enabled,
+        can_read_stats=stats_reader,
     )
     return await issue_credential(sf, keys.pepper, caller_id, T0)
 
@@ -389,7 +398,13 @@ def build_harness(
     async def auth(token: str) -> Any:
         return await authenticate(sf, keys.pepper, token)
 
-    app = create_app(ApiDependencies(repository=repo, authenticate=auth, clock=clock))
+    from oan_messaging.stats.charts import StatsService
+
+    app = create_app(
+        ApiDependencies(
+            repository=repo, authenticate=auth, clock=clock, stats=StatsService(sf, clock=clock)
+        )
+    )
     api = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
         base_url="http://testserver",

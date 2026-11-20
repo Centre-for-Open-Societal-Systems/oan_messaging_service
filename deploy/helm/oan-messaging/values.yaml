@@ -117,6 +117,8 @@ config:
   # anything faster, outside our OTP-first order), and the slots of each second kept for OTP.
   smsRatePerSecond: 4          # OAN_MSG_SMS_RATE_PER_SECOND
   smsOtpReserve: 1             # OAN_MSG_SMS_OTP_RESERVE
+  # How often the cleanup component rebuilds the statistics behind GET /api/v1/charts.
+  statsRefreshSeconds: 900     # OAN_MSG_STATS_REFRESH_SECONDS
   # Empty = code default (https://8028.et:3400/sms-api/v1). OAN_MSG_SMS8028_BASE_URL.
   sms8028BaseUrl: ""
   # ServicePolicy overrides in seconds (all optional; must be identical for every

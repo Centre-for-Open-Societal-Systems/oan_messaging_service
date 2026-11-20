@@ -15,6 +15,13 @@ inbound SMS, Telegram conversations, registry SMS, Novu or deployment.
 Frozen interfaces: [`oan_messaging/contracts.py`](../oan_messaging/contracts.py) (Python) and
 [`docs/openapi.yaml`](openapi.yaml) (HTTP). 8028 specifics: [`docs/8028-contract.md`](8028-contract.md).
 
+## Changes in 3.1.0 and 3.2.0 (20 November 2026)
+
+| Version | Change |
+|---|---|
+| 3.1.0 | SMS of up to 3 parts (SMS-09); an OTP stays one part (`too_long_for_sms`, `too_long_for_single_sms`). Broadcast ageing (SMS-03, migration `0004`). 8028 paced at 4 SMS/s with one OTP slot (SMS-10); a 500 from 8028 is retried (SMS-11); receipts read `status` only (SMS-07) |
+| 3.2.0 | **Statistics:** `GET /api/v1/charts/{chartId}` and `GET /api/v1/charts?charts=`, the dashboard service contract of the OAN dashboards, for statistics readers only (see [Statistics](#statistics-get-apiv1charts)). Migration `0005`: snapshot tables, `callers.can_read_stats`, `ix_messages_created_at` |
+
 ## Changes in 3.0.0 (from the review of 2.0.0)
 
 | # | Change |
@@ -60,6 +67,32 @@ Added after 3.0.0. None of it changes the HTTP contract.
 **Broadcast:** off unless `OAN_MSG_BROADCAST_ENABLED=true`. Broadcast ageing (SMS-03) keeps
 it from starving under higher-priority load (see [Priority and rate limits](#priority-and-rate-limits)). Telegram is implemented, but Phase 1 has no
 Telegram caller: the OAN Telegram bot runs on RapidPro and sends to Telegram itself.
+
+## Statistics (GET /api/v1/charts)
+
+Modelled on the other OAN dashboard services (A2C `oan_a2c/api/v1/dashboard.py`,
+Grievance), so Reports Central reads it as one more upstream:
+
+* **Routes:** `GET /api/v1/charts/{chartId}` returns `{"success": true, "data": [rows],
+  "meta": {"as_of", "chart", "from", "to", "granularity"}}`; `GET /api/v1/charts?charts=a,b`
+  returns `data: {chartId: {"chartName", "data"}}` (at most 20).
+* **Access:** a **statistics reader** only: a caller created with `caller --stats-reader`
+  (no channels, no purposes, `can_read_stats`), whose token is issued as any caller's. A
+  sending caller gets `403 stats_not_permitted`; a reader cannot send.
+* **Data:** counts only, never a recipient, text or reference. The cleanup component
+  rebuilds a snapshot (`stats_daily`, `stats_failures`, `stats_campaigns`, `stats_state`)
+  every `OAN_MSG_STATS_REFRESH_SECONDS` (900) under an advisory lock, rebuilding the last
+  8 days (statuses change for up to the 7-day receipt window); older days are final. A
+  message counts on the Ethiopian day (Africa/Addis_Ababa) it was accepted, with its
+  current status. `python -m oan_messaging.runtime stats-refresh` runs one rebuild.
+* **Charts:** `msgKpis`, `msgTrend`, `msgByCaller`, `msgByPurpose`, `msgFailureReasons`,
+  `msgOtpLatency`, `msgCampaigns` (alert and broadcast messages sharing the first two parts
+  of `source_reference`, two or more recipients) from the snapshot; `msgQueueNow`,
+  `msgProviderHealth` and `msgFilterCallers` live.
+* **Filters:** `from`, `to` (default the last 30 days, at most 366), `granularity`
+  (day, week, month), `caller`, `purpose`, `channel`; other parameters are ignored.
+* **Latency:** median and p95 from histograms (buckets 1 s … 1 day), reported as the bucket's
+  upper edge in seconds.
 
 ## Stack
 

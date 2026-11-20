@@ -80,7 +80,7 @@ and these checks are green.
 | OAN Messaging full suite | 896 passed, 1 expected failure (broadcast fairness, disabled in the pilot). Passes on Python 3.13 after the test-certificate fix; passed on 3.12 before it. |
 | Helm chart | Lint, render and schema checks passed; kind install, recovery and upgrade passed. NetworkPolicy and LoadBalancer behaviour not tested. |
 | Integration trial | Credit (9 messages, each delivered once) and Consent Manager OTP passed end to end against a fake 8028. |
-| Release blockers | 16 listed: 12 fixed pending review, 3 partly fixed (redaction limits, a DA visit test, metrics decision), 1 open (rollout sequence). |
+| Release blockers | 16 listed: all fixed pending the independent review (20 Nov 2026), one with a known limit (redaction of direct stream writes). The go-live checklist (environments, 8028 credentials and live test, load, security, UAT) is in `docs/evidence/RELEASE-BLOCKERS-STATUS.md`. |
 | Telegram | Nothing built yet. |
 | Live | No real 8028 or Telegram traffic yet. |
 

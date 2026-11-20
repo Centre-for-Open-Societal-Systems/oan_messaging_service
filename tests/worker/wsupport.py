@@ -47,7 +47,7 @@ from oan_messaging.worker.rate_limit import clock_time_source
 T0 = datetime(2026, 9, 1, 5, 12, 13, tzinfo=UTC)
 ALL_TABLES = (
     "dispatch_controls, receipts, message_attempts, message_content, messages, api_credentials, "
-    "callers, retired_key_versions"
+    "callers, retired_key_versions, stats_daily, stats_failures, stats_campaigns, stats_state"
 )
 OTP_TEXT = "Your OAN code is 482913."
 

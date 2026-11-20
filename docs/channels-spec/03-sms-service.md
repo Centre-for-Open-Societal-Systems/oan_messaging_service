@@ -153,8 +153,16 @@ a **runtime** role with only the grants in `deploy/sql/grants.sql`.
 **Health and alerts:** the API has `/livez` and `/readyz`; the worker writes a heartbeat
 checked by its liveness probe. A `status-check` CronJob runs `status --fail-on-alert`
 and fails on any of: old queue, messages stuck in `sending`, `unknown` outcomes, late
-starts, deferred rows, receipt anomalies or a suspended channel. There is no metrics
-endpoint, by decision.
+starts, deferred rows, receipt anomalies or a suspended channel.
+
+**Statistics (SMS-12, 20 November 2026):** `GET /api/v1/charts/{chartId}` and
+`GET /api/v1/charts?charts=…` serve the dashboard contract of the other OAN services (A2C,
+Grievance), so Reports Central reads OAN Messaging as one more upstream. Only a read-only
+statistics reader (`caller --stats-reader`, its own OAN token; it cannot send) may call
+them. Counts only: totals by status, delivered and failed shares, send and delivery time
+(median, p95), by module, purpose and day/week/month; failure reasons; OTP speed;
+broadcast campaigns; and, live, the queue and each channel's health. The cleanup component
+rebuilds the snapshot every 15 minutes; `meta.as_of` says when.
 
 **Operator commands** (runbook: `docs/runbook.md`): `caller` (register a caller, its
 channels and purposes), `issue-credential` (token shown once), `list-credentials`,

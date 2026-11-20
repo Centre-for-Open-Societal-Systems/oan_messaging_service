@@ -30,7 +30,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
     message_attempts,
     receipts,
     retired_key_versions,
-    dispatch_controls
+    dispatch_controls,
+    stats_daily,
+    stats_failures,
+    stats_campaigns,
+    stats_state
 TO :"runtime_role";
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO :"runtime_role";
 

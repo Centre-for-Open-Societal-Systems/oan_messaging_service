@@ -49,6 +49,8 @@ from oan_messaging.runtime.ops import (
     set_scope,
     touch_heartbeat,
 )
+from oan_messaging.stats.snapshot import refresh as refresh_stats
+from oan_messaging.stats.snapshot import refresh_forever
 from oan_messaging.storage.config import ServiceSecrets, StorageSettings, load_policy
 from oan_messaging.storage.credentials import (
     issue_credential_with_id,
@@ -127,15 +129,21 @@ async def run(
             if component == "caller":
                 assert opts is not None
                 purposes = {Purpose(v) for v in opts.purposes.split(",") if v}
+                stats_reader = bool(getattr(opts, "stats_reader", False))
                 if Purpose.BROADCAST in purposes and not settings.broadcast_enabled:
                     raise ValueError("broadcast purpose refused: broadcasts disabled for pilot")
                 await upsert_caller(
                     sf,
                     opts.caller,
-                    channels={Channel(v) for v in opts.channels.split(",") if v},
+                    channels=(
+                        set()
+                        if stats_reader
+                        else {Channel(v) for v in opts.channels.split(",") if v}
+                    ),
                     purposes=purposes,
                     telegram_bot=opts.bot,
                     enabled=not opts.disable,
+                    can_read_stats=stats_reader,
                 )
                 log.info("caller upserted caller_id=%s enabled=%s", opts.caller, not opts.disable)
                 return
@@ -183,8 +191,18 @@ async def run(
                 return
             if component == "cleanup" and forever:
                 # Deployment mode: one long-running process sweeping every
-                # purge_sweep_interval; a failed sweep is logged and retried next interval.
-                await cleanup_forever(repo, stop, interval=policy.purge_sweep_interval)
+                # purge_sweep_interval, and rebuilding the statistics snapshot every
+                # stats_refresh_seconds; a failed run is logged and retried next interval.
+                await asyncio.gather(
+                    cleanup_forever(repo, stop, interval=policy.purge_sweep_interval),
+                    refresh_forever(
+                        sf, stop, interval=timedelta(seconds=settings.stats_refresh_seconds)
+                    ),
+                )
+                return
+            if component == "stats-refresh":
+                done = await refresh_stats(sf, datetime.now(UTC))
+                log.info("statistics refresh %s", "done" if done else "skipped: another runs")
                 return
             if component == "cleanup":
                 stats = await run_cleanup(repo, datetime.now(UTC))
@@ -301,6 +319,7 @@ COMPONENTS = [
     "worker",
     "receipts",
     "cleanup",
+    "stats-refresh",
     "suspend",
     "resume",
     "status",
@@ -324,6 +343,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--purposes", default="", help="caller: comma-separated purposes")
     parser.add_argument("--bot", help="caller: Telegram bot key")
     parser.add_argument("--disable", action="store_true", help="caller: disable the caller")
+    parser.add_argument(
+        "--stats-reader",
+        action="store_true",
+        help="caller: a read-only statistics reader (GET /api/v1/charts); cannot send",
+    )
     parser.add_argument("--credential", help="revoke-credentials: the one credential id")
     parser.add_argument("--all", action="store_true", help="revoke-credentials: every token")
     args = parser.parse_args(argv)
@@ -336,8 +360,10 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--caller is required")
     if args.component == "revoke-credentials" and bool(args.credential) == bool(args.all):
         parser.error("revoke-credentials needs exactly one of --credential ID or --all")
-    if args.component == "caller" and not args.purposes:
+    if args.component == "caller" and not args.purposes and not args.stats_reader:
         parser.error("--purposes is required")
+    if args.component == "caller" and args.stats_reader and args.purposes:
+        parser.error("a --stats-reader has no --purposes (it cannot send)")
     if args.component == "check-heartbeat":
         # Liveness probe: no settings, no database. Exit 1 if the worker loop has not
         # completed a cycle within --max-age seconds.

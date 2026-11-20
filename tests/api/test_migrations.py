@@ -44,6 +44,10 @@ def test_upgrade_check_downgrade_upgrade_from_empty(admin_url: str) -> None:
             "message_attempts",
             "receipts",
             "retired_key_versions",
+            "stats_daily",
+            "stats_failures",
+            "stats_campaigns",
+            "stats_state",
         }
         command.check(cfg)  # raises if the models and the migrated schema differ
         with psycopg.connect(_libpq(url)) as conn:

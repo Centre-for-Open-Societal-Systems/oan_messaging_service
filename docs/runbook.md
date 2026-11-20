@@ -92,6 +92,19 @@ restarts (worker liveness) and API readiness.
 | `receipt_anomalies` | Orphaned, mismatched or late 8028 receipts in the last 24 h | §4.6 |
 | `suspended:<channel>` | Provider dispatch is suspended | §4.2 |
 
+**Statistics for the dashboards.** `GET /api/v1/charts` (architecture, Statistics) gives
+Reports Central and the OAN dashboards counts, rates, latency, failures, campaigns, the
+live queue and provider health. To give a dashboard access, create a read-only reader and
+issue its token (it has no channels or purposes, so it cannot send):
+
+```
+python -m oan_messaging.runtime caller --caller reports-central --stats-reader
+python -m oan_messaging.runtime issue-credential --caller reports-central
+```
+
+The snapshot is rebuilt by the cleanup component every `OAN_MSG_STATS_REFRESH_SECONDS`
+(900). `meta.as_of` older than about 30 minutes means cleanup is not running.
+
 ## 4. Procedures
 
 ### 4.1 Queue not draining
@@ -172,6 +185,9 @@ logged without the secret. A run of them usually means a rotated secret or certi
 8028's side: check with 8028 before changing anything here.
 
 ## 5. Releases and rollback
+
+The version-by-version plan is in [deployment/rollout.md](deployment/rollout.md).
+
 
 * Stop all workers of the old release before activating schema features that the old
   release cannot read.

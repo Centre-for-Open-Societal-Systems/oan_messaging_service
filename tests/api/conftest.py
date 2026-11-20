@@ -40,7 +40,7 @@ ROOT = Path(__file__).resolve().parents[2]
 T0 = datetime(2026, 9, 1, 5, 12, 13, tzinfo=UTC)
 ALL_TABLES = (
     "dispatch_controls, receipts, message_attempts, message_content, messages, api_credentials, "
-    "callers, retired_key_versions"
+    "callers, retired_key_versions, stats_daily, stats_failures, stats_campaigns, stats_state"
 )
 
 
