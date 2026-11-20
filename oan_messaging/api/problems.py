@@ -50,6 +50,7 @@ def problem(
 _VALUE_ERROR_CODES = (
     ("ethiopian mobile", "invalid_et_mobile"),
     ("single sms part", "too_long_for_single_sms"),
+    ("sms part limit", "too_long_for_sms"),
     ("telegram message length", "too_long"),
     ("must not be blank", "blank"),
     ("control characters", "control_characters"),

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OAN Messaging Service
-  version: 3.0.0
+  version: 3.1.0
   summary: Outbound SMS (8028) and Telegram with durable acceptance and honest outcomes.
   description: |
     Frozen by MSG-01 (contract 3.0.0). Python mirror: `oan_messaging/contracts.py`.
@@ -67,8 +67,11 @@ paths:
       summary: Accept one SMS for one Ethiopian mobile recipient
       description: |
         Persists the message before responding. No gateway call happens in this request.
-        Pilot rule: the text must fit in one SMS part (160 GSM-7 septets, or 70 UTF-16
-        units if any non-GSM character such as Amharic or emoji is present).
+        The text may take up to 3 SMS parts (SMS-09). One part holds 160 GSM-7 septets,
+        or 70 UTF-16 units if any non-GSM character such as Amharic or emoji is present;
+        a longer text is sent concatenated at 153 septets or 67 units per part, so at
+        most 459 septets or 201 units. An `otp` text must fit one part. Longer text is
+        refused (`too_long_for_sms`, or `too_long_for_single_sms` for an OTP), never cut.
         `purpose: otp` requires `expires_at`, at most the configured OTP ceiling ahead
         (default 30 minutes). The service never extends a caller's `expires_at`.
       tags: [messages]
@@ -579,11 +582,13 @@ components:
         text:
           type: string
           minLength: 1
-          maxLength: 160
+          maxLength: 459
           description: |
-            One SMS part: ≤160 GSM-7 septets (extension characters count 2), or ≤70
-            UTF-16 units if any non-GSM-7 character is present. Encoding-aware check is
-            enforced server-side.
+            At most 3 SMS parts: ≤459 GSM-7 septets (extension characters count 2), or
+            ≤201 UTF-16 units if any non-GSM-7 character is present (one part: 160 / 70;
+            each part of a longer text: 153 / 67, and a 2-unit character is never split
+            between parts). `otp`: one part only. Encoding-aware check is enforced
+            server-side.
         source_reference:
           $ref: '#/components/schemas/SourceReference'
         purpose:

@@ -214,15 +214,17 @@ async def test_expiry_is_never_extended(
     [
         (sms_body(expires_at="2026-09-01T05:17:13"), "expires_at", "timezone_required"),
         (
-            sms_body(text="a" * 161, purpose="alert", expires_at=None),
+            sms_body(text="a" * 460, purpose="alert", expires_at=None),
             "text",
-            "too_long_for_single_sms",
+            "too_long_for_sms",
         ),
         (
-            sms_body(text="ሀ" * 71, purpose="alert", expires_at=None),
+            sms_body(text="ሀ" * 202, purpose="broadcast", expires_at=None),
             "text",
-            "too_long_for_single_sms",
+            "too_long_for_sms",
         ),
+        (sms_body(text="a" * 161), "text", "too_long_for_single_sms"),
+        (sms_body(text="ሀ" * 71), "text", "too_long_for_single_sms"),
         (sms_body(text="   "), "text", "blank"),
         (sms_body(purpose="marketing"), "purpose", "enum"),
         (sms_body(source_reference="bad ref!"), "source_reference", "invalid_format"),

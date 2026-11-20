@@ -364,7 +364,7 @@ ERROR_CODES = frozenset({
     "method_not_allowed", "invalid_request", "outcome_uncertain_retry_same_key",
     "channel_not_permitted", "required", "invalid_format", "invalid_json",
     "purpose_not_permitted", "telegram_bot_not_configured", "payload_mismatch",
-    "invalid_et_mobile", "too_long_for_single_sms", "too_long", "blank",
+    "invalid_et_mobile", "too_long_for_single_sms", "too_long_for_sms", "too_long", "blank",
     "control_characters", "invalid_chat_id", "required_for_otp", "invalid",
     "unknown_field", "timezone_required",
     # storage expiry checks

@@ -429,22 +429,23 @@ EMOJI = "😀"
     ("text", "accepted"),
     [
         ("a" * 160, True),
-        ("a" * 161, False),
+        ("a" * 459, True),  # 3 parts x 153 septets
+        ("a" * 460, False),
         ("{" * 80, True),
-        ("{" * 81, False),  # GSM-7 extension chars count 2 septets
-        ("€" * 80, True),
-        ("a" * 159 + "€", False),
+        ("{" * 228 + "a", True),  # GSM-7 extension chars count 2 and are never split
+        ("{" * 228 + "aa", False),
+        ("€" * 228, True),
         ("ሀ" * 70, True),
-        ("ሀ" * 71, False),  # any Amharic -> UCS-2, 70 units
-        ("a" * 69 + "ሀ", True),
-        ("a" * 70 + "ሀ", False),  # one Amharic char makes it Unicode
-        (EMOJI * 35, True),
-        (EMOJI * 35 + "a", False),  # emoji are 2 UTF-16 units
-        ("a" * 69 + EMOJI, False),
+        ("ሀ" * 201, True),  # any Amharic -> UCS-2, 3 parts x 67 units
+        ("ሀ" * 202, False),
+        ("a" * 200 + "ሀ", True),  # one Amharic char makes it Unicode
+        ("a" * 201 + "ሀ", False),
+        (EMOJI * 99, True),  # emoji are 2 UTF-16 units, kept whole: 33 per part
+        (EMOJI * 100, False),
         ("Line one\nline two", True),
     ],
 )
-async def test_single_part_boundaries(text: str, accepted: bool) -> None:
+async def test_part_limit_boundaries(text: str, accepted: bool) -> None:
     adapter, rec = adapter_for(respond(200, ok_body()))
     result = await adapter.send(req(text=text))
     if accepted:

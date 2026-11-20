@@ -116,7 +116,7 @@ no submitted values.
 | `Idempotency-Key` (header) | required | required | `^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`; one per intended delivery |
 | `recipient` | required | — | `09XXXXXXXX`, `07XXXXXXXX`, `2519…`, `+2519…`, `+2517…`; stored as E.164 |
 | `chat_id` | — | required | non-zero integer, \|id\| < 2^52; recipient must have started the bot |
-| `text` | required | required | not blank, no control chars except `\n` `\r`. SMS: one part (160 GSM-7 septets / 70 UTF-16 units). Telegram: ≤ 4096 UTF-16 units, no `parse_mode` |
+| `text` | required | required | not blank, no control chars except `\n` `\r`. SMS: up to 3 parts (one part 160 GSM-7 septets / 70 UTF-16 units; longer texts 153 / 67 per part, at most 459 / 201); an OTP is one part. Telegram: ≤ 4096 UTF-16 units, no `parse_mode` |
 | `source_reference` | required | required | `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`; business correlation, **not unique** |
 | `purpose` | required | required | `otp`, `transactional`, `alert`, `broadcast`; caller must be permitted |
 | `expires_at` | optional | optional | RFC 3339 with offset. **Required for `otp`.** Must be in the future and within the policy ceiling (defaults: OTP 30 min, others 7 days) |

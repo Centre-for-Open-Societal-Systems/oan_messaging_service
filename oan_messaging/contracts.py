@@ -59,11 +59,12 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
 
-CONTRACT_VERSION = "3.0.0"
+CONTRACT_VERSION = "3.1.0"
 
 # --------------------------------------------------------------------------------------
 # Enumerations
@@ -318,12 +319,15 @@ _GSM7_BASIC = frozenset(
 )
 _GSM7_EXTENSION = frozenset("^{}\\[~]|€\f")
 
-#: Pilot rule: exactly one SMS part. The 8028 guide's three-part limits (466 Latin /
-#: 204 Unicode) are internally inconsistent with its per-part sizes (153/67), so
-#: multi-part is out of scope until 8028 confirms. See docs/8028-contract.md.
+#: One part holds 160 GSM-7 septets or 70 UTF-16 units. A longer text is sent as a
+#: concatenated message whose parts each lose a 6-byte header: 153 septets or 67 units
+#: (SMS-09, 20 Nov 2026). 8028's guide v1.1 sets no length limit and the handset joins
+#: the parts; we cap a message at SMS_MAX_PARTS parts. An OTP is always one part.
 SMS_SINGLE_PART_GSM7_SEPTETS = 160
 SMS_SINGLE_PART_UCS2_UNITS = 70
-SMS_MAX_PARTS = 1
+SMS_MULTIPART_GSM7_SEPTETS = 153
+SMS_MULTIPART_UCS2_UNITS = 67
+SMS_MAX_PARTS = 3
 
 #: Telegram sendMessage limit (after entity parsing). Plain text, no parse_mode.
 #: Counted in UTF-16 code units to be conservative for astral characters (emoji).
@@ -342,6 +346,31 @@ def sms_length_units(text: str) -> tuple[Literal["gsm7", "ucs2"], int, int]:
         return enc, used, SMS_SINGLE_PART_GSM7_SEPTETS
     used = len(text.encode("utf-16-le")) // 2
     return enc, used, SMS_SINGLE_PART_UCS2_UNITS
+
+
+def sms_parts(text: str) -> int:
+    """How many SMS parts ``text`` needs (1 for an empty or short text).
+
+    Counted as a gateway splits it: a GSM-7 extension character (2 septets) or a
+    UTF-16 surrogate pair (2 units) is never cut in half, so it moves whole to the
+    next part. Clients that only estimate (160/153, 70/67) may count one part fewer
+    in those rare cases; the service's count is the one that is enforced.
+    """
+    enc = sms_encoding(text)
+    if enc == "gsm7":
+        sizes = [2 if c in _GSM7_EXTENSION else 1 for c in text]
+        single, per_part = SMS_SINGLE_PART_GSM7_SEPTETS, SMS_MULTIPART_GSM7_SEPTETS
+    else:
+        sizes = [len(c.encode("utf-16-le")) // 2 for c in text]
+        single, per_part = SMS_SINGLE_PART_UCS2_UNITS, SMS_MULTIPART_UCS2_UNITS
+    if sum(sizes) <= single:
+        return 1
+    parts, room = 1, per_part
+    for size in sizes:
+        if size > room:
+            parts, room = parts + 1, per_part
+        room -= size
+    return parts
 
 
 _DISALLOWED_CONTROL = re.compile(r"[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]")
@@ -413,11 +442,13 @@ class SmsSubmission(_SubmissionBase):
 
     @field_validator("text")
     @classmethod
-    def _text(cls, v: str) -> str:
+    def _text(cls, v: str, info: ValidationInfo) -> str:
         _check_plain_text(v)
-        _, used, capacity = sms_length_units(v)
-        if used > capacity:
-            raise ValueError("text exceeds a single SMS part for its encoding")
+        parts = sms_parts(v)
+        if parts > 1 and info.data.get("purpose") is Purpose.OTP:
+            raise ValueError("an otp text exceeds a single SMS part for its encoding")
+        if parts > SMS_MAX_PARTS:
+            raise ValueError("text exceeds the sms part limit for its encoding")
         return v
 
 
@@ -1274,14 +1305,14 @@ INVALID_EXAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
         SmsSubmission,
         {"recipient": "0111000000", "text": "hi", "source_reference": "x3", "purpose": "alert"},
     ),
-    "amharic_over_single_part": (
+    "amharic_over_part_limit": (
         SmsSubmission,
-        {"recipient": "0912000001", "text": "ሀ" * 71, "source_reference": "x4",
+        {"recipient": "0912000001", "text": "ሀ" * 202, "source_reference": "x4",
          "purpose": "broadcast"},
     ),
-    "latin_over_single_part": (
+    "latin_over_part_limit": (
         SmsSubmission,
-        {"recipient": "0912000001", "text": "a" * 161, "source_reference": "x5",
+        {"recipient": "0912000001", "text": "a" * 460, "source_reference": "x5",
          "purpose": "broadcast"},
     ),
     "naive_expiry": (
@@ -1352,7 +1383,7 @@ SCHEMA_ENFORCED_INVALID: frozenset[str] = frozenset(
         "otp_without_expiry",
         "invalid_number_9_digits",
         "landline_number",
-        "latin_over_single_part",
+        "latin_over_part_limit",
         "idempotency_key_in_body",
         "telegram_token_field",
         "telegram_string_chat_id",
@@ -1659,14 +1690,28 @@ def _self_check(openapi_path: str | None = None) -> list[str]:
     _check(failures, mask_chat_id(123456789) == "chat:*******89", "mask_chat_id")
 
     # Length boundaries.
-    for text, ok in [("a" * 160, True), ("a" * 161, False), ("{" * 80, True), ("{" * 81, False),
-                     ("ሀ" * 70, True), ("ሀ" * 71, False), ("a" * 69 + "😀", False)]:
+    # One part 160 / 70; three parts 3 x 153 = 459 septets, 3 x 67 = 201 units.
+    # A 2-septet extension character or a surrogate pair is never split across parts.
+    for text, ok in [("a" * 459, True), ("a" * 460, False), ("{" * 80, True),
+                     ("{" * 228 + "a", True), ("{" * 228 + "aa", False), ("ሀ" * 201, True),
+                     ("ሀ" * 202, False), ("a" * 199 + "😀", True),
+                     ("ሀ" * 66 + "😀" + "ሀ" * 133, False)]:
         try:
             SmsSubmission(recipient="0912000001", text=text, source_reference="b",
                           purpose=Purpose.ALERT)
             _check(failures, ok, f"sms length accepted len={len(text)}")
         except ValidationError:
             _check(failures, not ok, f"sms length rejected len={len(text)}")
+    for text, ok in [("a" * 160, True), ("a" * 161, False), ("ሀ" * 70, True), ("ሀ" * 71, False)]:
+        try:
+            SmsSubmission(recipient="0912000001", text=text, source_reference="b",
+                          purpose=Purpose.OTP, expires_at=_T0 + timedelta(minutes=5))
+            _check(failures, ok, f"otp length accepted len={len(text)}")
+        except ValidationError:
+            _check(failures, not ok, f"otp length rejected len={len(text)}")
+    _check(failures, [sms_parts(t) for t in ("", "a" * 160, "a" * 161, "a" * 306, "a" * 307,
+                                             "ሀ" * 70, "ሀ" * 71, "ሀ" * 134, "ሀ" * 135)]
+           == [1, 1, 2, 2, 3, 1, 2, 2, 3], "sms_parts boundaries")
 
     # Undocumented receipt status is non-final and maps to None; Expired keeps raw status.
     base = EXAMPLES["receipt_delivered"][1]

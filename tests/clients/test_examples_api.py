@@ -132,25 +132,22 @@ async def test_changed_content_under_same_key_is_a_conflict(api_client: OanClien
         await api_client.submit(changed)
 
 
-async def test_amharic_single_part_limit_is_70_characters(api_client: OanClient) -> None:
-    def amharic(n: int, key: str) -> SmsDelivery:
-        return SmsDelivery(idempotency_key=key, recipient="0900000006", text="ሀ" * n,
-                           source_reference="grievance:G-1:e", purpose="transactional",
+async def test_amharic_part_limit_is_three_parts_of_67(api_client: OanClient) -> None:
+    def text_of(text: str, key: str, purpose: str = "transactional") -> SmsDelivery:
+        return SmsDelivery(idempotency_key=key, recipient="0900000006", text=text,
+                           source_reference="grievance:G-1:e", purpose=purpose,
                            expires_at=None, first_submitted_at=T0)
 
-    assert (await api_client.submit(amharic(70, "k-amharic-70"))).status == "accepted"
+    # One part is 70 Amharic characters; three concatenated parts are 3 x 67 = 201.
+    assert (await api_client.submit(text_of("ሀ" * 70, "k-amharic-70"))).status == "accepted"
+    assert (await api_client.submit(text_of("ሀ" * 201, "k-amharic-201"))).status == "accepted"
     with pytest.raises(OanRejected) as info:
-        await api_client.submit(amharic(71, "k-amharic-71"))
-    assert info.value.status == 422 and ("text", "too_long_for_single_sms") in info.value.errors
-    # One Amharic character in English text makes the whole message UCS-2 (70 limit).
-    mixed = SmsDelivery(idempotency_key="k-mixed-71", recipient="0900000006",
-                        text="a" * 70 + "ሀ", source_reference="g:1", purpose="alert",
-                        expires_at=None, first_submitted_at=T0)
+        await api_client.submit(text_of("ሀ" * 202, "k-amharic-202"))
+    assert info.value.status == 422 and ("text", "too_long_for_sms") in info.value.errors
+    # One Amharic character in English text makes the whole message UCS-2.
     with pytest.raises(OanRejected):
-        await api_client.submit(mixed)
-    english = SmsDelivery(idempotency_key="k-english-160", recipient="0900000006",
-                          text="a" * 160, source_reference="g:1", purpose="alert",
-                          expires_at=None, first_submitted_at=T0)
+        await api_client.submit(text_of("a" * 201 + "ሀ", "k-mixed-202"))
+    english = text_of("a" * 459, "k-english-459", "alert")
     assert (await api_client.submit(english)).status == "accepted"
 
 

@@ -31,7 +31,7 @@ written here, in the repository or in logs. They live in the secret store only.
 |---|---|---|
 | `phonenums` | At least one; each exactly `09XXXXXXXX` or `07XXXXXXXX`; `+251…`/`251…` rejected; all or nothing | **One recipient per request** (one message = one `sms_id`). The adapter converts E.164 to `09…`/`07…` |
 | `pushdatetime` | Optional; omitted or empty sends now; a past **date** is rejected | Sent as "now" in EAT (today's date, so accepted). Scheduling is out of scope |
-| `smstext` | Not empty; trimmed; Unicode supported; no length limit (body < 100 KB); multi-part joined on the handset | **Single part only**: 160 GSM-7 characters (extension characters count 2), otherwise 70 UTF-16 units. Multi-part stays refused until a product decision |
+| `smstext` | Not empty; trimmed; Unicode supported; no length limit (body < 100 KB); multi-part joined on the handset | **Up to 3 parts** (SMS-09, 20 Nov 2026): one part is 160 GSM-7 characters (extension characters count 2), otherwise 70 UTF-16 units; a longer text is sent whole and counted at 153 / 67 per part, so at most 459 / 201. OTPs stay one part |
 
 ## Send response → `ProviderResult`
 

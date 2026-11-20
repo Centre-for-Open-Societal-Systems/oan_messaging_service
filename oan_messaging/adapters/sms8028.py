@@ -66,6 +66,7 @@ import httpx
 from pydantic import SecretStr
 
 from oan_messaging.contracts import (
+    SMS_MAX_PARTS,
     Channel,
     FailureCode,
     Provider,
@@ -74,7 +75,7 @@ from oan_messaging.contracts import (
     SendRequest,
     SmsSendRequest,
     normalize_et_mobile,
-    sms_length_units,
+    sms_parts,
 )
 
 __all__ = [
@@ -342,14 +343,13 @@ class Sms8028Adapter:
                 failure=FailureCode.TEXT_REJECTED,
                 detail="text is blank or has control characters",
             )
-        _, used, capacity = sms_length_units(text)
-        if used > capacity:
+        if sms_parts(text) > SMS_MAX_PARTS:
             return self._result(
                 started,
                 ProviderOutcome.REJECTED,
                 "text_too_long",
                 failure=FailureCode.TEXT_REJECTED,
-                detail="text exceeds one SMS part (pilot limit)",
+                detail=f"text exceeds {SMS_MAX_PARTS} SMS parts",
             )
         if request.expires_at is not None and request.expires_at <= started:
             return self._result(
