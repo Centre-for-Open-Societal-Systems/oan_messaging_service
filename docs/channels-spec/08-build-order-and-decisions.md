@@ -52,7 +52,7 @@ and then switched on kebele by kebele.
 | OQ-13 | Farmer linking | OTP from the Auth service to the registered phone; a different Telegram number (shared with the contact button) approved by that OTP is used for Telegram only (RP-D5, the alternate-number decision, §6.6) |
 | SMS-01 | SMS sender | One sender (OAN Messaging) for all modules; no module calls 8028 directly |
 | SMS-02 | Telegram through OAN Messaging | No OAN Telegram caller in Phase 1; the bot sends through RapidPro |
-| SMS-03 | Broadcast purpose (revised 19 Nov 2026) | Enabled once **broadcast ageing** is built and passes the starvation test: a `broadcast` waiting longer than a configurable time (proposed 180 s) is claimed ahead of newer non-OTP traffic; no reserved share (§3.4) |
+| SMS-03 | Broadcast purpose (revised 19 Nov 2026; built 20 Nov 2026) | **Built and the starvation test passes** (20 Nov 2026); kept as decided after the campaign trade-off was raised: an aged broadcast goes ahead of newer non-OTP SMS, so a large campaign delays them until it drains. Enabled by `OAN_MSG_BROADCAST_ENABLED` once **broadcast ageing** is built and passes the starvation test: a `broadcast` waiting longer than a configurable time (proposed 180 s) is claimed ahead of newer non-OTP traffic; no reserved share (§3.4) |
 | SMS-05 | Batching (19 Nov 2026) | Identical texts go to 8028 in one request of up to 100 numbers (configurable); each recipient stays its own message; OTPs and personal notices one per request |
 | SMS-06 | Purposes for DA web app broadcasts (19 Nov 2026) | `Emergency` and `Weather` → `alert`; `Knowledge` and `Informational` → `broadcast` |
 | SMS-07 | 8028 receipt format (19 Nov 2026) | Accept both `status` and `sms_status` until 8028 confirms (§3.5) |

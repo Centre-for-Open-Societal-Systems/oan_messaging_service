@@ -21,7 +21,7 @@ import base64
 from dataclasses import dataclass
 from datetime import timedelta
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from oan_messaging.contracts import HmacFingerprinter, ServicePolicy
@@ -51,6 +51,8 @@ class StorageSettings(BaseSettings):
     db_max_overflow: int = 10
     max_body_bytes: int = 16 * 1024
     broadcast_enabled: bool = False
+    #: SMS-03: seconds after which a waiting message goes ahead of newer non-OTP traffic.
+    broadcast_max_wait_seconds: int = Field(default=180, gt=0)
 
     policy_max_otp_ttl_seconds: int | None = None
     policy_max_expiry_horizon_seconds: int | None = None

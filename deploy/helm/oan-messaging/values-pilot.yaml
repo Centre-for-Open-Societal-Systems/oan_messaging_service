@@ -5,8 +5,9 @@
 #   helm upgrade --install oan-msg deploy/helm/oan-messaging \
 #     -f deploy/helm/oan-messaging/values-pilot.yaml -f <environment-values>.yaml
 #
-# Broadcast stays disabled (no caller may be granted `broadcast`; the worker refuses to
-# start with OAN_MSG_BROADCAST_ENABLED=true). Dispatch rate defaults are unchanged.
+# Broadcast is off unless config.broadcastEnabled is set (SMS-03 ageing is built: a message
+# waiting config.broadcastMaxWaitSeconds goes ahead of newer non-OTP traffic). Dispatch
+# rate defaults are unchanged.
 worker:
   enabled: true
   command: [python, -m, oan_messaging.runtime, worker]

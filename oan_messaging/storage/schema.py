@@ -185,6 +185,13 @@ Index(
     messages.c.created_at,
     postgresql_where=text("status = 'accepted'"),
 )
+# SMS-03 broadcast ageing: the worker's aged pass reads accepted non-OTP messages by age.
+Index(
+    "ix_messages_claimable_by_age",
+    messages.c.created_at,
+    messages.c.id,
+    postgresql_where=text("status = 'accepted' AND priority > 0"),
+)
 Index("ix_messages_caller_id_id", messages.c.caller_id, messages.c.id)
 Index(
     "ix_messages_provider_message_id",

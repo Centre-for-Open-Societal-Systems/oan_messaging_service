@@ -109,6 +109,10 @@ config:
   contentKeyCurrent: v1        # OAN_MSG_CONTENT_KEY_CURRENT
   fingerprintKeyCurrent: k1    # OAN_MSG_FINGERPRINT_KEY_CURRENT
   maxBodyBytes: 16384          # OAN_MSG_MAX_BODY_BYTES
+  # SMS-03: accept and send the broadcast purpose (API, worker and caller command).
+  broadcastEnabled: false      # OAN_MSG_BROADCAST_ENABLED
+  # A message waiting this long is claimed ahead of newer non-OTP traffic (OTPs first).
+  broadcastMaxWaitSeconds: 180 # OAN_MSG_BROADCAST_MAX_WAIT_SECONDS
   # Empty = code default (https://8028.et:3400/sms-api/v1). OAN_MSG_SMS8028_BASE_URL.
   sms8028BaseUrl: ""
   # ServicePolicy overrides in seconds (all optional; must be identical for every

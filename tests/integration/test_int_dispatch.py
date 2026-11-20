@@ -136,27 +136,14 @@ async def test_otp_overtakes_an_existing_broadcast_backlog(h: Harness) -> None:
     assert h.sms.calls[0].body["phonenums"] == [fake_number(120)]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="MSG-07b pilot: broadcasts disabled at API and worker; "
-    "fairness required before enablement",
-)
-async def test_defect_sustained_higher_priority_load_starves_broadcast_indefinitely(
-    h: Harness,
-) -> None:
-    """Requirement: priority without UNBOUNDED broadcast starvation. Claim order is a
-    strict ``ORDER BY priority, created_at`` (repository.py:455) and the only reservation
-    is OTP's (rate_limit.py:220-224), so transactional traffic arriving at gateway capacity
-    keeps an older broadcast unclaimed forever. Here the transactional class alone is not
-    overloaded (arrivals == capacity, its own latency stays bounded), yet a broadcast
-    accepted first is still unsent after 3 simulated minutes.
-
-    Status (MSG-07 takeover): the 180 s figure is a PROPOSED fairness expectation, not an
-    approved SLA (docs/reviews/MSG-07-review.md). The observed behaviour (no bound at all)
-    is real; the number awaits a contract decision. Assertion intentionally unchanged.
-    See also test_finding_broadcast_backlog_drains_once_load_drops_below_capacity."""
+async def test_sustained_higher_priority_load_does_not_starve_broadcast(h: Harness) -> None:
+    """SMS-03 broadcast ageing: transactional traffic arriving at gateway capacity can delay
+    an older broadcast but not starve it. Once it has waited ``broadcast_max_wait`` (180 s)
+    it is claimed ahead of the newer transactional messages, and the transactional class
+    keeps up apart from that one slot."""
     advisory = await h.caller("advisory", bot=None)
     grievance = await h.caller("grievance", bot=None)
+    t0 = h.clock()
     b = (
         await h.post_sms(
             advisory,
@@ -168,8 +155,8 @@ async def test_defect_sustained_higher_priority_load_starves_broadcast_indefinit
         )
     ).json()["id"]
     worker = h.worker(sms_limit=RateLimit(requests=4, window=timedelta(seconds=1)), batch_size=4)
-    n = 0
-    for _second in range(180):
+    n, sent_at = 0, None
+    for _second in range(200):
         for _ in range(4):  # 4 new transactional messages per second == capacity
             n += 1
             await h.post_sms(
@@ -180,16 +167,63 @@ async def test_defect_sustained_higher_priority_load_starves_broadcast_indefinit
                 expires_at=None,
                 text=f"Update {n}",
             )
+        claimed_at = h.clock()  # the limiter's waits also move the shared simulated clock
         await worker.run_once()
+        if sent_at is None and (await h.status(advisory, b))["status"] == "sent":
+            sent_at = (claimed_at - t0).total_seconds()
         h.clock.advance(seconds=1)
-        if (await h.status(advisory, b))["status"] != "accepted":
-            break
+    # Delayed while younger than 180 s, then claimed in the first cycle after it.
+    assert sent_at is not None and 180 <= sent_at < 183, sent_at
     sent_transactional = sum(1 for c in h.sms.calls if c.body["smstext"].startswith("Update"))
-    assert sent_transactional >= 4 * 170  # the higher class itself is keeping up
-    assert (await h.status(advisory, b))["status"] == "sent", (
-        "broadcast accepted first was never claimed during 180 s of transactional "
-        "traffic at gateway capacity (unbounded starvation)"
-    )
+    assert sent_transactional >= 4 * 200 - 4  # the higher class lost about one slot
+
+
+async def test_without_ageing_strict_priority_still_holds(h: Harness) -> None:
+    """broadcast_max_wait=None keeps the old strict order (priority, created_at)."""
+    advisory = await h.caller("advisory", bot=None)
+    grievance = await h.caller("grievance", bot=None)
+    b = (
+        await h.post_sms(advisory, new_key(), recipient=fake_number(501), purpose="broadcast",
+                         expires_at=None, text="Advisory.")
+    ).json()["id"]
+    h.clock.advance(seconds=600)
+    await h.post_sms(grievance, new_key(), recipient=fake_number(601), purpose="transactional",
+                     expires_at=None, text="Update 1")
+    await h.worker(batch_size=1, broadcast_max_wait=None).run_once()
+    assert [c.body["smstext"] for c in h.sms.calls] == ["Update 1"]
+    assert (await h.status(advisory, b))["status"] == "accepted"
+
+
+async def test_aged_order_otp_first_then_oldest_waiting_then_priority(h: Harness) -> None:
+    """With ageing: OTPs first; then messages waiting past broadcast_max_wait, oldest first
+    whatever their purpose (an older alert keeps its place ahead of an aged broadcast);
+    then the rest by priority."""
+    esignet = await h.caller("esignet", bot=None)
+    advisory = await h.caller("advisory", bot=None)
+    grievance = await h.caller("grievance", bot=None)
+
+    async def sms(token, purpose, text, n):
+        otp_expiry = (h.clock() + timedelta(minutes=5)).isoformat()
+        await h.post_sms(token, new_key(), recipient=fake_number(n), purpose=purpose,
+                         expires_at=otp_expiry if purpose == "otp" else None, text=text)
+
+    await sms(advisory, "alert", "old alert", 701)
+    h.clock.advance(seconds=10)
+    await sms(advisory, "broadcast", "aged broadcast", 702)
+    h.clock.advance(seconds=200)
+    await sms(grievance, "transactional", "new transactional", 703)
+    await sms(advisory, "alert", "new alert", 704)
+    await sms(advisory, "broadcast", "new broadcast", 705)
+    await sms(esignet, "otp", "Your code is 482913.", 706)
+    await h.worker(batch_size=10).run_once()
+    assert [c.body["smstext"] for c in h.sms.calls] == [
+        "Your code is 482913.",
+        "old alert",
+        "aged broadcast",
+        "new transactional",
+        "new alert",
+        "new broadcast",
+    ]
 
 
 async def test_worker_without_an_adapter_does_not_claim_other_channel(

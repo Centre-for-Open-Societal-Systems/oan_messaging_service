@@ -11,8 +11,8 @@ Run from the bench's sites directory, with the kit's stub server next to this fi
    farmers of the woreda on SMS and Telegram. Telegram goes first; the SMS copy then skips
    the farmer reached on Telegram and reaches the rest through OAN Messaging and the fake
    8028 (purpose alert).
-4. Broadcast B: an Informational message on SMS only (purpose broadcast). OAN accepts it;
-   its worker holds broadcast-purpose messages until SMS-03 broadcast ageing ships.
+4. Broadcast B: an Informational message on SMS only (purpose broadcast), delivered once
+   OAN runs with OAN_MSG_BROADCAST_ENABLED (SMS-03 broadcast ageing).
 5. Replays A's client_op_id: the original answer, nothing sent twice.
 """
 
@@ -233,10 +233,10 @@ try:
 	frappe.db.commit()
 	name_b = dispatch.find(op_b)
 	run_until_done(name_b)
-	statuses_b = deliver(name_b, {"accepted"}, limit=30)
+	statuses_b = deliver(name_b, {"delivered"})
 	check(
-		len(statuses_b) == 5 and set(statuses_b) == {"accepted"},
-		"B: 5 SMS accepted as broadcast; held by OAN until SMS-03 ships",
+		len(statuses_b) == 5 and set(statuses_b) == {"delivered"},
+		"B: 5 SMS sent as broadcast and delivered by the fake 8028",
 	)
 
 	# -- 5. replay ------------------------------------------------------------------

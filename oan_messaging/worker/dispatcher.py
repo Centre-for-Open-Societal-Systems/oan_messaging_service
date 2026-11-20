@@ -71,6 +71,9 @@ class WorkerConfig:
     worker_id: str = field(default_factory=lambda: f"worker-{uuid.uuid4().hex[:8]}")
     batch_size: int = 1
     broadcast_enabled: bool = False
+    #: SMS-03 broadcast ageing: a message accepted this long ago is claimed ahead of newer
+    #: non-OTP traffic (OTPs still first), so a broadcast cannot be starved. None = off.
+    broadcast_max_wait: timedelta | None = timedelta(seconds=180)
     lease: timedelta = timedelta(minutes=2)
     #: A provider call may only start while at least this much lease is left.
     lease_safety_margin: timedelta = timedelta(seconds=30)
@@ -93,6 +96,8 @@ class WorkerConfig:
             raise ValueError("timing settings must be positive")
         if self.lease <= self.lease_safety_margin or not self.backoff:
             raise ValueError("lease must exceed the safety margin; backoff required")
+        if self.broadcast_max_wait is not None and self.broadcast_max_wait <= zero:
+            raise ValueError("broadcast_max_wait must be positive")
         if self.finish_reserve is None:
             self.finish_reserve = min(timedelta(seconds=5), self.lease_safety_margin / 2)
         elif not zero < self.finish_reserve < self.lease_safety_margin:
@@ -151,6 +156,7 @@ class Worker:
             self._cfg.batch_size,
             channels=tuple(self._adapters),
             allow_broadcast=self._cfg.broadcast_enabled,
+            aged_after=self._cfg.broadcast_max_wait,
         )
         stats.claimed = len(claims)
         for claim in claims:

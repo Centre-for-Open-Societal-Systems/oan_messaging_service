@@ -31,7 +31,20 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import and_, any_, delete, func, literal, or_, select, text, true, union, update
+from sqlalchemy import (
+    Select,
+    and_,
+    any_,
+    delete,
+    func,
+    literal,
+    or_,
+    select,
+    text,
+    true,
+    union,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
@@ -59,6 +72,7 @@ from oan_messaging.contracts import (
     Provider,
     ProviderOutcome,
     ProviderResult,
+    Purpose,
     ReceiptDisposition,
     ReceiptStatus,
     SendRequest,
@@ -434,6 +448,44 @@ class PostgresMessageRepository:
             )
         return len(expired)
 
+    @staticmethod
+    async def _claimable_rows(
+        s: AsyncSession,
+        base: Select[Any],
+        now: datetime,
+        limit: int,
+        aged_after: timedelta | None,
+    ) -> list[dict[str, Any]]:
+        """Lock up to ``limit`` claimable rows in claim order (SKIP LOCKED).
+
+        Without ageing: ``priority, created_at``. With ageing (SMS-03), in three passes
+        that each follow an index: OTPs; then every other message accepted at least
+        ``aged_after`` ago, oldest first, whatever its purpose, so an aged broadcast goes
+        ahead of newer transactional and alert traffic but never ahead of older; then the
+        rest by ``priority, created_at``.
+        """
+
+        async def take(q: Select[Any], n: int, skip: list[uuid.UUID]) -> list[dict[str, Any]]:
+            if skip:
+                q = q.where(messages.c.id.not_in(skip))
+            q = q.limit(n).with_for_update(skip_locked=True, of=messages)
+            return [dict(r) for r in (await s.execute(q)).mappings().all()]
+
+        by_priority = (messages.c.priority, messages.c.created_at, messages.c.id)
+        if aged_after is None:
+            return await take(base.order_by(*by_priority), limit, [])
+        otp = PURPOSE_PRIORITY[Purpose.OTP]
+        rows = await take(base.where(messages.c.priority == otp).order_by(*by_priority), limit, [])
+        if len(rows) < limit:
+            aged = base.where(
+                messages.c.priority > otp, messages.c.created_at <= now - aged_after
+            ).order_by(messages.c.created_at, messages.c.id)
+            rows += await take(aged, limit - len(rows), [r["id"] for r in rows])
+        if len(rows) < limit:
+            rest = base.order_by(*by_priority)
+            rows += await take(rest, limit - len(rows), [r["id"] for r in rows])
+        return rows
+
     async def claim_due(
         self,
         worker_id: str,
@@ -443,14 +495,17 @@ class PostgresMessageRepository:
         *,
         channels: tuple[Channel, ...] | None = None,
         allow_broadcast: bool = True,
+        aged_after: timedelta | None = None,
     ) -> list[Claim]:
         if lease <= timedelta(0) or limit <= 0:
             raise ValueError("lease and limit must be positive")
+        if aged_after is not None and aged_after <= timedelta(0):
+            raise ValueError("aged_after must be positive")
         claims: list[Claim] = []
         async with self._sf() as s, s.begin():
             await self._key_lock_shared(s)
             await self._expire_due_accepted(s, now, max(limit, 100))
-            q = (
+            base = (
                 select(
                     messages,
                     message_content.c.key_version.label("c_key_version"),
@@ -481,11 +536,8 @@ class PostgresMessageRepository:
                     if channels is not None
                     else true(),
                 )
-                .order_by(messages.c.priority, messages.c.created_at, messages.c.id)
-                .limit(limit)
-                .with_for_update(skip_locked=True, of=messages)
             )
-            rows = [dict(r) for r in (await s.execute(q)).mappings().all()]
+            rows = await self._claimable_rows(s, base, now, limit, aged_after)
             for row in rows:
                 try:
                     content = self._cipher.decrypt(

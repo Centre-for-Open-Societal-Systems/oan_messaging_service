@@ -11,6 +11,8 @@ data:
   OAN_MSG_CONTENT_KEY_CURRENT: {{ required "config.contentKeyCurrent is required" .Values.config.contentKeyCurrent | quote }}
   OAN_MSG_FINGERPRINT_KEY_CURRENT: {{ required "config.fingerprintKeyCurrent is required" .Values.config.fingerprintKeyCurrent | quote }}
   OAN_MSG_MAX_BODY_BYTES: {{ .Values.config.maxBodyBytes | int | quote }}
+  OAN_MSG_BROADCAST_ENABLED: {{ .Values.config.broadcastEnabled | ternary "true" "false" | quote }}
+  OAN_MSG_BROADCAST_MAX_WAIT_SECONDS: {{ .Values.config.broadcastMaxWaitSeconds | int | quote }}
   {{- with .Values.config.sms8028BaseUrl }}
   OAN_MSG_SMS8028_BASE_URL: {{ . | quote }}
   {{- end }}

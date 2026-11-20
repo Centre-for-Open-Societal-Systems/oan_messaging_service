@@ -21,8 +21,12 @@ exception is `issue-credential`, which prints the new token once on stdout.
 | Migrations | `alembic -c migrations/alembic.ini upgrade head`, as the **owner** role | exit status |
 
 Pilot constraints:
-* Broadcast is disabled. The API refuses it, the worker never claims it, and the worker
-  and `caller` command refuse to start or grant it.
+* Broadcast is off unless `OAN_MSG_BROADCAST_ENABLED=true` (Helm `config.broadcastEnabled`)
+  on the API, the worker and the `caller` command; while off, the API refuses it, the worker
+  never claims it and `caller` refuses to grant it. When on, **broadcast ageing (SMS-03)**
+  applies: a message waiting longer than `OAN_MSG_BROADCAST_MAX_WAIT_SECONDS` (default
+  180) is claimed ahead of newer non-OTP traffic, oldest first; OTPs always go first. A
+  large campaign therefore delays newer transactional and alert SMS until it has drained.
 * Every enabled channel needs at least one worker with that channel configured.
 * The worker refuses to start (exit 1) if:
   * **the latency guard fails:** the database round trip measured at start-up cannot fit

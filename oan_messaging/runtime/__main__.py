@@ -22,7 +22,7 @@ import signal
 import sys
 import uuid
 from contextlib import AsyncExitStack
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import select, text
@@ -270,9 +270,16 @@ async def run(
             if not latency.fits:
                 log.error("database round trip too slow for the dispatch window; not starting")
                 raise RuntimeError("dispatch latency guard")
-            if settings.broadcast_enabled:
-                raise ValueError("broadcast rollout awaits fairness acceptance")
-            worker = Worker(repo, adapters, limiter, WorkerConfig(lease=policy.worker_lease))
+            worker = Worker(
+                repo,
+                adapters,
+                limiter,
+                WorkerConfig(
+                    lease=policy.worker_lease,
+                    broadcast_enabled=settings.broadcast_enabled,
+                    broadcast_max_wait=timedelta(seconds=settings.broadcast_max_wait_seconds),
+                ),
+            )
             heartbeat = heartbeat_path()
             touch_heartbeat(heartbeat)
             log.info("worker started channels=%s", ",".join(sorted(c.value for c in adapters)))

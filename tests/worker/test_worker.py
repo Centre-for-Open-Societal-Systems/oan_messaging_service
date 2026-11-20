@@ -770,6 +770,7 @@ def test_worker_config_validation() -> None:
         {"backoff": ()},
         {"finish_reserve": timedelta(seconds=30)},
         {"finish_reserve": timedelta(0)},
+        {"broadcast_max_wait": timedelta(0)},
     ):
         with pytest.raises(ValueError):
             WorkerConfig(**bad)

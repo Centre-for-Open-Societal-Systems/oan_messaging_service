@@ -139,7 +139,7 @@ async def test_api_process_killed_after_commit_before_response_then_replayed(
             timeout=120,
         )
         assert mig.returncode == 0, mig.stderr[-500:]
-        assert scalar(url, "SELECT version_num FROM alembic_version") == "0003"
+        assert scalar(url, "SELECT version_num FROM alembic_version") == "0004"
 
         engine = make_engine(url)
         sf = make_session_factory(engine)

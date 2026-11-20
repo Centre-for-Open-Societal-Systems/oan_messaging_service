@@ -35,7 +35,7 @@ provider URL or priority.
 | `recipient` | `09XXXXXXXX`, `07XXXXXXXX`, `2519…`, `+2519…` or `+2517…`; stored as E.164 |
 | `text` | Not blank; no control characters except line breaks. **Up to 3 SMS parts (SMS-09):** one part is 160 GSM-7 characters, or 70 if the text contains any character outside GSM-7 (any Amharic letter, curly quote, en dash or emoji); a longer text is sent as one concatenated message at 153 / 67 per part, so at most 459 / 201, and a two-unit character is never split between parts. **An `otp` text must fit one part** (`422`, error `too_long_for_single_sms`). Longer text is refused (`422`, error `too_long_for_sms`), never cut. |
 | `source_reference` | 1–128 characters of `[A-Za-z0-9._:-]`, starting with a letter or digit. Names the business event (for example `grievance:G-1042:deadline_extended`). Not unique. Never contains personal data. |
-| `purpose` | `otp`, `transactional`, `alert` or `broadcast` (`broadcast` is disabled in the pilot). The caller must be allowed it. |
+| `purpose` | `otp`, `transactional`, `alert` or `broadcast` (`broadcast` is accepted when `OAN_MSG_BROADCAST_ENABLED` is on). The caller must be allowed it. |
 | `expires_at` | RFC 3339 with an offset. **Required for `otp`**, at most 30 minutes ahead. Other purposes: optional, at most 7 days ahead. OAN never extends or rewrites it. |
 
 ## 3.2 Idempotency: retries never become second messages
@@ -75,7 +75,11 @@ provider URL or priority.
   waited longer than `broadcast_max_wait` (configuration, proposed default 180 seconds) is
   claimed ahead of newer non-OTP traffic, so sustained higher-priority load can delay a
   broadcast but never starve it. The OTP reserve is unchanged; there is no reserved share
-  for broadcasts. `broadcast` is enabled once this passes the starvation test.
+  for broadcasts. **Built 20 Nov 2026** (contract 3.1.0 service, migration 0004): OTPs first,
+  then every message waiting longer than `broadcast_max_wait` oldest first whatever its
+  purpose (an older alert keeps its place), then the rest by priority; the starvation test
+  passes. Turned on with `OAN_MSG_BROADCAST_ENABLED`. A large campaign delays newer
+  transactional and alert SMS until it drains (user's choice, 20 Nov 2026).
 * **Batching (decided 19 Nov 2026):** queued messages with exactly the same text are sent
   in one 8028 request of up to `batch_max_recipients` numbers (configuration, default
   **100**). Each recipient stays its own message (own key, status and receipt); the

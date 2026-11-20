@@ -52,13 +52,13 @@ Added after 3.0.0. None of it changes the HTTP contract.
 | Transient database errors | The worker loop recovers instead of exiting. | `worker/dispatcher.py` |
 | Liveness | The worker writes a heartbeat each cycle; `check-heartbeat` is its exec probe. The API has `/livez` and `/readyz`. | `runtime/` |
 | Alerts | `status [--fail-on-alert]` (exit 2 on alert), run by the Helm `status-check` CronJob. Alerts: queue age, stale sending, unknown outcomes, late starts, deferred dispatch, receipt anomalies, provider suspended. No metrics endpoint, by decision. | `runtime/ops.py` |
-| Operator commands | `caller` (refuses `broadcast`), `issue-credential`, `list-credentials`, `revoke-credentials --credential ID \| --all`, `suspend`, `resume`, `cleanup [--forever]`. | `runtime/__main__.py`, [runbook](runbook.md) |
+| Operator commands | `caller` (refuses `broadcast` unless broadcasts are enabled), `issue-credential`, `list-credentials`, `revoke-credentials --credential ID \| --all`, `suspend`, `resume`, `cleanup [--forever]`. | `runtime/__main__.py`, [runbook](runbook.md) |
 | Least privilege | Migrations run as the owner role; API, worker, receipts and cleanup run as a runtime role with explicit grants. | `deploy/sql/grants.sql` |
 | Redaction | Applied at the handler level, so loggers and handlers added later are covered; uvicorn access lines keep their (redacted) arguments. Direct stream writes and third-party exporters are not covered. | `redaction.py` |
 | Packaging | One image (non-root uid 10001, hash-pinned dependencies) runs `api`, `worker`, `receipts` and `cleanup`; Helm chart with a pre-install/pre-upgrade migration hook and `values-pilot.yaml`. | `Dockerfile`, `deploy/helm/oan-messaging`, [Helm guide](deployment/helm.md) |
 
-**Pilot restrictions:** `broadcast` is disabled at the API and the worker (strict priority
-can starve it; fairness is required first). Telegram is implemented, but Phase 1 has no
+**Broadcast:** off unless `OAN_MSG_BROADCAST_ENABLED=true`. Broadcast ageing (SMS-03) keeps
+it from starving under higher-priority load (see [Priority and rate limits](#priority-and-rate-limits)). Telegram is implemented, but Phase 1 has no
 Telegram caller: the OAN Telegram bot runs on RapidPro and sends to Telegram itself.
 
 ## Stack
@@ -344,10 +344,14 @@ Logs and errors never include text, full recipients, tokens or secrets.
 ## Priority and rate limits
 
 `PURPOSE_PRIORITY`: `otp` 0 < `transactional` 10 < `alert` 20 < `broadcast` 30 (lower is
-claimed first). Provider rate limits (8028: 20 requests/s) are enforced across workers inside
+claimed first). **Broadcast ageing (SMS-03):** the worker claims OTPs first; then every other
+message accepted at least `broadcast_max_wait` ago (`OAN_MSG_BROADCAST_MAX_WAIT_SECONDS`,
+default 180), oldest first whatever its purpose; then the rest by priority and age. So an aged
+broadcast goes ahead of newer transactional and alert SMS, an older alert keeps its place
+ahead of it, and a waiting broadcast is never starved. Each pass follows an index
+(`ix_messages_claimable`, `ix_messages_claimable_by_age`). Provider rate limits (8028: 20 requests/s) are enforced across workers inside
 the `begin_attempt` transaction (see [Reliability and operations](#reliability-and-operations-msg07b-and-msg08)).
-Expiry is re-checked immediately before every network call. `broadcast` is disabled in
-the pilot.
+Expiry is re-checked immediately before every network call.
 
 ## Receipts (8028 only)
 

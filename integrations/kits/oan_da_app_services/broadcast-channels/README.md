@@ -74,8 +74,8 @@ now belongs to the Communications Officer and the Admin only, as the FSD says.
 5. **OAN operator:**
    - give caller `da` the purposes `alert` and `broadcast`;
    - run OAN Messaging 3.1.0 or later.
-   `broadcast` SMS are accepted but not sent until SMS-03 broadcast ageing ships and
-   `OAN_MSG_BROADCAST_ENABLED` is turned on.
+   `broadcast` SMS need `OAN_MSG_BROADCAST_ENABLED` on (OAN Messaging with SMS-03
+   broadcast ageing, migration 0004). While it is off they are refused.
 6. **Folding it into `da_services` later:** the app is written in `da_services`' style (same
    router, `handle_api_errors`, services layer and tests). Moving it in is a file move:
    - `rules.py` and `dispatch.py` to `services/`;
@@ -101,7 +101,7 @@ there) and 1 without a phone.
 - The SMS copy read 6 farmers, skipped the 1 reached on Telegram, counted 1 without a phone
   and queued 4 SMS.
 - The fake 8028 delivered all 4 (purpose `alert`).
-- An Informational SMS was accepted by OAN as `broadcast` and held, as designed until SMS-03.
+- An Informational SMS went to OAN as `broadcast` and was delivered (broadcasts enabled, SMS-03 ageing).
 - A replay of the `client_op_id` returned the original and sent nothing.
 
 ## QA cases

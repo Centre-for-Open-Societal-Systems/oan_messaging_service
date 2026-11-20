@@ -43,5 +43,5 @@ The package reuses all of these unchanged.
 |---|---|---|
 | Beneficiary API routes (ID-01, ID-04) | Farmer registry / DPI | Farmer SMS and the Telegram linking work only against the stub |
 | Bot Services `/broadcasts` | OAN messaging (Telegram, wave 1) | Telegram copies work only against the stub |
-| SMS-03 broadcast ageing, then `OAN_MSG_BROADCAST_ENABLED` | OAN messaging | `Knowledge` and `Informational` SMS (purpose `broadcast`) are accepted but not sent. `Emergency` and `Weather` (`alert`) are sent now |
+| `OAN_MSG_BROADCAST_ENABLED` on each environment (SMS-03 ageing is built) | OAN messaging, DevOps | `Knowledge` and `Informational` SMS (purpose `broadcast`) are refused while it is off. `Emergency` and `Weather` (`alert`) are sent now |
 | 8028 answers (ID-12) | Delivery team | Multi-part SMS: 8028's guide v1.1 sets no limit; we cap at 3 parts |

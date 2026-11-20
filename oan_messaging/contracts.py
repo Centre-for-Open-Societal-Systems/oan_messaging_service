@@ -1106,8 +1106,13 @@ class MessageRepository(Protocol):
     async def claim_due(
         self, worker_id: str, now: datetime, lease: timedelta, limit: int,
         *, channels: tuple[Channel, ...] | None = None, allow_broadcast: bool = True,
+        aged_after: timedelta | None = None,
     ) -> list[Claim]:
         """Lease up to ``limit`` ACCEPTED, due messages by (priority, created_at).
+
+        With ``aged_after`` (SMS-03 broadcast ageing): OTPs first, then every other
+        message accepted at least that long ago, oldest first, then the rest by
+        (priority, created_at). A waiting broadcast is never starved by newer traffic.
 
         Must use row locks that let concurrent workers proceed (SKIP LOCKED).
         Expired messages are moved to EXPIRED (and purged) instead of being claimed.
