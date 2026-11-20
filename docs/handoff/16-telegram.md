@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Pattern** | Direct API (`POST /api/v1/messages/telegram`) |
-| **Status** | Implemented in OAN (contract 3.1.0). **No caller in Phase 1** (decided 15 November 2026). |
+| **Status** | Implemented in OAN (contract 3.2.0). **No caller in Phase 1** (decided 15 November 2026). |
 | **Why** | The OAN Telegram bot (bot specification v1.1) runs on RapidPro, which sends to Telegram itself with its own bot token. It is not an OAN Messaging caller, and it sends no SMS. |
 
 ![Telegram flow](diagrams/16-telegram.png)

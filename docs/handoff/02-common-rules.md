@@ -1,6 +1,6 @@
 # 02 Common rules (every caller)
 
-The full contract is `code/openapi.yaml` (contract 3.1.0). This page is
+The full contract is `code/openapi.yaml` (contract 3.2.0). This page is
 what a developer must get right.
 
 ## 1. Endpoints

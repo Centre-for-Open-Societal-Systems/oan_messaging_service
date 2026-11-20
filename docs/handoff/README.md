@@ -6,7 +6,7 @@ Messaging Service**. The design behind it, for SMS and Telegram together, is the
 Channels Specification v2.0**. The Telegram bot is not an OAN Messaging caller and is not
 covered here.
 
-**Contract 3.1.0. Nothing in this pack is deployed.** Development and staging URLs are not
+**Contract 3.2.0. Nothing in this pack is deployed.** Development and staging URLs are not
 defined yet; every host shown is an `example.invalid` placeholder.
 
 **Changes on 20 November 2026 (no code change for Credit, Consent, Grievance, Auth,
@@ -19,6 +19,8 @@ eSignet or DA visits):**
 * A 500 from 8028 is now retried by OAN (8028 confirmed nothing was queued).
 * New connector version (`develop` `96fc5d1`): adds the option `max_parts`. You can update
   to it; nothing else changes.
+* New in contract 3.2.0: a read-only statistics API (`GET /api/v1/charts`) for the OAN
+  dashboards and Reports Central. Module callers do not use it.
 
 ## 1. Start here
 
@@ -75,7 +77,7 @@ access to anyone's disk:
 
 | Item | Path in the package | Use |
 |---|---|---|
-| Contract | `code/openapi.yaml` | The API, contract 3.1.0. Its `servers` entry is a local mock (`http://localhost:8000`); real environments are HTTPS only, so set your base URL explicitly. |
+| Contract | `code/openapi.yaml` | The API, contract 3.2.0. Its `servers` entry is a local mock (`http://localhost:8000`); real environments are HTTPS only, so set your base URL explicitly. |
 | Python client | `code/oan_client/` | Typed client, `delivery_key`, error classes. Vendored inside the connector too. |
 | Sample code | `code/examples/` | One reference implementation per module (Credit, Consent Manager, Grievance, DA, Auth, eSignet), a generic outbox, 12 JSON request/response/error bodies. See its README. |
 | Local trial | `trial/` | The OAN service source (clean export, in review) with its tests, the trial stack with a fake 8028, and end-to-end tests for Credit and Consent Manager. Start with `trial/README.md`. |
@@ -84,7 +86,7 @@ access to anyone's disk:
 | QA catalogue | `code/06-qa-cases.csv` | The case IDs cited in each guide |
 | Channels Specification | `CHANNELS-SPEC/OAN_Channels_Specification_v2.0.docx` | The design: SMS and Telegram together |
 
-The OAN service source (`main` of 20 November 2026, contract 3.1.0) is in `trial/` only so
+The OAN service source (`main` of 20 November 2026, contract 3.2.0) is in `trial/` only so
 you can run it locally;
 dev and staging will run the accepted version. Use the local trial (guide 20) to test end
 to end.
