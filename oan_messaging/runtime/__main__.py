@@ -62,7 +62,7 @@ from oan_messaging.storage.repository import PostgresMessageRepository
 from oan_messaging.storage.schema import callers
 from oan_messaging.worker import SharedRateLimiter, Worker, WorkerConfig
 from oan_messaging.worker.cleanup import cleanup_forever, run_cleanup
-from oan_messaging.worker.rate_limit import measure_dispatch_latency
+from oan_messaging.worker.rate_limit import TELEGRAM_DEFAULT, RateLimit, measure_dispatch_latency
 
 log = logging.getLogger(__name__)
 
@@ -255,7 +255,16 @@ async def run(
                 install_redaction(*registry.secrets())
                 client = await stack.enter_async_context(telegram_client())
                 adapters[Channel.TELEGRAM] = TelegramAdapter(registry, client)
-            limiter = SharedRateLimiter(engine)
+            limiter = SharedRateLimiter(
+                engine,
+                {
+                    Channel.SMS: RateLimit(
+                        requests=settings.sms_rate_per_second,
+                        otp_reserve=settings.sms_otp_reserve,
+                    ),
+                    Channel.TELEGRAM: TELEGRAM_DEFAULT,
+                },
+            )
             stack.push_async_callback(limiter.aclose)
             # Start-up latency guard (remediation plan §3.3): refuse to run when the
             # database round trip cannot fit the dispatch window; otherwise every start

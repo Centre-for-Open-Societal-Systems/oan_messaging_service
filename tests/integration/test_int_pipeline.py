@@ -128,7 +128,6 @@ def _raise(exc: Exception) -> Any:
 
 
 AMBIGUOUS = {
-    "http_500": (lambda b, n: http_status(500), "http_500", "provider_server_error"),
     "http_503": (lambda b, n: http_status(503), "http_503", "provider_server_error"),
     "http_429": (lambda b, n: http_status(429), "http_429", "rate_limited"),
     "read_timeout": (_raise(httpx.ReadTimeout("timed out")), "timeout", "timeout"),
@@ -155,6 +154,22 @@ AMBIGUOUS = {
         "malformed_response",
     ),
 }
+
+
+async def test_http_500_queued_nothing_and_is_retried(h: Harness) -> None:
+    """8028 confirmed (20 Nov 2026) that a 500 queues nothing: the message is retried with
+    the normal backoff and sent once 8028 accepts it; it is never ``unknown``."""
+    h.sms.script = lambda b, n: http_status(500) if n == 1 else h.sms.ok(b)
+    token = await h.caller("auth", bot=None)
+    r = await h.post_sms(token, new_key(), purpose="transactional", expires_at=None,
+                         text="Reset requested.")
+    mid = r.json()["id"]
+    await h.worker().run_once()
+    assert (await h.status(token, mid))["status"] == "accepted"  # waiting for its retry
+    h.clock.advance(seconds=31)
+    await h.worker().run_once()
+    view = await h.status(token, mid)
+    assert view["status"] == "sent" and len(h.sms.calls) == 2
 
 
 @pytest.mark.parametrize("case", sorted(AMBIGUOUS))

@@ -70,7 +70,7 @@ it is **never** stored or logged verbatim; only `http_<code>` is kept.
 | Server certificate | Publicly trusted, matching the hostname | The listener presents the public certificate for `iiss.et` (`OAN_MSG_RECEIPTS_SERVER_CERT`) |
 | Client certificate | 8028 presents its own client certificate; 8028 supplied its callback CA (`CN=StatusAPIPrivateCA`) | Trust that CA (`OAN_MSG_RECEIPTS_CLIENT_CA_CERTS`). Optional pins (`OAN_MSG_RECEIPTS_PINNED_CERTS`) narrow it to specific certificates |
 | Callback secret | `clientSecret` in every body; check it on every call | Constant-time check against `OAN_MSG_RECEIPTS_CALLBACK_SECRET` (and `_PREVIOUS` during rotation); wrong or missing → 401; never stored or logged |
-| Status field | `status` | Read `status`; `sms_status` (used by the Postman collection) accepted when `status` is absent |
+| Status field | `status` | Read `status` only (8028 confirmed 20 Nov 2026; values `Pending`, `Delivered`, `Rejected`). The Postman collection's `sms_status` is not read |
 | `sms_id` | May be a number; compare as text | Numbers converted to text |
 | `phone_number` | International `251XXXXXXXXX` | Normalised to E.164; matched with `sms_id` through the keyed fingerprint |
 | Answer | HTTP 200 with `{"success": true}`, or updates stop | Validate, **persist the receipt, then** `200 {"success": true}`; storage failure → 503 so 8028 sends it again |
@@ -89,8 +89,8 @@ Status values (guide 8.2):
 ## Inconsistencies in 8028's material
 
 1. **Status field name.** The guide (8.1) and 8028's callback sample use `status`; the
-   Postman collection v1.3 (folder 3) sends `sms_status`. **Decision:** accept both, prefer
-   `status`. **OPEN:** confirm `status`.
+   Postman collection v1.3 (folder 3) sends `sms_status`. **Resolved 20 Nov 2026:** 8028
+   confirmed `status` with `Pending`, `Delivered`, `Rejected` and will update the collection.
 2. **Status values.** The guide lists `Pending`, `Delivered`, `Rejected`; the Postman
    collection also sends `Sent`, `Failed` and `Expired`. **Decision:** all are recorded;
    only documented values change status.
@@ -98,24 +98,37 @@ Status values (guide 8.2):
    supplies a CA; the README tells testers to present our own client certificate to the
    callback host, and 8028's covering note asks to "use the provided CRT certificate for
    both the client and callback services". **Decision:** trust 8028's callback CA.
-   **OPEN:** confirm which certificate 8028 presents on callbacks; if it is a fixed
-   certificate, add it as a pin.
+   **Answered 20 Nov 2026:** the certificates in the callback sample's `ssl` folder
+   (open item 8).
 4. **8028's callback CA has no Key Usage extension.** Accepted by the current image
    (Python 3.11). Python 3.13 and later verify strictly and may reject it. **OPEN:** ask
    8028 to reissue the CA with Key Usage before any image upgrade.
 
 ## Open items for 8028
 
-1. **500 means nothing was queued** (guide 6: the transaction is rolled back, safe to retry).
-   This service still treats 500 as `unknown` and never resends. Changing that to
-   "not sent, retry" is a small adapter change once 8028 confirms it in writing.
+8028 answered on 20 November 2026 (relayed by the delivery team). Answered items are kept
+here with the answer.
+
+1. **500 means nothing was queued.** **Answered:** confirmed ("SMS will not be queued").
+   A 500 is now `not_sent`, retryable, with the worker's normal backoff. Other 5xx stay
+   `unknown` and are never resent.
 2. **Credentials in the package.** 8028's client sample contains the client secret in the
    same package as the private key, which the guide itself says to keep apart. Ask 8028
    to issue a new client secret, and to confirm whether the key needs reissuing.
-3. **Callback secret** value, delivered separately (not in the package).
-4. **Callback source addresses**, for the listener's network allow-list.
-5. **Production endpoint and certificate**, if different from the test ones.
-6. **Rate limit** (previously 20 requests/second) and the response when it is exceeded;
-   not mentioned in guide v1.1. The service keeps its 20/s limit (about 14 sent per second).
+3. **Callback secret.** **Answered:** 8028 named the value to use; it is held only in the
+   receipts Secret (`OAN_MSG_RECEIPTS_CALLBACK_SECRET`), never in files. It is weak and was
+   sent by email: **still to do:** ask 8028 for a strong one before production.
+4. **Callback source addresses.** **Answered:** `213.55.73.209`. Allow-list it on the
+   receipts listener's ingress or network policy (DevOps, per environment).
+5. **Production endpoint and certificate**, if different from the test ones. 8028 also
+   asks for **our callback URL** for each environment (DevOps, OPS-02).
+6. **Rate limit.** **Answered:** no limit on the API; everything is queued at 8028 and the
+   operator sends 2–5 SMS a second. The service now paces 8028 at **4 SMS a second**
+   (`OAN_MSG_SMS_RATE_PER_SECOND`, one slot kept for OTP: `OAN_MSG_SMS_OTP_RESERVE`), so
+   messages wait in OAN, where OTPs go first and broadcasts age (SMS-03), instead of in
+   8028's queue. At that pace a 1 million SMS campaign takes about 3 days.
 7. **No idempotency at 8028.** There is no caller reference or status lookup, so an
    ambiguous submission (timeout after sending) stays `unknown` and is never resent.
+8. **Callback certificate.** **Answered:** the certificates are those in the package's
+   callback sample `ssl` folder (`CA.crt`, `third_party_client_ca.pem`); the listener trusts
+   that CA through `OAN_MSG_RECEIPTS_CLIENT_CA_CERTS`. The missing Key Usage extension (inconsistency 4) is still to be raised.

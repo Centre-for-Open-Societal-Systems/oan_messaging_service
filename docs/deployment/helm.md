@@ -308,7 +308,7 @@ image: {workingDir: <directory holding migrations/>}        # MSG-08 image layou
 database: {connectionBudget: <share of max_connections>}
 networkPolicy:
   api: {from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: <gateway ns>}}}]}
-  receipts: {fromCIDRs: [<8028 callback source CIDRs>]}
+  receipts: {fromCIDRs: [213.55.73.209/32]}   # 8028's callback source (20 Nov 2026)
 secrets:
   receipts:
     clientCaSecret: oan-messaging-8028-callback-ca     # 8028 guide v1.1: trust its CA
@@ -318,7 +318,7 @@ receipts:
   path: /sms-status-receiver/v1/update-status          # registered with 8028
   service:
     annotations: {<L4 load balancer annotations; no TLS termination>}
-    loadBalancerSourceRanges: [<8028 callback source CIDRs>]
+    loadBalancerSourceRanges: [213.55.73.209/32]
 migration:
   network: {mode: hook}      # or preprovisioned + preprovisionedPolicy, see §3.3
 networkPolicy:
@@ -369,7 +369,8 @@ log behaviour in §3.6.
 * The image (repository `Dockerfile`) runs as uid/gid 10001, has `python`, `uvicorn` and
   `alembic` on `PATH`, and has `migrations/` under `image.workingDir`.
 * PostgreSQL is reachable over TLS and its CA is trusted by the image.
-* 8028 can reach a public TCP endpoint and publishes its callback source CIDRs.
+* 8028 can reach a public TCP endpoint. Its callback source is 213.55.73.209 (8028,
+  20 Nov 2026). Send 8028 the receipt URL of each environment (they asked for it).
 * All components share one ServicePolicy (one ConfigMap) and roll out together after a
   policy change.
 

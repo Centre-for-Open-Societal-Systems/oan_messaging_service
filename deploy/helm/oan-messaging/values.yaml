@@ -113,6 +113,10 @@ config:
   broadcastEnabled: false      # OAN_MSG_BROADCAST_ENABLED
   # A message waiting this long is claimed ahead of newer non-OTP traffic (OTPs first).
   broadcastMaxWaitSeconds: 180 # OAN_MSG_BROADCAST_MAX_WAIT_SECONDS
+  # SMS sent to 8028 per second across all workers (operator capacity 2-5/s; 8028 queues
+  # anything faster, outside our OTP-first order), and the slots of each second kept for OTP.
+  smsRatePerSecond: 4          # OAN_MSG_SMS_RATE_PER_SECOND
+  smsOtpReserve: 1             # OAN_MSG_SMS_OTP_RESERVE
   # Empty = code default (https://8028.et:3400/sms-api/v1). OAN_MSG_SMS8028_BASE_URL.
   sms8028BaseUrl: ""
   # ServicePolicy overrides in seconds (all optional; must be identical for every
@@ -230,7 +234,8 @@ receipts:
     #   service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
     annotations: {}
     externalTrafficPolicy: Local
-    # 8028 callback source CIDRs (placeholder; obtain from the 8028 onboarding).
+    # 8028 callback source CIDRs. 8028 gave 213.55.73.209 (20 Nov 2026): set
+    # [213.55.73.209/32] in the environment values.
     loadBalancerSourceRanges: []
   pdb: {enabled: true, minAvailable: 1}
   extraEnv: []
@@ -305,7 +310,8 @@ networkPolicy:
     # Empty = no ingress to the API at all.
     from: []
   receipts:
-    # 8028 callback source CIDRs. Empty = no ingress to the receipt ingress at all.
+    # 8028 callback source CIDRs (8028: 213.55.73.209/32). Empty = no ingress to the receipt
+    # ingress at all.
     fromCIDRs: []
   egress:
     # Off by default: the destinations below are not known yet. When on, only DNS and

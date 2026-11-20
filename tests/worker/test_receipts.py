@@ -577,13 +577,14 @@ def guide_body(secret: Any = SECRET, **kw: Any) -> bytes:
     return json.dumps({k: v for k, v in data.items() if v is not None}).encode()
 
 
-def test_parse_guide_shape_and_postman_fallback() -> None:
+def test_parse_guide_shape_and_status_field_only() -> None:
     r = parse_callback(guide_body(status="Pending"), T0)
     assert (r.provider_message_id, r.recipient, r.raw_status) == (
         "17006100", "+251900000001", "Pending")
+    # 8028 confirmed the field is ``status``; the Postman ``sms_status`` is not read.
     postman = json.dumps({"sms_id": "17006100", "phone_number": PHONE,
                           "sms_status": "Delivered", "event_time": "2026-09-01 08:12:19"})
-    assert parse_callback(postman.encode(), T0).raw_status == "Delivered"
+    assert parse_callback(postman.encode(), T0).raw_status == "null"
     assert parse_callback(guide_body(status=None), T0).raw_status == "null"
     nul = json.loads(guide_body())
     nul["status"] = None

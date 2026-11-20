@@ -47,7 +47,7 @@ Added after 3.0.0. None of it changes the HTTP contract.
 | Undecryptable rows | A row whose content cannot be decrypted (for example a missing key version) is **deferred**: content kept, error logged, other work continues. It is never failed or purged for that reason. | `storage/repository.py` |
 | Late provider success | Success evidence is fenced to the exact attempt, so a late `sms_id` is kept and later receipts still match. | `storage/repository.py` |
 | Claims | Batch size 1 by default, so an OTP never waits behind a claimed batch. A worker claims only the channels it can send. | `worker/dispatcher.py`, `claim_due` |
-| Rate limit (8028: 20/s) | The reservation runs **inside** the `begin_attempt` transaction: a transaction-scoped advisory lock, the time sample and start count in one statement, and the state change plus attempt insert in one CTE. Default tolerance 200 ms (about 14.3 calls/s). A cancelled reservation can never leave the lock held. | `worker/rate_limit.py`, migration 0002 (start-time index) |
+| Rate limit (8028: 4 SMS/s, configurable) | The reservation runs **inside** the `begin_attempt` transaction: a transaction-scoped advisory lock, the time sample and start count in one statement, and the state change plus attempt insert in one CTE. Default tolerance 200 ms (about 14.3 calls/s). A cancelled reservation can never leave the lock held. | `worker/rate_limit.py`, migration 0002 (start-time index) |
 | Start-up guards | The worker refuses to start if measured database latency (`4 × p95 + 5 ms`) exceeds half the tolerance, if a key version referenced by stored data is missing, or if an enabled Telegram caller's bot has no worker token. | `runtime/__main__.py` |
 | Transient database errors | The worker loop recovers instead of exiting. | `worker/dispatcher.py` |
 | Liveness | The worker writes a heartbeat each cycle; `check-heartbeat` is its exec probe. The API has `/livez` and `/readyz`. | `runtime/` |
@@ -349,7 +349,7 @@ message accepted at least `broadcast_max_wait` ago (`OAN_MSG_BROADCAST_MAX_WAIT_
 default 180), oldest first whatever its purpose; then the rest by priority and age. So an aged
 broadcast goes ahead of newer transactional and alert SMS, an older alert keeps its place
 ahead of it, and a waiting broadcast is never starved. Each pass follows an index
-(`ix_messages_claimable`, `ix_messages_claimable_by_age`). Provider rate limits (8028: 20 requests/s) are enforced across workers inside
+(`ix_messages_claimable`, `ix_messages_claimable_by_age`). Provider rate limits (8028: 4 SMS/s by default, `OAN_MSG_SMS_RATE_PER_SECOND`, one slot kept for OTP; the operator sends 2–5 SMS/s and 8028 queues the rest) are enforced across workers inside
 the `begin_attempt` transaction (see [Reliability and operations](#reliability-and-operations-msg07b-and-msg08)).
 Expiry is re-checked immediately before every network call.
 
@@ -361,7 +361,7 @@ factors are checked in the process, never from a header: mutual TLS (8028's call
 optionally narrowed by pinned certificates) and the callback secret in the body
 (constant-time; never stored or logged). The callback is authenticated and its evidence
 durably persisted before `200 {"success": true}`; matching and status changes may follow
-asynchronously. The status is read from `status` (`sms_status` accepted); `sms_id` may be
+asynchronously. The status is read from `status` (confirmed by 8028); `sms_id` may be
 a number; the phone arrives as `251…`. Documented statuses map via `RECEIPT_STATUS_MAP`;
 the raw status is always kept:
 

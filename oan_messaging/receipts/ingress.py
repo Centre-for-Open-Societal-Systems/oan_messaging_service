@@ -18,8 +18,9 @@ Callback body (guide 8.1)::
     {"clientSecret": "...", "sms_id": 4433006, "phone_number": "251911234567",
      "status": "Delivered", "event_time": "2026-11-11 21:33:20"}
 
-``status`` is read; ``sms_status`` (used by 8028's Postman collection) is accepted when
-``status`` is absent. ``sms_id`` may be a number. A null or empty status is recorded as
+``status`` is read (8028 confirmed 20 Nov 2026: field ``status``, values ``Pending``,
+``Delivered``, ``Rejected``); the Postman collection's ``sms_status`` is no longer read.
+``sms_id`` may be a number. A null or empty status is recorded as
 an unknown status and acknowledged, as the guide requires.
 * There is no code path that reads a certificate or fingerprint from an HTTP header (for
   example ``X-SSL-Client-Cert``), so a public or spoofed header cannot authenticate.
@@ -179,8 +180,8 @@ def receipt_from(data: dict[str, Any], received_at: datetime) -> DeliveryReceipt
     except ValueError:
         raise ReceiptRejected("invalid_phone_number") from None
 
-    # Guide v1.1 sends ``status``; the Postman collection sends ``sms_status``.
-    status = data["status"] if "status" in data else data.get("sms_status")
+    # 8028 confirmed ``status`` (20 Nov 2026); a missing field is recorded as null.
+    status = data.get("status")
     if status is None:
         status = "null"  # acknowledged and recorded as an unknown status (guide 8.2)
     elif status == "":

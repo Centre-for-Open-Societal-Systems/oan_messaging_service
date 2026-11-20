@@ -26,8 +26,10 @@ Outcome classification (``ProviderResult``):
 * ``rejected``: definite refusals (400 invalid number or text, 413, other 4xx).
 * ``not_sent``: provably never queued. Connection refused (retryable). TLS or handshake
   failure, 401/403 credentials (not retryable).
-* ``unknown``: a 2xx body that is malformed or partial, any 5xx (including 500/503,
-  which the guide says to retry; we never resend blindly), a timeout after the request
+* ``not_sent``, retryable: HTTP 500. 8028 confirmed in writing (20 Nov 2026) that a 500
+  queues nothing, so the worker retries it with its normal backoff.
+* ``unknown``: a 2xx body that is malformed or partial, any other 5xx (503 and the rest
+  are not confirmed; we never resend blindly), a timeout after the request
   may have been written, an unexpected transport error, a redirect, or a 429. Never
   retryable.
 
@@ -437,6 +439,16 @@ class Sms8028Adapter:
 
         if 200 <= status <= 299:
             return self._classify_success(started, domestic, body, tag)
+        if status == 500:
+            # 8028, 20 Nov 2026: "SMS will not be queued" on a 500 (guide v1.1 section 6).
+            return self._result(
+                started,
+                ProviderOutcome.NOT_SENT,
+                tag,
+                failure=FailureCode.PROVIDER_SERVER_ERROR,
+                detail="gateway error 500; nothing queued (8028), retried",
+                retryable=True,
+            )
         if 500 <= status <= 599:
             return self._result(
                 started,

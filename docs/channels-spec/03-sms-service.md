@@ -87,14 +87,18 @@ provider URL or priority.
   so a batch that may have left without a response makes every message in it `unknown`,
   never resent. OTPs and personal notices are sent one per request.
 * **Expiry** is checked again immediately before each network call.
-* **Rate limit:** 8028's second guide states 20 requests a second and 1,000 numbers per
-  request; v1.1 states none (ID-12). We design to the stricter figures. The worker reserves a slot inside
-  the same database transaction that records the attempt (a transaction-scoped
-  advisory lock), so the limit holds across workers. With the default 200 ms tolerance
-  the service sends at most about 14.3 a second.
+* **Pacing (SMS-10, 20 Nov 2026):** 8028 has no API rate limit and queues everything, but
+  the operator sends only 2–5 SMS a second. Anything sent faster waits in 8028's queue,
+  where our order (OTP first, broadcast ageing) no longer applies. So OAN paces 8028 at
+  **4 SMS a second** (`OAN_MSG_SMS_RATE_PER_SECOND`), one slot of each second kept for OTP
+  (`OAN_MSG_SMS_OTP_RESERVE`), counted per SMS (a batch counts each number). The worker
+  reserves a slot inside the same database transaction that records the attempt (a
+  transaction-scoped advisory lock), so the pace holds across workers. A 1 million SMS
+  campaign takes about 3 days at this pace.
 * **Before the call**, the attempt is committed. After it, the result is recorded:
   `sent`, `failed`, back to `accepted` with a back-off if the message provably never
-  left (connection refused, TLS failure), or `unknown` if it might have left.
+  left (connection refused, TLS failure, or an HTTP 500, which 8028 confirmed queues
+  nothing: SMS-11), or `unknown` if it might have left (any other 5xx, a timeout).
 * **8028 connection:** mutual TLS with a client certificate, the 8028 CA bundle and
   hostname checks; numbers are converted to the domestic `09…`/`07…` form.
 
@@ -108,9 +112,10 @@ provider URL or priority.
   `200 {"success": true}`. Receipts are matched on `sms_id` and a fingerprint of the
   recipient (sent as `251…`) within 7 days of sending.
 
-  The three 8028 documents name the field differently (`status` in guide v1.1,
-  `sms_status` in Postman v1.3 and the second guide). The listener reads `status`, then
-  `sms_status`, until 8028 confirms production's format (ID-12).
+  The three 8028 documents named the field differently; **8028 confirmed `status`**
+  with `Pending`, `Delivered`, `Rejected` (20 Nov 2026, SMS-07). The listener reads
+  `status` only. Callbacks come from 213.55.73.209, which the listener's network policy
+  allows.
 
   | 8028 value | OAN status |
   |---|---|

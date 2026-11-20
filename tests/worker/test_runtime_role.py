@@ -80,7 +80,7 @@ def receipt_body(sms_id: str) -> bytes:
         {
             "sms_id": sms_id,
             "phone_number": "0900000001",
-            "sms_status": "Delivered",
+            "status": "Delivered",
             "event_time": "2026-09-01 08:12:19",
         }
     ).encode()

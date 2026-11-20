@@ -110,9 +110,12 @@ class RateLimit:
             raise ValueError("otp_reserve must be in [0, requests)")
 
 
-#: 8028 guide section 4.5: 20 requests/second per client, the configurable ceiling. Two
-#: slots per window are reserved for OTP. Deployments may set a lower value.
-SMS_8028_DEFAULT = RateLimit(requests=20, window=timedelta(seconds=1), otp_reserve=2)
+#: 8028 (20 Nov 2026): no API rate limit; everything is queued at 8028, and the operator
+#: sends 2-5 SMS a second. Sending faster only moves the queue into 8028, where our order
+#: (OTP first, SMS-03 ageing) no longer applies, so we pace to the operator: 4 SMS a second
+#: (one request is one SMS), one slot per window kept for OTP. Settings
+#: OAN_MSG_SMS_RATE_PER_SECOND and OAN_MSG_SMS_OTP_RESERVE override it.
+SMS_8028_DEFAULT = RateLimit(requests=4, window=timedelta(seconds=1), otp_reserve=1)
 #: Telegram Bot API guidance is about 30 messages/second per bot; stay below it.
 TELEGRAM_DEFAULT = RateLimit(requests=25, window=timedelta(seconds=1), otp_reserve=2)
 

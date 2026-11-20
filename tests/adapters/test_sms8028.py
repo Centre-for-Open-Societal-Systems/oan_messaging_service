@@ -600,12 +600,12 @@ async def test_malformed_or_partial_success_is_unknown(handler: Handler) -> None
         ),
         (404, None, ProviderOutcome.REJECTED, FailureCode.PROVIDER_REJECTED, False),
         (429, None, ProviderOutcome.UNKNOWN, FailureCode.RATE_LIMITED, False),
-        (
+        (  # 8028, 20 Nov 2026: a 500 queues nothing, so it is retried
             500,
             {"success": False},
-            ProviderOutcome.UNKNOWN,
+            ProviderOutcome.NOT_SENT,
             FailureCode.PROVIDER_SERVER_ERROR,
-            False,
+            True,
         ),
         (502, None, ProviderOutcome.UNKNOWN, FailureCode.PROVIDER_SERVER_ERROR, False),
         (
@@ -645,7 +645,7 @@ async def test_status_classification_preserves_gateway_status(
     result = await adapter.send(req())
     assert (result.outcome, result.failure_code, result.retryable) == (outcome, code, retryable)
     assert result.provider_status == f"http_{status}"
-    assert len(rec.requests) == 1  # never resent, even for 500/503
+    assert len(rec.requests) == 1  # the adapter itself never resends; the worker decides
     assert_no_leak(result, "091261825", "Invalid client secret", "Temporary error")
 
 

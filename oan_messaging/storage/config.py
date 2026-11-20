@@ -53,6 +53,10 @@ class StorageSettings(BaseSettings):
     broadcast_enabled: bool = False
     #: SMS-03: seconds after which a waiting message goes ahead of newer non-OTP traffic.
     broadcast_max_wait_seconds: int = Field(default=180, gt=0)
+    #: SMS sent to 8028 per second across all workers (operator capacity 2-5/s), and the
+    #: slots of each second only an OTP may use.
+    sms_rate_per_second: int = Field(default=4, gt=0)
+    sms_otp_reserve: int = Field(default=1, ge=0)
 
     policy_max_otp_ttl_seconds: int | None = None
     policy_max_expiry_horizon_seconds: int | None = None
