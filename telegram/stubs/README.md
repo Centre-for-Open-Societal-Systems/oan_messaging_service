@@ -17,7 +17,7 @@ OAN_STUBS_CLIENT_ID=bot-services OAN_STUBS_CLIENT_SECRET=<generated> python3 tel
 |---|---|---|
 | `OAN_STUBS_CLIENT_ID`, `OAN_STUBS_CLIENT_SECRET` | none (required) | The one test client allowed to get a token. The stack's init script generates the secret; it is never committed. |
 | `OAN_STUBS_HOST`, `OAN_STUBS_PORT` | `127.0.0.1`, `8200` | The Docker image uses `0.0.0.0`. |
-| `OAN_STUBS_CLOCK` | `ticking` | `ticking` or `frozen` (see Fake clock). |
+| `OAN_STUBS_CLOCK` | `running` | `running` or `frozen` (see Fake clock). |
 | `OAN_STUBS_SEED` | `seed.json` here | Another seed file, same shape. |
 
 Docker: `docker build -t oan-telegram-stubs telegram/stubs` (non-root, health check on
@@ -119,10 +119,13 @@ the region down to the direct parent.
 As `contracts/stubs/clock.md`. It starts at 2026-12-01T08:30:00+03:00 and never goes
 backwards (`/clock/set` to an earlier time gives 422). Times are RFC 3339 in +03:00.
 
-`clock.md` does not say whether time stands still between calls. In **`ticking`** mode
+`clock.md` does not say whether time stands still between calls. In **`running`** mode
 (the default, used in the stack) the fake time moves on with real time from the last
 reset, set or advance, so the bot's own short waits still pass. In **`frozen`** mode it
 moves only when a test moves it. The stubs' own tests use frozen.
+
+`GET /clock` also reports the mode, `{"now": "...", "mode": "running"}` or
+`"frozen"`, so end-to-end tests can check it. `advance` and `set` return `{now}` only.
 
 ## Seed data (`seed.json`)
 
@@ -146,8 +149,8 @@ to read and change.
 
 ## Choices where the contracts are silent
 
-1. **Fake clock ticks by default**, with a `frozen` mode (above). This was asked of the
-   control session.
+1. **Fake clock runs by default**, with a `frozen` mode, and `GET /clock` reports the
+   mode (above). Agreed with the control session; it will add this to `clock.md`.
 2. **Beneficiary paths** keep their contract paths under the prefix:
    `/beneficiary/api/v1/farmers...`.
 3. **Beneficiary validation errors are 400**, because its contract lists 400 and not 422.

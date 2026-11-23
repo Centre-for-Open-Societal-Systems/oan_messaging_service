@@ -8,7 +8,7 @@
 ARG PYTHON_IMAGE=python:3.11-slim-bookworm@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39
 FROM ${PYTHON_IMAGE}
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
-    OAN_STUBS_HOST=0.0.0.0 OAN_STUBS_PORT=8200 OAN_STUBS_CLOCK=ticking
+    OAN_STUBS_HOST=0.0.0.0 OAN_STUBS_PORT=8200 OAN_STUBS_CLOCK=running
 RUN groupadd --system --gid 10001 stubs \
     && useradd --system --uid 10001 --gid stubs --no-create-home --shell /usr/sbin/nologin stubs
 WORKDIR /app

@@ -79,12 +79,12 @@ def _err(field: str, code: str) -> dict:
 
 
 class Clock:
-    """Fake time. ``ticking`` (default): moves on with real time from the last reset, set or
+    """Fake time. ``running`` (default): moves on with real time from the last reset, set or
     advance. ``frozen``: stands still until a test moves it. Never goes backwards."""
 
-    def __init__(self, mode: str = "ticking"):
-        if mode not in ("ticking", "frozen"):
-            raise ValueError("clock mode must be ticking or frozen")
+    def __init__(self, mode: str = "running"):
+        if mode not in ("running", "frozen"):
+            raise ValueError("clock mode must be running or frozen")
         self.mode = mode
         self.lock = threading.Lock()
         self.reset()
@@ -381,7 +381,7 @@ class Handler(BaseHTTPRequestHandler):
     def _clock(self, method: str, rest: list, q: dict, raw: bytes) -> None:
         clock = self.state.clock
         if rest == [] and method == "GET":
-            return self._send(200, {"now": fmt_time(clock.now())})
+            return self._send(200, {"now": fmt_time(clock.now()), "mode": clock.mode})
         if rest == ["advance"] and method == "POST":
             body = self._json(raw)
             errs = check_object(body, ("seconds",), ("seconds",))
@@ -855,8 +855,8 @@ def main(argv: list | None = None) -> None:
     ap.add_argument("--seed", default=os.environ.get("OAN_STUBS_SEED", str(HERE / "seed.json")))
     ap.add_argument(
         "--clock",
-        choices=("ticking", "frozen"),
-        default=os.environ.get("OAN_STUBS_CLOCK", "ticking"),
+        choices=("running", "frozen"),
+        default=os.environ.get("OAN_STUBS_CLOCK", "running"),
     )
     args = ap.parse_args(argv)
     client_id = os.environ.get("OAN_STUBS_CLIENT_ID", "")

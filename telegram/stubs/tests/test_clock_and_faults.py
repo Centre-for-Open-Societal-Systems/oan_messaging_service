@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 
+import httpx
 import pytest
 import stubs_server
 
@@ -13,7 +15,8 @@ import stubs_server
 
 
 def test_clock_starts_at_reset_time(stub):
-    assert stub.raw("GET", "/clock").json() == {"now": "2026-12-01T08:30:00+03:00"}
+    body = stub.raw("GET", "/clock").json()
+    assert body == {"now": "2026-12-01T08:30:00+03:00", "mode": "frozen"}
 
 
 def test_clock_advance_and_set(stub):
@@ -50,8 +53,8 @@ def test_clock_needs_no_token(stub):
     assert stub.raw("GET", "/clock").status_code == 200
 
 
-def test_ticking_clock_moves_with_real_time():
-    clock = stubs_server.Clock("ticking")
+def test_running_clock_moves_with_real_time():
+    clock = stubs_server.Clock("running")
     a = clock.now()
     time.sleep(0.05)
     b = clock.now()
@@ -60,6 +63,21 @@ def test_ticking_clock_moves_with_real_time():
     assert clock.now() - b >= stubs_server.timedelta(seconds=60)
     with pytest.raises(stubs_server.ApiError):
         clock.set(a)
+
+
+def test_running_clock_reports_its_mode():
+    srv = stubs_server.make_server(
+        "127.0.0.1",
+        0,
+        stubs_server.State(stubs_server.load_seed(), "c", "s", stubs_server.Clock("running")),
+    )
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        host, port = srv.server_address[:2]
+        body = httpx.get(f"http://{host}:{port}/clock").json()
+        assert body["mode"] == "running"
+    finally:
+        srv.shutdown()
 
 
 def test_frozen_clock_stands_still():
