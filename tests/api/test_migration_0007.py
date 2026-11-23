@@ -33,7 +33,7 @@ def test_campaign_channel_upgrade_labels_existing_rows_and_downgrades(admin_url:
         command.check(cfg)
         with psycopg.connect(_libpq(url), autocommit=True) as conn:
             rows = dict(conn.execute("SELECT caller_id, channel FROM stats_campaigns").fetchall())
-            assert rows == {"da": "sms", "tg-only": "telegram", "both": "sms"}
+            assert rows == {"da": "sms", "tg-only": "sms", "both": "sms"}  # existing rows: sms
             # One caller's campaign on two channels is two rows now.
             conn.execute(
                 "INSERT INTO stats_campaigns (campaign, caller_id, purpose, channel, first_at,"
@@ -49,7 +49,7 @@ def test_campaign_channel_upgrade_labels_existing_rows_and_downgrades(admin_url:
         command.downgrade(cfg, "0006")
         with psycopg.connect(_libpq(url), autocommit=True) as conn:
             left = conn.execute("SELECT caller_id FROM stats_campaigns ORDER BY 1").fetchall()
-            assert [r[0] for r in left] == ["both", "da"]
+            assert [r[0] for r in left] == ["both", "da", "tg-only"]
         command.upgrade(cfg, "head")
     finally:
         drop_database(admin_url, url)

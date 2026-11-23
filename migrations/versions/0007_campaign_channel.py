@@ -6,8 +6,8 @@ channels gives two rows.
 
 Expand-only for the running version: the new column has a constant default (``sms``), so
 the table is not rewritten and an older refresh still inserts. Rows written before this
-migration are labelled ``telegram`` only when their caller cannot send SMS; the next
-refresh rebuilds the recent days anyway.
+migration become ``sms``; the next refresh rebuilds the recent days anyway. Only
+``stats_campaigns`` is touched, never ``messages``.
 """
 
 import sqlalchemy as sa
@@ -23,11 +23,6 @@ def upgrade() -> None:
     op.add_column(
         "stats_campaigns",
         sa.Column("channel", sa.Text(), nullable=False, server_default=sa.text("'sms'")),
-    )
-    op.execute(
-        "UPDATE stats_campaigns s SET channel = 'telegram' FROM callers c"
-        " WHERE c.caller_id = s.caller_id AND NOT ('sms' = ANY (c.allowed_channels))"
-        " AND 'telegram' = ANY (c.allowed_channels)"
     )
     op.drop_constraint("pk_stats_campaigns", "stats_campaigns", type_="primary")
     op.create_primary_key(
