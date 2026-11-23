@@ -523,7 +523,7 @@ built in the first Telegram release, with broadcasts (§8.1).
 **Acceptance:** the OTP always goes to the registered phone; someone else's contact is
 refused; 5 wrong codes in an hour lock linking for an hour; OTP expiry is set by Auth
 (at most 30 minutes); the alternate number never reaches the registry, SMS senders or
-logs; the bot makes no call to OAN Messaging. The code the farmer types is a message, so
+logs; linking makes no call to OAN Messaging (Auth sends the OTP). The code the farmer types is a message, so
 it sits in RapidPro's history under RP-D1 retention; it is single-use and short-lived.
 
 ## 6.7 MOD-06 and MOD-07: Verified status checks (deferred)
@@ -578,7 +578,8 @@ later enhancement that needs DA app changes; it is not built in Phase 1.
   menu turns them off and on again.
 * Bot Services keeps one subscription row per linked farmer: RapidPro contact UUID,
   `contact_ref`, Farmer ID, registry kebele, woreda and zone codes, language, updates on
-  or off. No name, chat id or phone. The row lives as long as the link: Stop, unlinking or
+  or off, and the Telegram chat id (needed to send the broadcast copy through OAN Messaging;
+never logged). No name or phone. The row lives as long as the link: Stop, unlinking or
   a deleted Telegram account removes it at once, and 12 months without any activity
   (configurable) removes the row and the link.
 * **Development Agents:** the roster (R1) of the kebele, or of every kebele in the woreda or
@@ -598,8 +599,8 @@ both channels.
 | `sender_ref`, `sender_role` | The DA web app has already checked the role and area; Bot Services records both in the audit |
 | `source` | `Knowledge`, `Emergency`, `Weather` or `Informational` |
 | `source_reference` | Names the business event (for example `da_broadcast:BC-2210`); never personal data |
-| `title`, `body` | Sent as one Telegram message: title in bold, then the message; `language` when the app sends one (Knowledge Base), recorded for reporting only |
-| `evidence` | Optional files, sent after the message as photos or documents through the media route (§5.9) |
+| `title`, `body` | Sent as one plain-text Telegram message: the title on its own first line, then the message (no bold in Phase 1, TG-34); `language` when the app sends one (Knowledge Base), recorded for reporting only |
+| `evidence` | Optional files. **Not sent on Telegram in Phase 1** (TG-34); accepted and recorded so the app's request stays valid |
 | `expires_at` | Optional, RFC 3339 with an offset, at most 7 days ahead, set by the caller and never extended (as for SMS) |
 
 * Response `202`: `broadcast_id`, `recipients`, and `not_on_telegram` (refs of Development
@@ -635,23 +636,32 @@ both.
 
 ### 6.8.4 Delivery
 
-* Batches through the RapidPro broadcasts API, which does not disturb a flow the farmer is
-  in (§5.8).
-* `Emergency` broadcasts go ahead of other broadcasts, never ahead of conversation
-  replies; several running broadcasts of the same kind take turns batch by batch, so a
-  zone sent as many woredas makes progress in every woreda.
-* Pace: at most `broadcast_max_per_second` (configuration, **default 20**, never above
-  Telegram's 30 for the bot), leaving room for conversation replies. The SMS copy is paced
-  by OAN Messaging.
-* `expires_at` is checked before every send; recipients not reached by then are `expired`
-  and get the SMS copy.
-* An attempt whose outcome cannot be proven (a timeout after the request left) is
-  `unknown` and **never resent**, as in OAN Messaging; it counts as not delivered for the
-  SMS copy.
-* A farmer who blocked the bot or deleted their account is `failed`, marked so later
-  broadcasts skip them, and never retried. Temporary errors (429, network before the
-  request left): retried with Telegram's `retry_after` up to 3 times, then `failed`.
-* Link previews off for farmers.
+* **OAN Messaging sends each Telegram message** (SMS-02 revised, TG-04). Bot Services
+  chooses the recipients, then submits one `POST /api/v1/messages/telegram` per recipient
+  as its own OAN caller, with the recipient's chat id (from the subscription row, or from
+  R1 for Development Agents), the text (TG-34), `expires_at` from the request, a
+  `source_reference` naming the broadcast (never personal data) and one idempotency key per
+  recipient, so a retry is never a second message. Broadcasts do not pass through RapidPro,
+  so they never disturb a flow the farmer is in.
+* Purpose as for the SMS copy (SMS-06): `Emergency` and `Weather` go as `alert`,
+  `Knowledge` and `Informational` as `broadcast`, so an `Emergency` broadcast goes ahead of
+  other broadcasts. Conversation replies go out through RapidPro, outside OAN Messaging's
+  queue, so a broadcast never holds them up.
+* Bot Services submits recipients interleaved across woredas (TG-35), so a zone sent as
+  many woredas makes progress in every woreda.
+* Pace: OAN Messaging's Telegram limit, **default 20 a second** (TG-08), never above
+  Telegram's 30 for the bot, leaving the rest for RapidPro's replies. The SMS copy is paced
+  by OAN Messaging's SMS limit.
+* OAN Messaging's rules apply unchanged (§3): `expires_at` is checked before every send
+  (recipients not reached are `expired` and get the SMS copy); an attempt whose outcome
+  cannot be proven is `unknown`, **never resent**, and counts as not delivered for the SMS
+  copy; temporary errors (429 with `retry_after`, network before the request left) are
+  retried, then `failed`.
+* Bot Services reads each message's status from OAN Messaging to build the counts of
+  `GET /broadcasts/{id}` and the `telegram-recipients` list (TG-20). A farmer who blocked
+  the bot or deleted their account comes back as `failed` with that reason: Bot Services
+  marks the subscription so later broadcasts skip them, and never retries (TG-09).
+* Link previews off for farmers (OAN Messaging's Telegram adapter sets this).
 
 **Acceptance:** a broadcast with Telegram ticked reaches the linked farmers (or the
 Development Agents) of that zone, woreda or kebele, and nobody else; an unlinked farmer of

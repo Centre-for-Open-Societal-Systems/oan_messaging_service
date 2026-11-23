@@ -6,7 +6,7 @@
 |---|---|---|
 | Namespaces | Own namespace and Helm release (`oan-messaging`) | RapidPro deployment; `oan-bot-services` release |
 | Databases | Own PostgreSQL database; owner role for migrations, runtime role for processes | RapidPro's PostgreSQL and Redis; OAN Bot Services' own PostgreSQL |
-| Secrets | Caller tokens are hashed in OAN; content and fingerprint keys, database URLs, 8028 client certificate and key, 8028 client secret, 8028's callback CA (and optional pinned callback certificates), callback secret: all in Kubernetes Secrets | Bot token per environment (courier channel configuration); webhook secret; `contact_ref` HMAC key; Keycloak client secret; flow ↔ service credential |
+| Secrets | Caller tokens are hashed in OAN; content and fingerprint keys, database URLs, 8028 client certificate and key, 8028 client secret, 8028's callback CA (and optional pinned callback certificates), callback secret: all in Kubernetes Secrets | Bot token per environment (courier channel configuration and OAN Messaging's Secret); webhook secret; `contact_ref` HMAC key; Keycloak client secret; flow ↔ service credential |
 | Public exposure | 8028 receipt listener only, at the registered callback host (mutual TLS with 8028's callback CA, plus the callback secret) | One webhook path (Design 1) and the GET-only media route (§5.9) |
 | URLs | Dev and staging URLs to be published by DevOps; all examples use `example.invalid` | Same |
 | Certificates | HTTPS everywhere. Python 3.13 and later (including Frappe v16 on 3.14) verify strictly: private CA certificates need Subject and Authority Key Identifiers and CA key usage. Ask 8028 to confirm its certificates carry both identifiers. | Public certificate on the webhook host |
@@ -32,7 +32,7 @@
 | Health | `/livez`, `/readyz`, worker heartbeat probe | Courier and mailroom health; `getWebhookInfo`; OAN Bot Services health |
 | Alerts | `status-check` CronJob (`status --fail-on-alert`) | Rejected webhook calls, webhook errors, adapter failures, questions waiting for a reply, 429 pauses (Rancher monitoring) |
 | Pause | `suspend --channel sms`, then `resume` | Stop the webhook (unregister or block at the gateway); updates queue at Telegram for up to 24 hours |
-| Credentials | `issue-credential`, `list-credentials`, `revoke-credentials` | Rotate the bot token and webhook secret (runbook) |
+| Credentials | `issue-credential`, `list-credentials`, `revoke-credentials` | Rotate the bot token (courier and OAN Messaging together) and webhook secret (runbook) |
 | Audit | Message metadata and receipts in OAN | Audit Manager events for every question created, delivered, replied, escalated and closed, and for every broadcast accepted (sender, scope, approval, recipient count) |
 | Restore | PostgreSQL backups; the cleanup sweeper resumes on recovery | RapidPro and OAN Bot Services backups |
 

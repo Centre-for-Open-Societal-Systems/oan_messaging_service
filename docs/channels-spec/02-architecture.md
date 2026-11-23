@@ -6,12 +6,12 @@
 
 | Component | Owns | Channel |
 |---|---|---|
-| **OAN Messaging Service** | The only SMS sender: API, PostgreSQL store, workers, 8028 adapter, delivery-receipt listener, cleanup. Also has a Telegram send endpoint, with no caller in Phase 1. | SMS |
+| **OAN Messaging Service** | The only SMS sender: API, PostgreSQL store, workers, 8028 adapter, delivery-receipt listener, cleanup. Also sends the Telegram copy of area broadcasts for OAN Bot Services, with the same rules as SMS (SMS-02, revised 23 Nov 2026). | SMS; Telegram broadcasts |
 | **Module services** (Credit, DPI Consent Manager, Grievance, DA Services, Auth, eSignet) | Deciding when to send, the text, the recipient's registered phone, and their own record of each message | SMS |
 | **Frappe connector** (`oan_messaging_connector`) | A shared Frappe app that gives every Frappe module an outbox, safe retries and status polling | SMS |
 | **Beneficiary API** (farmer registry) | The farmer's registered phone | Both |
 | **RapidPro** (courier, mailroom, web) | Receiving Telegram through the webhook, contacts, flows (language, notice, location, menus, prices, question intake, linking), sending replies, the Stop flow | Telegram |
-| **OAN Bot Services** (new, small API with its own PostgreSQL) | Adapters to Master Data, Marketplace and the DA backend; Development Agent routing, relay and reminders; question store; Development Agent linking; farmer linking; area broadcasts for the DA web app; weekly figures for Reports Central | Telegram |
+| **OAN Bot Services** (new, small API with its own PostgreSQL) | Adapters to Master Data, Marketplace and the DA backend; Development Agent routing, relay and reminders; question store; Development Agent linking; farmer linking; area broadcasts for the DA web app (choosing recipients; OAN Messaging sends them); weekly figures for Reports Central | Telegram |
 | **Garage** (S3-compatible object storage) | Media for RapidPro, with one GET-only public route for media sent to Telegram (§5.9) | Telegram |
 | **Reports Central** | The weekly DA report, emailed by scope (§6.4.4) | Telegram |
 | **Auth service** | Issues and verifies the farmer-linking OTP; sends it as an ordinary OTP SMS | SMS |
@@ -41,6 +41,9 @@
    beneficiary API, Auth) and returns plain JSON.
 4. Replies go back through RapidPro to Telegram. Questions to Development Agents are
    sent by OAN Bot Services through the RapidPro API.
+5. Area broadcasts: OAN Bot Services chooses the recipients and submits each Telegram
+   message to OAN Messaging (`POST /api/v1/messages/telegram`), which sends it with the
+   same rules as an SMS (§6.8.4).
 
 ## 2.4 Identities and phone numbers
 
@@ -49,7 +52,7 @@
 | Registered phone | The farmer's phone in the farmer registry | Beneficiary API, the sending module, OAN Messaging (encrypted, purged after sending) |
 | Alternate Telegram number | The number on the farmer's own Telegram account, approved by an OTP to the registered phone | OAN Bot Services link record only. Never in the registry, never used for SMS, never logged. |
 | Farmer ID | The registry identifier | Beneficiary API, OAN Bot Services link record and subscription row. In RapidPro only inside messages shown to Development Agents (RP-D4) and in short-lived webhook logs (§5.4); never as a contact field. |
-| `chat_id` | Telegram chat identifier, needed to reply | RapidPro contact (as its URN) |
+| `chat_id` | Telegram chat identifier, needed to reply | RapidPro contact (as its URN); for a linked farmer, the Bot Services subscription row (§6.8.1); OAN Messaging while a broadcast copy is sent (encrypted, purged after sending, like a phone number). Never in logs. |
 | `contact_ref` | HMAC-SHA256 of `chat_id` with a secret key | Logs, metrics, audit events, the question store and calls to OAN services |
 | `da_ref` | Development Agent reference from the DA backend | Question store, routing state |
 | OAN message `id` | OAN's id for one accepted message | The sender's own record; used to poll |

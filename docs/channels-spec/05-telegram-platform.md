@@ -11,9 +11,9 @@ Bot Services**, does them and RapidPro flows call it.
 |---|---|
 | Receive updates through the webhook (Design 1) | Adapters to Master Data, Marketplace, the DA backend, the beneficiary API and Auth, behind one Keycloak service account |
 | Contacts, language, the current step, flow timeouts | Development Agent routing (specialism, kebele inbox claim, availability and officer cover) |
-| Flows: language, privacy notice, location menus, Main menu (with Updates on/off), prices, question intake, farmer linking, Stop, and one thin staff flow | Question store, relay between farmer and Development Agent, reminders, area broadcasts (§6.8), weekly figures for Reports Central (§6.4.4) |
+| Flows: language, privacy notice, location menus, Main menu (with Updates on/off), prices, question intake, farmer linking, Stop, and one thin staff flow | Question store, relay between farmer and Development Agent, reminders, area broadcasts (§6.8: choosing recipients; OAN Messaging sends), weekly figures for Reports Central (§6.4.4) |
 | Every farmer and staff text, as flow translations | Development Agent linking; farmer linking; deciding what to send to whom |
-| Send replies within Telegram's limits; stop a contact that blocked the bot | Sending to other contacts through the RapidPro API (§5.8) |
+| Send replies within Telegram's limits; stop a contact that blocked the bot | Keyed messages to other contacts through the RapidPro API (§5.8); the Telegram copy of area broadcasts through OAN Messaging (§6.8.4) |
 
 **Flow ↔ service contract:** plain JSON over HTTPS (§5.8). Flows never call Master Data,
 Marketplace, the beneficiary API, Auth or OAN Messaging directly, so the service is the
@@ -75,7 +75,7 @@ RV-01).
 | TLS | Public certificate, TLS 1.2 or later, port 443 |
 | Limits | Body at most 1 MB; rate limit per source; short timeout; webhook `max_connections` about 20; `allowed_updates: [message]` |
 | Isolation | Courier ingress only from the gateway. Courier egress only to `api.telegram.org:443` and RapidPro internals. RapidPro web and API only for staff (VPN and SSO). Mailroom has no external route. |
-| Secrets | Bot token per environment in courier's channel configuration (database encrypted, access restricted); webhook secret in a Kubernetes Secret; rotation runbook |
+| Secrets | Bot token per environment in courier's channel configuration (database encrypted, access restricted) **and** in OAN Messaging's Kubernetes Secret (it sends the broadcast copies); webhook secret in a Kubernetes Secret; one rotation runbook updates both places |
 | Monitoring | Gateway counts of rejected calls (alert on spikes); scheduled `getWebhookInfo` (`last_error_message`, `pending_update_count`) |
 | Registration | If RapidPro registers the webhook without the secret, DevOps re-registers it with the secret after the channel is added, and checks it after every channel change |
 
@@ -199,11 +199,13 @@ unavailable) and returns a text key, parameters and keyboard keys, which the flo
 global and rotated by runbook (webhook nodes cannot fetch Keycloak tokens); APISIX
 accepts these routes only from the mailroom network. DA backend → Bot Services:
 Keycloak client credentials. Reports Central → chart API: a credential to be agreed with
-that team (ID-08). Bot Services → RapidPro API: an API token in a Kubernetes Secret.
+that team (ID-08). Bot Services → RapidPro API: an API token in a Kubernetes Secret. Bot Services → OAN
+Messaging: a caller token (channel `telegram`, purposes `alert` and `broadcast`), issued by
+the OAN operator.
 
 **Identifiers.** Flows send the RapidPro contact UUID and the Telegram id; Bot Services
-derives `contact_ref` and stores the contact UUID to address the farmer later, never the
-chat id. Staff are addressed as `telegram:<chat id>` from R1 and R4.
+derives `contact_ref` and stores the contact UUID to address the farmer later. The chat
+id is stored only in a linked farmer's subscription row, for broadcasts (§6.8.1). Staff are addressed as `telegram:<chat id>` from R1 and R4.
 
 | Call (from a flow unless noted) | In | Out |
 |---|---|---|
@@ -228,12 +230,14 @@ chat id. Staff are addressed as `telegram:<chat id>` from R1 and R4.
   the question number within 5 seconds; delivery to the Development Agent is
   asynchronous.
 
-**Sending to other contacts.** Bot Services sends through the RapidPro API in two ways:
+**Sending to other contacts.** Bot Services sends in two ways:
 
-* **Broadcasts from the DA web app** (§6.8) use the broadcasts API with the text the
-  app supplies. They do not disturb a flow the farmer is in.
+* **Broadcasts from the DA web app** (§6.8) go through **OAN Messaging's Telegram
+  endpoint** (SMS-02 revised, 23 Nov 2026), one message per recipient with the text the
+  app supplies. They do not pass through RapidPro, so they do not disturb a flow the
+  farmer is in.
 * **Keyed messages** (question deliveries, relays, reminders, claim offers, staff
-  notices) start a small `notify` flow with parameters, which renders the text key from
+  notices) go through the RapidPro API: they start a small `notify` flow with parameters, which renders the text key from
   the flow translations with its keyboard and attachments. Starting a flow interrupts
   the recipient's current flow, so these are **queued until the contact is idle**: Bot
   Services starts `notify` with "skip contacts already in a flow"; a skipped contact's

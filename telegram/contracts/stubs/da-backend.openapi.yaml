@@ -1,0 +1,134 @@
+openapi: 3.1.0
+info:
+  title: DA backend routes for OAN Bot Services (stub)
+  version: 0.1.0
+  description: |
+    Channels Specification v2.0 §6.4.5, routes R1 to R4. None exists in the DA backend yet
+    (ID-03); Bot Services is built against this stub. Field names are proposals for the DA
+    team; keep the stub as the contract test. The bot never sends the DA backend a farmer's
+    chat id, phone or name.
+servers:
+  - url: http://stubs:8200/da
+security:
+  - clientCredentials: []
+paths:
+  /roster:
+    post:
+      operationId: rosterForKebeles
+      summary: R1. Agents with an Effective posting and an active Development Agent grant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [kebele_codes]
+              properties:
+                kebele_codes: {type: array, minItems: 1, maxItems: 200, items: {$ref: '#/components/schemas/AreaCode'}}
+      responses:
+        '200':
+          description: One entry per requested kebele. Unknown kebele gives an empty list, not an error.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [kebeles]
+                properties:
+                  kebeles:
+                    type: array
+                    items:
+                      type: object
+                      required: [kebele_code, routing_mode, agents]
+                      properties:
+                        kebele_code: {$ref: '#/components/schemas/AreaCode'}
+                        routing_mode: {type: string, enum: [specialism, kebele_inbox]}
+                        agents:
+                          type: array
+                          items: {$ref: '#/components/schemas/Person'}
+  /staff-links:
+    post:
+      operationId: linkPerson
+      summary: R2. Redeem a one-time link code (8 characters, 15 minutes, works once)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code, telegram_id]
+              properties:
+                code: {type: string, pattern: '^[A-Za-z0-9]{8}$'}
+                telegram_id: {type: integer, description: Stored by the DA backend as the delivery address (D4)}
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result: {type: string, enum: [linked, invalid, expired]}
+                  ref: {type: string}
+                  role: {type: string, enum: [development_agent, supervisor, executive]}
+                  display_name: {type: string}
+  /staff-links/{ref}/unreachable:
+    post:
+      operationId: reportUnreachable
+      summary: R3. Mark a person's link inactive until they link again
+      parameters:
+        - {name: ref, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, enum: [blocked, chat_deleted]}
+      responses:
+        '204': {description: Recorded}
+        '404': {description: Unknown ref}
+  /officers:
+    get:
+      operationId: officersForArea
+      summary: R4. Supervisors (woreda scope) and Executives for an area
+      parameters:
+        - {name: level, in: query, required: true, schema: {type: string, enum: [woreda, zone, region]}}
+        - {name: code, in: query, required: true, schema: {$ref: '#/components/schemas/AreaCode'}}
+      responses:
+        '200':
+          description: Officers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [officers]
+                properties:
+                  officers:
+                    type: array
+                    items: {$ref: '#/components/schemas/Person'}
+components:
+  securitySchemes:
+    clientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: http://stubs:8200/auth/token
+          scopes: {}
+  schemas:
+    AreaCode: {type: string, pattern: '^[A-Z0-9]{2,16}$'}
+    Person:
+      type: object
+      required: [ref, role, display_name, telegram_linked]
+      properties:
+        ref: {type: string, description: da_ref (DA Registry DA-ID) or DA backend user}
+        role: {type: string, enum: [development_agent, supervisor, executive]}
+        display_name: {type: string}
+        specialisation: {type: string, enum: [CROP_PRODUCTION, LIVESTOCK, NATURAL_RESOURCES, AGRONOMY, HORTICULTURE, OTHER]}
+        telegram_linked: {type: boolean}
+        telegram_id: {type: integer, description: Delivery address (D4); present only when linked}
