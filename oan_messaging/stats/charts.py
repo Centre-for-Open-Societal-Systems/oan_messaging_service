@@ -9,7 +9,8 @@ as an upstream.
 Filters (all optional; other query parameters are ignored, as the dashboards pass their
 own):
 
-* ``from``, ``to``: Ethiopian calendar days ``YYYY-MM-DD`` (default: the last 30 days);
+* ``from``, ``to``: Ethiopian calendar days ``YYYY-MM-DD`` (default: the last 30 days),
+  between ``MIN_DAY`` and ``MAX_DAY``;
 * ``granularity``: ``day`` (default), ``week`` (from Monday) or ``month``;
 * ``caller``, ``purpose``, ``channel``: comma-separated lists.
 
@@ -51,6 +52,11 @@ from oan_messaging.storage.schema import (
 
 DEFAULT_DAYS = 30
 MAX_DAYS = 366
+#: Accepted ``from`` / ``to`` days. Far enough from the calendar's ends that the default
+#: range and the day after ``to`` can always be computed (a date near year 1 or 9999
+#: overflowed and answered 500).
+MIN_DAY = date(1900, 1, 1)
+MAX_DAY = date(2199, 12, 31)
 CAMPAIGN_LIMIT = 200
 _CALLER_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -91,9 +97,12 @@ def parse_query(params: Mapping[str, str], today: date) -> ChartQuery:
         if not _DATE_RE.fullmatch(raw):
             raise ChartQueryError(name, "invalid_format")
         try:
-            return date.fromisoformat(raw)
+            value = date.fromisoformat(raw)
         except ValueError:
             raise ChartQueryError(name, "invalid_format") from None
+        if not MIN_DAY <= value <= MAX_DAY:
+            raise ChartQueryError(name, "invalid")
+        return value
 
     end = day("to") or today
     start = day("from") or end - timedelta(days=DEFAULT_DAYS - 1)
@@ -431,4 +440,13 @@ class StatsService:
         return {"data": data, "meta": meta}
 
 
-__all__ = ["CHARTS", "LIVE", "ChartQueryError", "StatsService", "parse_query", "percentile"]
+__all__ = [
+    "CHARTS",
+    "LIVE",
+    "MAX_DAY",
+    "MIN_DAY",
+    "ChartQueryError",
+    "StatsService",
+    "parse_query",
+    "percentile",
+]

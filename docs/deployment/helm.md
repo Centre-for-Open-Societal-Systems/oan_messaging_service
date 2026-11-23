@@ -39,6 +39,7 @@ whose command is missing refuses to render instead of inventing one.
 | `receipts` | Deployment ×2, L4 Service (LoadBalancer by default), PDB | off; on in `values-pilot.yaml` | storage keys, runtime URL, receipt server certificate/key, pinned 8028 certificates |
 | `cleanup` | CronJob (default) or Deployment ×1 | off; on in `values-pilot.yaml` | storage keys, runtime URL |
 | `statusCheck` | CronJob (`status --fail-on-alert`, every 5 minutes) | off; on in `values-pilot.yaml` | storage keys, runtime URL |
+| `statsRefresh` | CronJob (`stats-refresh`, every 15 minutes; component `stats`) | on (default and `values-pilot.yaml`) | storage keys, runtime URL |
 
 Every component reads the storage keys because `StorageSettings` requires all of them at
 startup and the repository needs the cipher and fingerprinter. The 8028 and Telegram
@@ -157,7 +158,7 @@ release after the guarantee window, receipt fingerprint and evidence expiry).
 | Mode | Resource | Runs |
 |---|---|---|
 | `cleanup.mode: cronjob` (default) | CronJob, `concurrencyPolicy: Forbid`, `backoffLimit: 0`, `activeDeadlineSeconds: 600` | one pass per `cleanup.schedule` (default `*/5 * * * *`, matching `purge_sweep_interval` = 5 min) |
-| `cleanup.mode: deployment` | Deployment ×1 | `cleanup_forever`, every `purge_sweep_interval` |
+| `cleanup.mode: deployment` | Deployment ×1 | `cleanup_forever`, every `purge_sweep_interval`, plus the statistics rebuild. The chart adds `--forever` to `cleanup.command` in this mode |
 
 The policy's target, content gone within `worker_lease + purge_sweep_interval`, assumes
 the schedule matches `config.policy.purgeSweepInterval`. Keep them aligned. Key retirement
@@ -214,22 +215,22 @@ them: they are only as good as the values (and the MSG-08 runtime honouring them
   controller keeps at most `replicas + maxSurge` non-terminating pods, but terminating
   pods are not counted and keep their connections until they exit (bounded by
   `terminationGracePeriodSeconds`: 30 s API/receipts, 150 s workers), so up to `replicas`
-  old pods can still be connected. All Deployments may roll at once. Plus one cleanup pod
-  and **1** for the migration hook, which runs while the previous workloads are still up.
+  old pods can still be connected. All Deployments may roll at once. Plus one cleanup pod,
+  one statistics refresh pod and **1** for the migration hook, which runs while the previous workloads are still up.
 
 ```text
-steady  = Σ replicas × perPod            + cleanup.perPod
-rollout = Σ (2 × replicas + maxSurge) × perPod + cleanup.perPod + 1 (migration)
+steady  = Σ replicas × perPod            + cleanup.perPod + statsRefresh.perPod
+rollout = Σ (2 × replicas + maxSurge) × perPod + cleanup.perPod + statsRefresh.perPod + 1 (migration)
 ```
 
 | Configuration | Steady | Rollout |
 |---|---|---|
-| defaults (API only + migration) | 20 | 51 |
-| all components (`ci/02`) | 54 | 133 |
+| defaults (API, statistics refresh, migration) | 21 | 52 |
+| all components (`ci/02`) | 55 | 134 |
 
 Both figures are printed in the install NOTES. When `database.connectionBudget` > 0,
 rendering fails if the **rollout** estimate exceeds it (the regression checks cover the
-exact boundary: 133 renders, 132 is refused). Inputs are validated as integers:
+exact boundary: 134 renders, 133 is refused). Inputs are validated as integers:
 `replicas ≥ 0`, `rollout.maxSurge ≥ 0`, `pool.size ≥ 1`, `pool.maxOverflow ≥ 0`
 (SQLAlchemy treats 0 and −1 as unlimited), `coordinationConnections ≥ 1`, budget ≥ 0.
 

@@ -6,6 +6,7 @@ Rendered components:
   worker     {{ ternary "enabled" "disabled (enable with values-pilot.yaml)" .Values.worker.enabled }}
   receipts   {{ ternary "enabled" "disabled (enable with values-pilot.yaml)" .Values.receipts.enabled }}
   cleanup    {{ ternary (printf "enabled (%s)" .Values.cleanup.mode) "disabled (enable with values-pilot.yaml)" .Values.cleanup.enabled }}
+  stats      {{ ternary (printf "enabled (stats-refresh, %s)" .Values.statsRefresh.schedule) "disabled" .Values.statsRefresh.enabled }}
 
 Estimated PostgreSQL connections from configured pool limits (not enforced at runtime):
   steady state            {{ include "oan.connectionSteady" . }}

@@ -193,3 +193,39 @@ def test_percentile_reads_the_bucket_upper_edge() -> None:
     hist[0], hist[5] = 9, 1  # nine under 1 s, one between 30 and 60 s
     assert (percentile(hist, 0.5), percentile(hist, 0.95)) == (1, 60)
     assert set(CHARTS) >= {"msgKpis", "msgCampaigns", "msgQueueNow", "msgProviderHealth"}
+
+
+async def test_dates_at_the_calendar_edges_are_refused_not_a_server_error(h: Harness) -> None:
+    """A date near year 1 or 9999 used to overflow and answer 500; it is now 422."""
+    token = await reader(h)
+    for chart in ("/msgKpis", "/msgTrend", "/msgCampaigns", ""):
+        extra = {"charts": "msgKpis,msgTrend"} if chart == "" else {}
+        for name, value in (
+            ("to", "9999-12-31"),
+            ("to", "0001-01-05"),
+            ("from", "0001-01-01"),
+            ("from", "2200-01-01"),
+        ):
+            r = await charts(h, token, chart, **{name: value}, **extra)
+            assert r.status_code == 422, (chart, name, value, r.status_code)
+            assert r.json()["errors"] == [{"field": name, "code": "invalid"}]
+    # Inside the bounds: still answered.
+    ok = await charts(h, token, "/msgKpis", **{"from": "1900-01-01", "to": "1900-01-31"})
+    assert ok.status_code == 200
+
+
+def test_parse_query_bounds() -> None:
+    from datetime import date
+
+    from oan_messaging.stats.charts import MAX_DAY, MIN_DAY, ChartQueryError, parse_query
+
+    today = date(2019, 3, 14)
+    assert parse_query({"to": MAX_DAY.isoformat()}, today).end == MAX_DAY
+    assert parse_query({"from": MIN_DAY.isoformat(), "to": "1900-02-01"}, today).start == MIN_DAY
+    for params in ({"to": "0001-01-05"}, {"to": "9999-12-31"}, {"from": "1899-12-31"}):
+        try:
+            parse_query(params, today)
+        except ChartQueryError as exc:
+            assert exc.code == "invalid"
+        else:
+            raise AssertionError(params)

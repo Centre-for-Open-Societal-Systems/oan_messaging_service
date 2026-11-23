@@ -19,5 +19,7 @@ cleanup:
   enabled: true
   mode: cronjob
   command: [python, -m, oan_messaging.runtime, cleanup]
+statsRefresh:
+  enabled: true
 statusCheck:
   enabled: true

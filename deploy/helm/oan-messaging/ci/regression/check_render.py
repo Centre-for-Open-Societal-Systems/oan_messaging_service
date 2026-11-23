@@ -255,10 +255,11 @@ def budget() -> None:
         return int(m.group(1)), int(m.group(2))
 
     # Independent expectation for ci/02: api 2x(5+5), worker 2x(5+5+2), receipts 2x(2+2),
-    # cleanup cronjob 1x(2+0), migration 1; surge 1 each; terminating pods = replicas.
-    api, wrk, rec, cln = 10, 12, 4, 2
-    steady = 2 * api + 2 * wrk + 2 * rec + cln
-    rollout = (2 * 2 + 1) * api + (2 * 2 + 1) * wrk + (2 * 2 + 1) * rec + cln + 1
+    # cleanup cronjob 1x(2+0), statistics refresh cronjob 1x(1+0), migration 1; surge 1
+    # each; terminating pods = replicas.
+    api, wrk, rec, cln, sts = 10, 12, 4, 2, 1
+    steady = 2 * api + 2 * wrk + 2 * rec + cln + sts
+    rollout = (2 * 2 + 1) * api + (2 * 2 + 1) * wrk + (2 * 2 + 1) * rec + cln + sts + 1
     check(figures() == (rollout, steady), f"budget figures ci/02 == ({rollout}, {steady})")
     check(
         not error("-f", str(ALL), "--set", f"database.connectionBudget={rollout}"),
@@ -285,6 +286,10 @@ def budget() -> None:
         figures("--set", "migration.enabled=false") == (rollout - 1, steady),
         "migration hook adds exactly 1 to the rollout estimate",
     )
+    check(
+        figures("--set", "statsRefresh.enabled=false") == (rollout - sts, steady - sts),
+        "statistics refresh CronJob counts one pod",
+    )
     deploy = render("-f", str(ALL), "--set", "cleanup.mode=deployment")
     strategy = [
         d["spec"]["strategy"]["type"]
@@ -292,6 +297,41 @@ def budget() -> None:
         if d["kind"] == "Deployment" and d["metadata"]["name"].endswith("-cleanup")
     ]
     check(strategy == ["Recreate"], "cleanup Deployment uses Recreate")
+    commands = [
+        d["spec"]["template"]["spec"]["containers"][0]["command"]
+        for d in deploy
+        if d["kind"] == "Deployment" and d["metadata"]["name"].endswith("-cleanup")
+    ]
+    check(
+        commands == [["python", "-m", "oan_messaging.runtime", "cleanup", "--forever"]],
+        "cleanup Deployment runs the long-lived loop (--forever added)",
+    )
+    once = [
+        d["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["command"]
+        for d in render("-f", str(ALL))
+        if d["kind"] == "CronJob" and d["metadata"]["name"].endswith("-cleanup")
+    ]
+    check(
+        once == [["python", "-m", "oan_messaging.runtime", "cleanup"]],
+        "cleanup CronJob runs one pass (no --forever)",
+    )
+    for label, args in (
+        ("defaults", ()),
+        ("pilot", ("-f", str(CHART / "values-pilot.yaml"))),
+    ):
+        jobs = [
+            d
+            for d in render(*args)
+            if d["kind"] == "CronJob" and d["metadata"]["name"].endswith("-stats")
+        ]
+        ok = len(jobs) == 1 and jobs[0]["spec"]["schedule"] == "*/15 * * * *"
+        cmd = jobs[0]["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0][
+            "command"
+        ] if jobs else []
+        check(
+            ok and cmd == ["python", "-m", "oan_messaging.runtime", "stats-refresh"],
+            f"{label}: statistics refresh CronJob every 15 minutes",
+        )
     surges = {
         d["metadata"]["name"].rsplit("-", 1)[-1]: d["spec"]["strategy"]["rollingUpdate"]
         for d in render("-f", str(ALL), "--set", "worker.rollout.maxSurge=0")

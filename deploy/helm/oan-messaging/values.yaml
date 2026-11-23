@@ -251,8 +251,12 @@ receipts:
 cleanup:
   # Off by default; values-pilot.yaml sets command: [python, -m, oan_messaging.runtime, cleanup].
   enabled: false
-  # cronjob: one run_cleanup pass per schedule (concurrencyPolicy Forbid).
-  # deployment: one long-running cleanup_forever loop (strategy Recreate).
+  # cronjob: one run_cleanup pass per schedule (concurrencyPolicy Forbid). It does not
+  #   rebuild statistics: statsRefresh does.
+  # deployment: one long-running loop (strategy Recreate) that sweeps every
+  #   purge_sweep_interval and also rebuilds statistics. The chart adds --forever to the
+  #   command in this mode (without it the process exits after one pass and the pod
+  #   restarts in a loop).
   # Both are idempotent and would be safe to overlap; one pod keeps the budget at one pool.
   mode: cronjob
   command: []
@@ -265,6 +269,19 @@ cleanup:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 256Mi}
   extraEnv: []
+
+# ---------------------------------------------------------------- statistics
+# Rebuilds the statistics snapshot behind GET /api/v1/charts: one `stats-refresh` run per
+# schedule. A run that finds another one in progress does nothing (database lock).
+statsRefresh:
+  enabled: true
+  command: [python, -m, oan_messaging.runtime, stats-refresh]
+  schedule: "*/15 * * * *"
+  activeDeadlineSeconds: 600
+  pool: {size: 1, maxOverflow: 0}
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 256Mi}
 
 # -------------------------------------------------------------------- migration
 # Scheduled alert check (MSG-08): runs `status --fail-on-alert`, which exits 2 when any

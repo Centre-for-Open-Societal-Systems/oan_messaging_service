@@ -51,7 +51,7 @@ spec:
 ---
 {{- end }}
 {{- $c := dict "root" . "component" "internal" }}
-# Everything else in this release (worker, cleanup, migration, status check): no ingress.
+# Everything else in this release (worker, cleanup, migration, status check, statistics refresh): no ingress.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -62,7 +62,7 @@ spec:
   podSelector:
     matchExpressions:
       - {key: app.kubernetes.io/instance, operator: In, values: [{{ .Release.Name | quote }}]}
-      - {key: app.kubernetes.io/component, operator: In, values: [worker, cleanup, migration, status-check]}
+      - {key: app.kubernetes.io/component, operator: In, values: [worker, cleanup, migration, status-check, stats]}
   policyTypes: [Ingress]
   ingress: []
 {{- if $np.egress.enabled }}

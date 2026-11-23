@@ -246,6 +246,7 @@ running. Cleanup: one CronJob pod (concurrencyPolicy Forbid) or one Deployment p
 {{- end -}}
 {{- if $v.cleanup.enabled -}}{{- $t = add $t (include "oan.perPod" (dict "root" . "component" "cleanup")) -}}{{- end -}}
 {{- if $v.statusCheck.enabled -}}{{- $t = add $t (include "oan.perPod" (dict "root" . "component" "statusCheck")) -}}{{- end -}}
+{{- if $v.statsRefresh.enabled -}}{{- $t = add $t (include "oan.perPod" (dict "root" . "component" "statsRefresh")) -}}{{- end -}}
 {{- $t -}}
 {{- end -}}
 
@@ -268,11 +269,13 @@ estimate from configured limits; nothing at runtime enforces it. */}}
 {{- end -}}
 {{- if $v.cleanup.enabled -}}{{- $t = add $t (include "oan.perPod" (dict "root" . "component" "cleanup")) -}}{{- end -}}
 {{- if $v.statusCheck.enabled -}}{{- $t = add $t (include "oan.perPod" (dict "root" . "component" "statusCheck")) -}}{{- end -}}
+{{- if $v.statsRefresh.enabled -}}{{- $t = add $t (include "oan.perPod" (dict "root" . "component" "statsRefresh")) -}}{{- end -}}
 {{- if $v.migration.enabled -}}{{- $t = add $t 1 -}}{{- end -}}
 {{- $t -}}
 {{- end -}}
 
-{{/* Pod spec shared by the cleanup CronJob and Deployment modes. */}}
+{{/* Pod spec shared by the cleanup CronJob and Deployment modes. Deployment mode runs
+the long-lived loop, so --forever is added to the command when it is missing. */}}
 {{- define "oan.cleanupPodSpec" -}}
 serviceAccountName: {{ include "oan.serviceAccountName" . }}
 automountServiceAccountToken: false
@@ -291,8 +294,12 @@ containers:
     {{- with .Values.image.workingDir }}
     workingDir: {{ . }}
     {{- end }}
+    {{- $cmd := .Values.cleanup.command }}
+    {{- if and (eq .Values.cleanup.mode "deployment") (not (has "--forever" $cmd)) }}
+    {{- $cmd = append $cmd "--forever" }}
+    {{- end }}
     command:
-      {{- toYaml .Values.cleanup.command | nindent 6 }}
+      {{- toYaml $cmd | nindent 6 }}
     envFrom:
       {{- include "oan.envFromConfig" . | nindent 6 }}
     env:

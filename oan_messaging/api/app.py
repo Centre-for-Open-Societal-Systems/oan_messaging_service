@@ -340,6 +340,10 @@ def create_app(deps: ApiDependencies | None = None) -> FastAPI:
             return problem(404, "not_found")
         except ChartQueryError as exc:
             return problem(422, "validation_failed", [ErrorItem(field=exc.field, code=exc.code)])
+        except (OverflowError, ValueError):
+            # Backstop: a filter value that passed parsing but cannot be computed with is
+            # still the caller's input, never a server error.
+            return problem(422, "validation_failed", [ErrorItem(code="invalid")])
         return result
 
     @app.get("/api/v1/charts/{chart_id}")
