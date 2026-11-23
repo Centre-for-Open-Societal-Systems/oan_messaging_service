@@ -139,7 +139,8 @@ async def test_success_is_sent_not_delivered_and_preserves_message_id() -> None:
     sent = rec.requests[0]
     assert sent.method == "POST"
     assert sent.url == httpx.URL(f"https://api.telegram.org/bot{FAKE_TOKEN}/sendMessage")
-    assert json.loads(sent.content) == {"chat_id": CHAT, "text": req().text}
+    assert json.loads(sent.content) == {"chat_id": CHAT, "text": req().text,
+                                        "link_preview_options": {"is_disabled": True}}
     assert_no_leak(result, req().text, str(CHAT))
 
 
