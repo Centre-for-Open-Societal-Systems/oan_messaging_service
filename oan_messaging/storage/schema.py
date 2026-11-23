@@ -247,8 +247,15 @@ message_attempts = Table(
     Column("retryable", Boolean, nullable=True),
     Column("retry_after_seconds", Integer, nullable=True),
     Column("detail", Text, nullable=True),
+    #: SMS parts this attempt sent (Telegram: 1). Migration 0006.
+    Column("units", Integer, nullable=False, server_default=text("1")),
+    #: Pace debt left by a batch bigger than one window (worker/rate_limit.py): every
+    #: purpose, and non-OTP only. NULL for ordinary attempts.
+    Column("pace_total_until", TZ, nullable=True),
+    Column("pace_bulk_until", TZ, nullable=True),
     UniqueConstraint("message_id", "attempt_no"),
     CheckConstraint("attempt_no >= 1", name="attempt_no_positive"),
+    CheckConstraint("units >= 1", name="units_positive"),
 )
 
 Index("ix_message_attempts_started_at", message_attempts.c.started_at)

@@ -22,6 +22,15 @@ One ``run_once`` cycle:
       provider's ``retry_after`` always wins. Retries stop after ``max_attempts``.
       ``unknown`` is never retried.
 
+Batching (8028, off by default): with ``batch_max_recipients`` above 1, claimed broadcast
+and alert SMS from the same caller with exactly the same text go out in one 8028 request
+of up to that many numbers. Each stays its own message with its own attempt, status and
+``sms_id``. The batch takes one rate reservation of ``numbers x parts`` units and begins
+all its messages in one transaction. A batch that may have reached 8028 without a usable
+answer makes every message in it ``unknown`` (never resent); a 500 retries them as it
+does single messages; a 413 retries them one by one. OTPs and every other purpose always
+go one per request.
+
 The worker never converts ``unknown`` into another status, never resends after an
 ambiguous outcome, and logs only ids, statuses and codes.
 """
@@ -31,9 +40,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Protocol, runtime_checkable
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -45,10 +55,13 @@ from oan_messaging.contracts import (
     MessageAdapter,
     ProviderOutcome,
     ProviderResult,
+    Purpose,
+    SmsSendRequest,
 )
 from oan_messaging.storage.errors import DispatchNotAuthorized, MessageExpired
 from oan_messaging.storage.repository import PostgresMessageRepository
 from oan_messaging.worker.rate_limit import (
+    BatchBegun,
     BeginInterrupted,
     Begun,
     DeadlineReached,
@@ -64,6 +77,20 @@ DEFAULT_BACKOFF: tuple[timedelta, ...] = (
     timedelta(minutes=10),
     timedelta(minutes=30),
 )
+
+
+#: The only purposes ever sent several to one 8028 request.
+BATCH_PURPOSES = frozenset({Purpose.BROADCAST, Purpose.ALERT})
+#: Upper bound of ``batch_max_recipients``.
+MAX_BATCH_RECIPIENTS = 100
+
+
+@runtime_checkable
+class BatchAdapter(Protocol):
+    """An adapter that can send several same-text SMS in one provider request
+    (``Sms8028Adapter.send_batch``): one result per request, in order; never raises."""
+
+    async def send_batch(self, requests: Sequence[SmsSendRequest]) -> list[ProviderResult]: ...
 
 
 @dataclass
@@ -87,10 +114,18 @@ class WorkerConfig:
     #: Bounded waiting for a rate-limit slot before abandoning a claim.
     max_rate_waits: int = 5
     max_rate_wait: timedelta = timedelta(seconds=2)
+    #: 8028 batching: up to this many broadcast/alert numbers with the same text in one
+    #: request. 1 (the default) turns batching off. A batch counts numbers x parts
+    #: against the pace, so it does not send a campaign faster, and an OTP can wait behind
+    #: it (up to numbers x parts / rate seconds); keep it off unless fewer 8028 requests
+    #: matter more than OTP delay.
+    batch_max_recipients: int = 1
 
     def __post_init__(self) -> None:
         if self.batch_size <= 0 or self.max_attempts <= 0 or self.max_rate_waits < 0:
             raise ValueError("worker limits must be positive")
+        if not 1 <= self.batch_max_recipients <= MAX_BATCH_RECIPIENTS:
+            raise ValueError(f"batch_max_recipients must be 1 to {MAX_BATCH_RECIPIENTS}")
         zero = timedelta(0)
         if self.lease_safety_margin <= zero or self.max_rate_wait <= zero:
             raise ValueError("timing settings must be positive")
@@ -117,6 +152,9 @@ class CycleStats:
     rate_limited_abandoned: int = 0
     late_start_not_called: int = 0
     begin_uncertain: int = 0
+    #: Batched 8028 requests made, and the messages they carried.
+    batches: int = 0
+    batched_messages: int = 0
     outcomes: dict[str, int] = field(default_factory=dict)
 
 
@@ -153,15 +191,214 @@ class Worker:
             self._cfg.worker_id,
             now,
             self._cfg.lease,
-            self._cfg.batch_size,
+            max(self._cfg.batch_size, self._batch_limit()),
             channels=tuple(self._adapters),
             allow_broadcast=self._cfg.broadcast_enabled,
             aged_after=self._cfg.broadcast_max_wait,
         )
         stats.claimed = len(claims)
-        for claim in claims:
-            await self._dispatch(claim, stats)
+        done: set[uuid.UUID] = set()
+        for claim in claims:  # claim order (OTP first); a batch goes at its first message
+            if claim.message.id in done:
+                continue
+            group = self._batch_for(claim, claims, done)
+            if len(group) > 1:
+                await self._dispatch_batch(group, stats)
+            else:
+                await self._dispatch(claim, stats)
         return stats
+
+    # ----------------------------------------------------------------- batching
+
+    def _batch_limit(self) -> int:
+        """Batch size in use: 1 unless batching is on and the SMS adapter can batch."""
+        adapter = self._adapters.get(Channel.SMS)
+        if self._cfg.batch_max_recipients > 1 and isinstance(adapter, BatchAdapter):
+            return self._cfg.batch_max_recipients
+        return 1
+
+    @staticmethod
+    def _batchable(claim: Claim) -> bool:
+        return (
+            claim.message.channel is Channel.SMS
+            and claim.message.purpose in BATCH_PURPOSES
+            # A batch 8028 refused as too large is retried one message at a time.
+            and claim.message.provider_status != "http_413"
+        )
+
+    def _batch_for(self, claim: Claim, claims: list[Claim], done: set[uuid.UUID]) -> list[Claim]:
+        """The claims that go out with ``claim``: itself, plus (batching on) the other
+        not-yet-sent claims from the same caller, same purpose and exactly the same text,
+        up to ``batch_max_recipients``. Marks them all done."""
+        limit = self._batch_limit()
+        group = [claim]
+        if limit > 1 and self._batchable(claim):
+            key = (claim.message.caller_id, claim.message.purpose, claim.send_request.text)
+            for other in claims:
+                if len(group) >= limit:
+                    break
+                if (
+                    other is not claim
+                    and other.message.id not in done
+                    and self._batchable(other)
+                    and (other.message.caller_id, other.message.purpose, other.send_request.text)
+                    == key
+                ):
+                    group.append(other)
+        done.update(c.message.id for c in group)
+        return group
+
+    async def _dispatch_batch(self, group: list[Claim], stats: CycleStats) -> None:
+        adapter = self._adapters[Channel.SMS]
+        assert isinstance(adapter, BatchAdapter)
+        live: list[Claim] = []
+        now = self._clock()
+        for claim in group:
+            if self._expired(claim, now):
+                await self._expire(claim, now, stats)
+            else:
+                live.append(claim)
+        if len(live) <= 1:
+            for claim in live:
+                await self._dispatch(claim, stats)
+            return
+
+        deadline = min(self._deadline(c) for c in live)
+        begun: BatchBegun | None = None
+        waits_left = self._cfg.max_rate_waits
+        while True:
+            now = self._clock()  # fresh after every wait
+            for claim in [c for c in live if self._expired(c, now)]:
+                live.remove(claim)
+                await self._expire(claim, now, stats)
+            if not live or now >= deadline:
+                break
+            try:
+                started = await self._limiter.begin_batch_within_limit(
+                    self._repo, live, now, deadline=deadline
+                )
+            except DispatchNotAuthorized:  # provider scope unavailable: all held
+                stats.held += len(live)
+                return
+            if isinstance(started, BatchBegun):
+                begun = started
+                break
+            if isinstance(started, BeginInterrupted):
+                # Commit of 'sending' is uncertain for the whole batch: never call, never
+                # finish. Recovery settles it (unsent -> claimable, sending -> unknown).
+                stats.begin_uncertain += 1
+                return
+            if isinstance(started, DeadlineReached) or not self._worth_waiting(
+                started.wait, waits_left
+            ):
+                break
+            waits_left -= 1
+            await self._sleep(max(min(started.wait, self._cfg.max_rate_wait).total_seconds(), 0.0))
+        if begun is None:
+            for claim in live:
+                await self._release(claim, stats)
+            return
+
+        sending: list[Claim] = []
+        for claim, outcome in zip(live, begun.outcomes, strict=True):
+            if isinstance(outcome, int):
+                sending.append(claim)
+            elif isinstance(outcome, MessageExpired):
+                await self._expire(claim, self._clock(), stats)
+            elif isinstance(outcome, DispatchNotAuthorized):
+                stats.held += 1
+            else:
+                stats.lease_lost += 1
+        if not sending:
+            return
+
+        # Same final check as a single send, for the whole request.
+        call_at = self._clock()
+        elapsed = self._limiter.monotonic() - begun.mono_mark
+        late = elapsed > self._limiter.dispatch_tolerance.total_seconds()
+        if late or call_at >= deadline:
+            for claim in sending:
+                await self._finish_unsent(
+                    claim, call_at, expired=self._expired(claim, call_at), stats=stats
+                )
+            return
+        to_send: list[Claim] = []
+        for claim in sending:
+            if self._expired(claim, call_at):
+                await self._finish_unsent(claim, call_at, expired=True, stats=stats)
+            else:
+                to_send.append(claim)
+        if not to_send:
+            return
+
+        reserve = self._cfg.finish_reserve or timedelta(0)  # set in __post_init__
+        budget = (min(c.lease_expires_at for c in to_send) - call_at - reserve).total_seconds()
+        requests = [c.send_request for c in to_send]
+        results: list[ProviderResult]
+        try:
+            results = await asyncio.wait_for(
+                adapter.send_batch([r for r in requests if isinstance(r, SmsSendRequest)]),
+                timeout=budget,
+            )
+            if len(results) != len(to_send):
+                raise ValueError("one result per request expected")
+        except TimeoutError:
+            # The request may have reached 8028: every message in it is ambiguous.
+            at = self._clock()
+            results = [
+                ProviderResult(
+                    outcome=ProviderOutcome.UNKNOWN,
+                    provider=self._adapters[Channel.SMS].provider,
+                    provider_status="call_deadline",
+                    failure_code=FailureCode.TIMEOUT,
+                    started_at=call_at,
+                    finished_at=at,
+                    detail="provider call exceeded the lease deadline",
+                )
+            ] * len(to_send)
+        except Exception as exc:  # adapters never raise; stay conservative
+            at = self._clock()
+            results = [
+                ProviderResult(
+                    outcome=ProviderOutcome.UNKNOWN,
+                    provider=self._adapters[Channel.SMS].provider,
+                    provider_status="adapter_error",
+                    failure_code=FailureCode.INTERRUPTED,
+                    started_at=at,
+                    finished_at=at,
+                    detail=f"unexpected {type(exc).__name__}",
+                )
+            ] * len(to_send)
+        stats.dispatched += len(to_send)
+        stats.batches += 1
+        stats.batched_messages += len(to_send)
+        for claim, result in zip(to_send, results, strict=True):
+            await self._finish(claim, result, stats)
+
+    def _worth_waiting(self, wait: timedelta, waits_left: int) -> bool:
+        """Wait for a rate slot only when it can open within the waits still allowed;
+        otherwise give the claim back now rather than hold its lease."""
+        return waits_left > 0 and wait <= self._cfg.max_rate_wait * waits_left
+
+    async def _release(self, claim: Claim, stats: CycleStats) -> None:
+        """Never began an attempt: provably unsent. Give the claim back so the message is
+        claimable again at once, in priority order; otherwise a newer message could
+        overtake it until the lease lapsed. If the release fails, the lease lapses as
+        before (recover_stale clears it)."""
+        mid = claim.message.id
+        if self._expired(claim, self._clock()):
+            await self._expire(claim, self._clock(), stats)
+            return
+        stats.rate_limited_abandoned += 1
+        try:
+            await self._repo.release_claim(claim, self._clock())
+        except (SQLAlchemyError, OSError, TimeoutError) as exc:
+            log.warning(
+                "claim release failed; lease will lapse (message_id=%s error_type=%s)",
+                mid,
+                type(exc).__name__,
+            )
+        log.info("rate limited; claim released (message_id=%s)", mid)
 
     async def run_forever(
         self,
@@ -224,7 +461,7 @@ class Worker:
 
         deadline = self._deadline(claim)
         begun: Begun | None = None
-        for _ in range(self._cfg.max_rate_waits + 1):
+        for tried in range(self._cfg.max_rate_waits + 1):
             now = self._clock()  # fresh after every wait
             if self._expired(claim, now):
                 await self._expire(claim, now, stats)
@@ -258,28 +495,14 @@ class Worker:
                     # in-flight begin); if 'sending' was committed it raises LeaseLost.
                     await self._expire(claim, self._clock(), stats)
                 return
-            if isinstance(started, DeadlineReached):
+            if isinstance(started, DeadlineReached) or not self._worth_waiting(
+                started.wait, self._cfg.max_rate_waits - tried
+            ):
                 break
             wait = min(started.wait, self._cfg.max_rate_wait)
             await self._sleep(max(wait.total_seconds(), 0.0))
         if begun is None:
-            if self._expired(claim, self._clock()):
-                await self._expire(claim, self._clock(), stats)
-                return
-            # Never began an attempt: provably unsent. Give the claim back so the
-            # message is claimable again at once, in priority order; otherwise a
-            # newer message could overtake it until the lease lapsed. If the release
-            # fails, the lease lapses as before (recover_stale clears it).
-            stats.rate_limited_abandoned += 1
-            try:
-                await self._repo.release_claim(claim, self._clock())
-            except (SQLAlchemyError, OSError, TimeoutError) as exc:
-                log.warning(
-                    "claim release failed; lease will lapse (message_id=%s error_type=%s)",
-                    mid,
-                    type(exc).__name__,
-                )
-            log.info("rate limited; claim released (message_id=%s)", mid)
+            await self._release(claim, stats)
             return
 
         # Re-check current timing after begin, immediately before the provider call. If
@@ -406,4 +629,4 @@ class Worker:
         return result.finished_at + self._cfg.backoff[idx]
 
 
-__all__ = ["CycleStats", "Worker", "WorkerConfig"]
+__all__ = ["BATCH_PURPOSES", "BatchAdapter", "CycleStats", "Worker", "WorkerConfig"]

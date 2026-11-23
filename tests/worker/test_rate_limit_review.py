@@ -345,7 +345,7 @@ async def test_workers_with_skewed_clocks_share_one_bound(
     assert len(sms_a.calls) + len(sms_b.calls) == 2
 
 
-async def test_window_boundary_includes_dispatch_tolerance(
+async def test_window_boundary_is_one_true_window(
     engine: AsyncEngine,
     sf: async_sessionmaker[AsyncSession],
     keys: Keys,
@@ -374,24 +374,25 @@ async def test_window_boundary_includes_dispatch_tolerance(
 
     t1 = T0 + timedelta(milliseconds=999)
     assert isinstance(await at(c1, t1), Begun)
-    # Just past one window, but inside window + 2 x tolerance: still denied.
-    denied = await at(c2, t1 + timedelta(milliseconds=1090))
+    # A true rate: the next start is allowed exactly one window later (the earlier count
+    # over window + 2 x tolerance is gone), not a millisecond before.
+    denied = await at(c2, t1 + timedelta(milliseconds=999))
     assert isinstance(denied, RateLimited)
-    assert denied.retry_at == t1 + timedelta(milliseconds=1100)
-    assert isinstance(await at(c2, t1 + timedelta(milliseconds=1100)), Begun)
+    assert denied.retry_at == t1 + timedelta(milliseconds=1000)
+    assert isinstance(await at(c2, t1 + timedelta(milliseconds=1000)), Begun)
     # Contention across the boundary: c3 starts waiting before the boundary while another
     # process holds the lock; once it gets the lock it is judged at its FRESH time.
     await external_lock.execute(text("SELECT pg_advisory_lock(:c, 1)"), {"c": RATE_LOCK_CLASS})
     await external_lock.commit()
-    clk.now = t1 + timedelta(milliseconds=2150)  # c2's slot frees at t1 + 2200 ms
+    clk.now = t1 + timedelta(milliseconds=1950)  # c2's slot frees at t1 + 2000 ms
     task = asyncio.create_task(limiter.begin_within_limit(repo, c3, clk.now))
     await asyncio.sleep(0.05)
     assert not task.done()
-    clk.now = t1 + timedelta(milliseconds=2200)  # time passes while waiting
+    clk.now = t1 + timedelta(milliseconds=2000)  # time passes while waiting
     await external_lock.execute(text("SELECT pg_advisory_unlock_all()"))
     await external_lock.commit()
     out = await asyncio.wait_for(task, 5)
-    assert isinstance(out, Begun) and out.begin_time >= t1 + timedelta(milliseconds=2200)
+    assert isinstance(out, Begun) and out.begin_time >= t1 + timedelta(milliseconds=2000)
 
 
 async def test_lock_wait_is_bounded_by_otp_expiry(
@@ -528,7 +529,13 @@ async def test_actual_provider_call_times_respect_shared_limit(
             break
         clock.advance(minutes=3)
     assert set(sms.counter) == ids and max(sms.counter.values()) == 1
-    assert max_in_any_window(await call_times(sms), timedelta(seconds=1)) <= 3
+    # Recorded starts: never more than 3 in any 1 s. A call may follow its start by up to
+    # the dispatch tolerance (50 ms here), so call times are checked over 1 s minus it.
+    async with engine.connect() as conn:
+        starts = list((await conn.execute(select(message_attempts.c.started_at))).scalars())
+    assert max_in_any_window(starts, timedelta(seconds=1)) <= 3
+    window = timedelta(seconds=1) - timedelta(milliseconds=50)
+    assert max_in_any_window(await call_times(sms), window) <= 3
 
 
 async def test_database_time_source_is_used_for_the_shared_bound(

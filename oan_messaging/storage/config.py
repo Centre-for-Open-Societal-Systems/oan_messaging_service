@@ -55,8 +55,11 @@ class StorageSettings(BaseSettings):
     broadcast_max_wait_seconds: int = Field(default=180, gt=0)
     #: SMS sent to 8028 per second across all workers (operator capacity 2-5/s), and the
     #: slots of each second only an OTP may use.
+    #: Counted per SMS part (a 3-part SMS is 3).
     sms_rate_per_second: int = Field(default=4, gt=0)
     sms_otp_reserve: int = Field(default=1, ge=0)
+    #: 8028 batching: broadcast/alert numbers with the same text per request; 1 = off.
+    sms_batch_max_recipients: int = Field(default=1, ge=1, le=100)
     #: How often the cleanup component rebuilds the statistics snapshot (GET /api/v1/charts).
     stats_refresh_seconds: int = Field(default=900, gt=0)
 

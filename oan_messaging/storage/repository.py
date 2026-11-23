@@ -90,6 +90,7 @@ from oan_messaging.contracts import (
     mask_chat_id,
     mask_recipient,
     recipient_match_deadline,
+    sms_parts,
     submission_channel,
 )
 from oan_messaging.storage.crypto import ContentCipher, EncryptedContent, KeyringError
@@ -119,6 +120,31 @@ class BeginProgress:
     """Set by ``begin_attempt``: ``commit_sent`` is true once COMMIT may have been issued."""
 
     commit_sent: bool = False
+
+
+@dataclass(frozen=True)
+class Reservation:
+    """What a rate reservation (``reserve`` hook) decided inside the begin transaction.
+
+    ``at`` is the shared effective time: it is the attempt's ``started_at`` and the time
+    the lease and expiry are checked against. ``pace_total_until`` / ``pace_bulk_until``
+    are the pace debt of a batch bigger than one window; they are written on every attempt
+    row the transaction inserts (worker/rate_limit.py reads them back)."""
+
+    at: datetime
+    pace_total_until: datetime | None = None
+    pace_bulk_until: datetime | None = None
+
+
+def attempt_units(request: SendRequest) -> int:
+    """Pace units one attempt uses: its SMS parts (an SMS of 3 parts is 3), Telegram 1."""
+    if isinstance(request, SmsSendRequest):
+        return sms_parts(request.text)
+    return 1
+
+
+#: A ``reserve`` hook may return a plain time (no ledger) or a ``Reservation``.
+ReserveHook = Callable[[AsyncConnection], Awaitable[datetime | Reservation]]
 
 #: Advisory lock key coordinating key retirement with key use ("OANK").
 KEY_LOCK_ID = 0x4F414E4B
@@ -593,13 +619,138 @@ class PostgresMessageRepository:
                 )
         return claims
 
+    async def _gate_and_lock_callers(
+        self, s: AsyncSession, channel: Channel, caller_ids: Sequence[str], now: datetime
+    ) -> None:
+        """Check the provider scope and lock the caller rows (FOR SHARE), in that order."""
+        # An absent row means the scope was never restricted (finish creates it).
+        gate = (
+            (
+                await s.execute(
+                    select(dispatch_controls)
+                    .where(dispatch_controls.c.channel == channel.value)
+                    .with_for_update(read=True)
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if gate is not None and (
+            gate["suspended"] or (gate["cooldown_until"] and gate["cooldown_until"] > now)
+        ):
+            raise DispatchNotAuthorized("provider scope unavailable")
+        await s.execute(
+            select(callers.c.caller_id)
+            .where(callers.c.caller_id.in_(sorted(set(caller_ids))))
+            .order_by(callers.c.caller_id)
+            .with_for_update(read=True)
+        )
+
+    async def _begin_row(
+        self,
+        s: AsyncSession,
+        claim: Claim,
+        at: datetime,
+        units: int,
+        reservation: Reservation | None,
+    ) -> int | None:
+        """``sending`` + attempt row in one statement; None when the update did not match."""
+        mid = claim.message.id
+        authorized = (
+            select(callers.c.caller_id)
+            .where(callers.c.caller_id == messages.c.caller_id, dispatch_authorized())
+            .exists()
+        )
+        began = (
+            update(messages)
+            .where(
+                messages.c.id == mid,
+                messages.c.lease_token == claim.claim_token,
+                messages.c.status == MessageStatus.ACCEPTED.value,
+                messages.c.lease_expires_at > at,
+                or_(messages.c.expires_at.is_(None), messages.c.expires_at > at),
+                authorized,
+            )
+            .values(
+                status=MessageStatus.SENDING.value,
+                attempts=messages.c.attempts + 1,
+                last_attempt_at=at,
+                updated_at=at,
+            )
+            .returning(messages.c.attempts, messages.c.lease_owner)
+            .cte("began")
+        )
+        tz = message_attempts.c.started_at.type
+        # One round trip: state change and attempt row together (the attempt row
+        # exists exactly when the update matched).
+        insert_attempt = (
+            message_attempts.insert()
+            .from_select(
+                [
+                    "message_id",
+                    "attempt_no",
+                    "claim_token",
+                    "worker_id",
+                    "started_at",
+                    "units",
+                    "pace_total_until",
+                    "pace_bulk_until",
+                ],
+                select(
+                    literal(mid, message_attempts.c.message_id.type),
+                    began.c.attempts,
+                    literal(claim.claim_token, message_attempts.c.claim_token.type),
+                    began.c.lease_owner,
+                    literal(at, tz),
+                    literal(units, message_attempts.c.units.type),
+                    literal(None if reservation is None else reservation.pace_total_until, tz),
+                    literal(None if reservation is None else reservation.pace_bulk_until, tz),
+                ),
+            )
+            .add_cte(began)
+            .returning(message_attempts.c.attempt_no)
+        )
+        got = (await s.execute(insert_attempt)).first()
+        return None if got is None else int(got[0])
+
+    async def _not_begun(self, s: AsyncSession, claim: Claim, at: datetime) -> Exception:
+        """Why ``_begin_row`` did not match: ``LeaseLost`` or ``MessageExpired`` (nothing
+        changed), or ``DispatchNotAuthorized`` after releasing the lease (the message is
+        held: accepted and unclaimable, binding and content intact)."""
+        mid = claim.message.id
+        row = await self._get_row(s, mid, lock=True)
+        if (
+            row is None
+            or row["lease_token"] != claim.claim_token
+            or row["status"] != MessageStatus.ACCEPTED.value
+        ):
+            return LeaseLost("claim no longer owns the message")
+        if row["expires_at"] is not None and row["expires_at"] <= at:
+            return MessageExpired("message expired before the provider call")
+        if row["lease_expires_at"] is None or row["lease_expires_at"] <= at:
+            return LeaseLost("claim lease expired")
+        await s.execute(
+            update(messages)
+            .where(messages.c.id == mid, messages.c.lease_token == claim.claim_token)
+            .values(lease_token=None, lease_owner=None, lease_expires_at=None)
+        )
+        log.info("dispatch held: caller not authorized (message_id=%s)", mid)
+        return DispatchNotAuthorized("caller is not authorized to dispatch this message")
+
+    @staticmethod
+    def _reservation(value: datetime | Reservation | None) -> Reservation | None:
+        if value is None:
+            return None
+        return value if isinstance(value, Reservation) else Reservation(at=value)
+
     async def begin_attempt(
         self,
         claim: Claim,
         now: datetime,
         *,
-        reserve: Callable[[AsyncConnection], Awaitable[datetime]] | None = None,
+        reserve: ReserveHook | None = None,
         progress: BeginProgress | None = None,
+        units: int | None = None,
     ) -> int:
         """The dispatch authorization boundary. In one transaction: check the provider
         scope, lock the caller row (FOR SHARE, so a concurrent permission change waits until
@@ -608,111 +759,80 @@ class PostgresMessageRepository:
 
         ``reserve`` (optional) is the provider rate reservation (MSG-07b, F-03). It runs in
         THIS transaction, after the scope and caller locks and immediately before the state
-        change, and returns the shared effective time used for the lease and expiry checks
-        and as ``started_at``. If it raises, the transaction rolls back and nothing began.
-        ``progress.commit_sent`` becomes true immediately before COMMIT is issued, so an
-        interruption before that point provably committed nothing.
+        change. It returns the shared effective time (or a ``Reservation`` carrying it and
+        the pace ledger), used for the lease and expiry checks and as ``started_at``. If it
+        raises, the transaction rolls back and nothing began. ``progress.commit_sent``
+        becomes true immediately before COMMIT is issued, so an interruption before that
+        point provably committed nothing. ``units`` defaults to the SMS parts of the text.
 
         Raises ``LeaseLost``, ``MessageExpired`` or ``DispatchNotAuthorized``; the last
         releases the lease and leaves the message accepted (held, binding and content kept).
         """
-        mid = claim.message.id
-        unauthorized = False
+        held: Exception | None = None
         attempt = 0
+        used = attempt_units(claim.send_request) if units is None else units
         async with self._sf() as s, s.begin():
-            # An absent row means the scope was never restricted (finish creates it).
-            gate = (
-                (
-                    await s.execute(
-                        select(dispatch_controls)
-                        .where(dispatch_controls.c.channel == claim.message.channel.value)
-                        .with_for_update(read=True)
-                    )
-                )
-                .mappings()
-                .first()
+            await self._gate_and_lock_callers(
+                s, claim.message.channel, [claim.message.caller_id], now
             )
-            if gate is not None and (
-                gate["suspended"] or (gate["cooldown_until"] and gate["cooldown_until"] > now)
-            ):
-                raise DispatchNotAuthorized("provider scope unavailable")
-            await s.execute(
-                select(callers.c.caller_id)
-                .where(callers.c.caller_id == claim.message.caller_id)
-                .with_for_update(read=True)
-            )
+            reservation = None
             if reserve is not None:
-                now = await reserve(await s.connection())
-            authorized = (
-                select(callers.c.caller_id)
-                .where(callers.c.caller_id == messages.c.caller_id, dispatch_authorized())
-                .exists()
-            )
-            began = (
-                update(messages)
-                .where(
-                    messages.c.id == mid,
-                    messages.c.lease_token == claim.claim_token,
-                    messages.c.status == MessageStatus.ACCEPTED.value,
-                    messages.c.lease_expires_at > now,
-                    or_(messages.c.expires_at.is_(None), messages.c.expires_at > now),
-                    authorized,
-                )
-                .values(
-                    status=MessageStatus.SENDING.value,
-                    attempts=messages.c.attempts + 1,
-                    last_attempt_at=now,
-                    updated_at=now,
-                )
-                .returning(messages.c.attempts, messages.c.lease_owner)
-                .cte("began")
-            )
-            # One round trip: state change and attempt row together (the attempt row
-            # exists exactly when the update matched).
-            insert_attempt = (
-                message_attempts.insert()
-                .from_select(
-                    ["message_id", "attempt_no", "claim_token", "worker_id", "started_at"],
-                    select(
-                        literal(mid, message_attempts.c.message_id.type),
-                        began.c.attempts,
-                        literal(claim.claim_token, message_attempts.c.claim_token.type),
-                        began.c.lease_owner,
-                        literal(now, message_attempts.c.started_at.type),
-                    ),
-                )
-                .add_cte(began)
-                .returning(message_attempts.c.attempt_no)
-            )
-            got = (await s.execute(insert_attempt)).first()
+                reservation = self._reservation(await reserve(await s.connection()))
+            at = now if reservation is None else reservation.at
+            got = await self._begin_row(s, claim, at, used, reservation)
             if got is None:
-                row = await self._get_row(s, mid, lock=True)
-                if (
-                    row is None
-                    or row["lease_token"] != claim.claim_token
-                    or row["status"] != MessageStatus.ACCEPTED.value
-                ):
-                    raise LeaseLost("claim no longer owns the message")
-                if row["expires_at"] is not None and row["expires_at"] <= now:
-                    raise MessageExpired("message expired before the provider call")
-                if row["lease_expires_at"] is None or row["lease_expires_at"] <= now:
-                    raise LeaseLost("claim lease expired")
-                # Unauthorized now: release the claim; the message is held (accepted and
-                # unclaimable) with binding and content intact until restored or expired.
-                await s.execute(
-                    update(messages)
-                    .where(messages.c.id == mid, messages.c.lease_token == claim.claim_token)
-                    .values(lease_token=None, lease_owner=None, lease_expires_at=None)
-                )
-                unauthorized = True
+                reason = await self._not_begun(s, claim, at)
+                if not isinstance(reason, DispatchNotAuthorized):
+                    raise reason  # rolls back: nothing began
+                held = reason  # the lease release commits
             else:
-                attempt = int(got[0])
+                attempt = got
                 if progress is not None:
                     progress.commit_sent = True  # COMMIT follows on block exit
-        if unauthorized:
-            log.info("dispatch held: caller not authorized (message_id=%s)", mid)
-            raise DispatchNotAuthorized("caller is not authorized to dispatch this message")
+        if held is not None:
+            raise held
         return attempt
+
+    async def begin_batch(
+        self,
+        claims: Sequence[Claim],
+        now: datetime,
+        *,
+        reserve: ReserveHook | None = None,
+        progress: BeginProgress | None = None,
+    ) -> list[int | Exception]:
+        """``begin_attempt`` for several claims of one channel that go out in ONE provider
+        request (8028 batching). One transaction: scope check, caller locks, ONE rate
+        reservation for the whole request, then ``sending`` + attempt row per claim.
+
+        Returns one entry per claim, in order: the attempt number, or the reason it did not
+        begin (``LeaseLost``, ``MessageExpired``, or ``DispatchNotAuthorized`` with the
+        lease released). One claim that does not begin never stops the others. A scope that
+        is unavailable raises ``DispatchNotAuthorized`` for the whole batch; a ``reserve``
+        that raises rolls everything back.
+        """
+        if not claims:
+            raise ValueError("begin_batch needs at least one claim")
+        channel = claims[0].message.channel
+        if any(c.message.channel is not channel for c in claims):
+            raise ValueError("a batch is one channel")
+        outcomes: list[int | Exception] = []
+        async with self._sf() as s, s.begin():
+            await self._gate_and_lock_callers(
+                s, channel, [c.message.caller_id for c in claims], now
+            )
+            reservation = None
+            if reserve is not None:
+                reservation = self._reservation(await reserve(await s.connection()))
+            at = now if reservation is None else reservation.at
+            for claim in claims:
+                got = await self._begin_row(
+                    s, claim, at, attempt_units(claim.send_request), reservation
+                )
+                outcomes.append(got if got is not None else await self._not_begun(s, claim, at))
+            if progress is not None and any(isinstance(o, int) for o in outcomes):
+                progress.commit_sent = True  # COMMIT follows on block exit
+        return outcomes
 
     async def provider_attempt_count(self, message_id: uuid.UUID) -> int:
         """Exclude durable local start failures from the provider retry budget."""

@@ -305,6 +305,7 @@ async def run(
                     lease=policy.worker_lease,
                     broadcast_enabled=settings.broadcast_enabled,
                     broadcast_max_wait=timedelta(seconds=settings.broadcast_max_wait_seconds),
+                    batch_max_recipients=settings.sms_batch_max_recipients,
                 ),
             )
             heartbeat = heartbeat_path()

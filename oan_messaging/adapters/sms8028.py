@@ -2,11 +2,16 @@
 
 See ``docs/8028-contract.md`` (summary of the supplied integration guide and its open items).
 
-Request (one recipient per call, so one message is one ``sms_id``)::
+Request (``send``: one recipient per call, so one message is one ``sms_id``)::
 
     POST {base_url}/sms/send-sms        Content-Type: application/json; charset=utf-8
     {"clientSecret": "...", "smstext": "...", "phonenums": ["09XXXXXXXX"],
      "pushdatetime": "YYYY-MM-DD HH:MM:SS"}            # now, in EAT (UTC+3)
+
+``send_batch`` puts several messages with the same text in one request (``phonenums`` has
+one number per message). 8028 answers with one ``data`` entry per number, in the order
+sent (guide v1.1 §5.2), and each message keeps its own ``sms_id``. The worker uses it only
+for broadcast and alert messages, and only when batching is turned on.
 
 Transport security:
 
@@ -20,10 +25,13 @@ Transport security:
 
 Outcome classification (``ProviderResult``):
 
-* ``sent``: a 2xx with ``success: true`` and exactly one ``data`` entry whose
-  ``phone_number`` is our recipient and whose ``sms_id`` is valid. The ``sms_id`` is
-  preserved. This means queued at 8028; it is not a delivery claim.
-* ``rejected``: definite refusals (400 invalid number or text, 413, other 4xx).
+* ``sent``: a 2xx with ``success: true`` and exactly one ``data`` entry per number, each
+  with that number as ``phone_number`` and a valid ``sms_id``. The ``sms_id`` is
+  preserved. This means queued at 8028; it is not a delivery claim. Guide v1.1 answers
+  201; the 12-page guide shows 200; any 2xx is read the same way.
+* ``rejected``: definite refusals (400 invalid number or text, 413, other 4xx). In a batch
+  a 413 is instead ``not_sent`` and retried: nothing was queued, and the worker then sends
+  those messages one by one (12-page guide §4.4, "split into smaller batches").
 * ``not_sent``: provably never queued. Connection refused (retryable). TLS or handshake
   failure, 401/403 credentials (not retryable).
 * ``not_sent``, retryable: HTTP 500. 8028 confirmed in writing (20 Nov 2026) that a 500
@@ -57,7 +65,7 @@ import os
 import re
 import ssl
 import stat
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -81,6 +89,7 @@ from oan_messaging.contracts import (
 )
 
 __all__ = [
+    "BATCH_TOO_LARGE",
     "DEFAULT_BASE_URL",
     "EAT",
     "ENV_PREFIX",
@@ -100,6 +109,9 @@ SEND_PATH = "/sms/send-sms"
 ENV_PREFIX = "OAN_MSG_SMS8028_"
 #: East Africa Time. Ethiopia observes no daylight saving time.
 EAT = timezone(timedelta(hours=3), "EAT")
+
+#: ``detail`` of a batch refused with 413: the worker sends these messages one by one.
+BATCH_TOO_LARGE = "batch too large; sent one by one on retry"
 
 _E164_RE = re.compile(r"^\+251([79][0-9]{8})$")
 _SMS_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
@@ -309,7 +321,8 @@ class Sms8028Adapter:
 
     # -- pre-flight -------------------------------------------------------------------
 
-    async def _send(self, request: SendRequest, started: datetime) -> ProviderResult:
+    def _preflight(self, request: SendRequest, started: datetime) -> ProviderResult | str:
+        """A result when the request must not go out, else the 09/07 domestic number."""
         if started.tzinfo is None or started.utcoffset() is None:
             return self._result(
                 started.replace(tzinfo=UTC),
@@ -361,19 +374,36 @@ class Sms8028Adapter:
                 failure=FailureCode.EXPIRED_BEFORE_SEND,
                 detail="expired before the provider call",
             )
+        return domestic
 
+    async def _send(self, request: SendRequest, started: datetime) -> ProviderResult:
+        checked = self._preflight(request, started)
+        if isinstance(checked, ProviderResult):
+            return checked
+        assert isinstance(request, SmsSendRequest)
+        response = await self._post(request.text, [checked], started)
+        if isinstance(response, ProviderResult):
+            return response
+        return self._classify(started, checked, response)
+
+    async def _post(
+        self, text: str, domestic: list[str], started: datetime
+    ) -> httpx.Response | ProviderResult:
+        """Exactly one HTTP request. A transport failure comes back as the result that
+        applies to every number in it."""
         body = json.dumps(
             {
                 "clientSecret": self._secret,
                 "smstext": text,
-                "phonenums": [domestic],
+                "phonenums": domestic,
+                # Guide v1.1 §5.4: a date before today is refused, so always send now.
                 "pushdatetime": eat_pushdatetime(started),
             },
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
         try:
-            response = await self._client.post(
+            return await self._client.post(
                 self._settings.endpoint,
                 content=body,
                 headers={
@@ -426,7 +456,126 @@ class Sms8028Adapter:
                 failure=FailureCode.MALFORMED_RESPONSE,
                 detail=f"transport {type(exc).__name__}",
             )
-        return self._classify(started, domestic, response)
+
+    # -- batching ---------------------------------------------------------------------
+
+    async def send_batch(self, requests: Sequence[SmsSendRequest]) -> list[ProviderResult]:
+        """One 8028 request for several messages with the same text (guide v1.1 §5.1-5.2).
+
+        Returns one result per request, in order. Requests that fail the pre-flight
+        checks get their own result and are left out of the call. The rest share one
+        request, so they share its outcome, except on success, where each gets its own
+        ``sms_id``. 8028 answers with one ``data`` entry per number, in the order sent
+        (§5.2); every entry must be there and match its number, otherwise nothing can be
+        proven and every message in the batch is ``unknown``. A 413 means nothing was
+        queued: the messages are retried, and the worker then sends them one by one.
+        Never raises."""
+        started = self._clock()
+        results: list[ProviderResult | None] = [None] * len(requests)
+        try:
+            outgoing: list[tuple[int, str]] = []
+            for i, request in enumerate(requests):
+                checked = self._preflight(request, started)
+                if isinstance(checked, ProviderResult):
+                    results[i] = checked
+                else:
+                    outgoing.append((i, checked))
+            texts = {requests[i].text for i, _ in outgoing}
+            if len(texts) > 1:
+                shared = self._result(
+                    started,
+                    ProviderOutcome.NOT_SENT,
+                    "batch_mixed_text",
+                    failure=FailureCode.PROVIDER_CONFIG,
+                    detail="a batch must have one text",
+                )
+                for i, _ in outgoing:
+                    results[i] = shared
+                outgoing = []
+            if outgoing:
+                numbers = [d for _, d in outgoing]
+                response = await self._post(requests[outgoing[0][0]].text, numbers, started)
+                if isinstance(response, ProviderResult):
+                    batch = [response] * len(outgoing)
+                else:
+                    batch = self._classify_batch(started, numbers, response)
+                for (i, _), result in zip(outgoing, batch, strict=True):
+                    results[i] = result
+        except Exception as exc:  # contract: never raise; never leak via str(exc)
+            failed = self._result(
+                started,
+                ProviderOutcome.UNKNOWN,
+                "adapter_error",
+                failure=FailureCode.INTERRUPTED,
+                detail=f"unexpected {type(exc).__name__}",
+            )
+            results = [r if r is not None else failed for r in results]
+        final = [r for r in results if r is not None]
+        assert len(final) == len(requests)
+        for request, result in zip(requests, final, strict=True):
+            log.info(
+                "sms8028 batch send message_id=%s attempt=%s batch_size=%s outcome=%s "
+                "provider_status=%s failure_code=%s",
+                request.message_id,
+                request.attempt,
+                len(requests),
+                result.outcome.value,
+                result.provider_status,
+                result.failure_code.value if result.failure_code else None,
+            )
+        return final
+
+    def _classify_batch(
+        self, started: datetime, numbers: list[str], response: httpx.Response
+    ) -> list[ProviderResult]:
+        status = response.status_code
+        tag = f"http_{status}"
+        if status == 413:
+            # 12-page guide §4.4: "split into smaller batches". Nothing was queued.
+            retry = self._result(
+                started,
+                ProviderOutcome.NOT_SENT,
+                tag,
+                failure=FailureCode.TEXT_REJECTED,
+                retryable=True,
+                detail=BATCH_TOO_LARGE,
+            )
+            return [retry] * len(numbers)
+        if not 200 <= status <= 299:
+            shared = self._classify(started, numbers[0], response)
+            return [shared] * len(numbers)
+        body = _json_object(response)
+
+        def malformed(detail: str) -> list[ProviderResult]:
+            # 8028 may have queued every number: never retry automatically.
+            unknown = self._result(
+                started,
+                ProviderOutcome.UNKNOWN,
+                tag,
+                failure=FailureCode.MALFORMED_RESPONSE,
+                detail=detail,
+            )
+            return [unknown] * len(numbers)
+
+        if body is None:
+            return malformed("success body is not a JSON object")
+        if body.get("success") is not True:
+            return malformed("success flag missing or not true")
+        data = body.get("data")
+        if not isinstance(data, list) or len(data) != len(numbers):
+            return malformed("expected one data entry per number")
+        ids: list[str] = []
+        for entry, number in zip(data, numbers, strict=True):
+            sms_id = _entry_sms_id(entry, number)
+            if sms_id is None:
+                return malformed("data entry missing, out of order or invalid")
+            ids.append(sms_id)
+        if len(set(ids)) != len(ids):
+            return malformed("sms_id repeated in one response")
+        return [
+            self._result(started, ProviderOutcome.SENT, tag, provider_message_id=sms_id)
+            for sms_id in ids
+        ]
 
     # -- response classification --------------------------------------------------------
 
@@ -532,22 +681,9 @@ class Sms8028Adapter:
         data = body.get("data")
         if not isinstance(data, list) or len(data) != 1:
             return malformed("expected exactly one data entry")
-        entry = data[0]
-        if not isinstance(entry, dict):
-            return malformed("data entry is not an object")
-        try:
-            returned = normalize_et_mobile(str(entry.get("phone_number", "")))
-        except ValueError:
-            return malformed("data entry phone_number invalid")
-        if returned != normalize_et_mobile(domestic):
-            return malformed("data entry is for a different recipient")
-        sms_id = entry.get("sms_id")
-        if isinstance(sms_id, bool):
-            return malformed("sms_id invalid")
-        if isinstance(sms_id, int) and sms_id > 0:
-            sms_id = str(sms_id)
-        if not isinstance(sms_id, str) or not _SMS_ID_RE.fullmatch(sms_id):
-            return malformed("sms_id missing or invalid")
+        sms_id = _entry_sms_id(data[0], domestic)
+        if sms_id is None:
+            return malformed("data entry invalid or for a different recipient")
         return self._result(started, ProviderOutcome.SENT, tag, provider_message_id=sms_id)
 
     # -- result construction ------------------------------------------------------------
@@ -579,6 +715,26 @@ class Sms8028Adapter:
             finished_at=max(finished, started),
             detail=None if detail is None else detail.replace(self._secret, "<redacted>")[:200],
         )
+
+
+def _entry_sms_id(entry: object, domestic: str) -> str | None:
+    """The ``sms_id`` of one ``data`` entry when it is for ``domestic``, else None."""
+    if not isinstance(entry, dict):
+        return None
+    try:
+        returned = normalize_et_mobile(str(entry.get("phone_number", "")))
+    except ValueError:
+        return None
+    if returned != normalize_et_mobile(domestic):
+        return None
+    sms_id = entry.get("sms_id")
+    if isinstance(sms_id, bool):
+        return None
+    if isinstance(sms_id, int) and sms_id > 0:
+        sms_id = str(sms_id)
+    if not isinstance(sms_id, str) or not _SMS_ID_RE.fullmatch(sms_id):
+        return None
+    return sms_id
 
 
 def _json_object(response: httpx.Response) -> dict[str, Any] | None:
