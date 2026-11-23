@@ -84,7 +84,7 @@ added next to SMS, never through it:
 3. **SMS code paths untouched.** No change to the SMS adapter, batching, SMS pacing,
    receipts, the connector or the API contract (3.2.0). The Telegram pace settings only
    change the Telegram limit.
-4. **Full existing suite passes unchanged.** No existing test is edited to make it pass.
+4. **Full existing suite passes unchanged.** No existing test is edited to make it pass. The only exception is chart tests that gain the new `channel` field (see Statistics below); they change no number.
 
 ## Statistics: all channels, labelled (decided 23 Nov 2026)
 
