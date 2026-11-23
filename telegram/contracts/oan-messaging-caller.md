@@ -85,3 +85,23 @@ added next to SMS, never through it:
    receipts, the connector or the API contract (3.2.0). The Telegram pace settings only
    change the Telegram limit.
 4. **Full existing suite passes unchanged.** No existing test is edited to make it pass.
+
+## Statistics: all channels, labelled (decided 23 Nov 2026)
+
+The one visible change to a delivered feature, chosen by the owner: charts keep counting
+every channel (as today), and **every row shows its channel**, so readers can tell SMS
+from Telegram once Telegram broadcasts start.
+
+- Every chart row that counts messages carries `channel` (`sms` or `telegram`). Where a
+  chart today has one row per key (for example, per caller or per purpose), it gets one row
+  per key and channel. The `channel` filter keeps working.
+- `msgKpis` and `msgTrend` give totals per channel as well as the overall total.
+- Broadcast campaigns (`stats_campaigns`) get a `channel` column (a migration). The
+  Telegram copy (`bc:<broadcast_id>:…`) and the SMS copy of one broadcast show as two
+  labelled rows.
+- This adds response fields, so the contract goes to **3.3.0** (minor; nothing removed or
+  renamed). Update `docs/openapi.yaml`, the statistics doc and
+  `docs/integrations/reports-central.md` (tell Reports Central that totals now include
+  Telegram and how to split them).
+- Existing chart tests keep passing; where an expected row gains `channel`, the test adds
+  the field and changes no number.
