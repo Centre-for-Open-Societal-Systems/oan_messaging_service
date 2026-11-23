@@ -26,7 +26,7 @@ single, auditable adapter layer. Each call has a contract test.
 | Data held | RapidPro keeps a contact per person (Telegram id and name), message history and downloaded media; staff chats hold copies of relayed questions | RP-D1: accepted. Database and media storage encrypted at rest; RapidPro web and API for operators only; retention configurable, **90 days by default**, for messages and media; media in Garage (§5.9); Stop deletes the contact, its staff-side copies and its media (§5.4). Each deletion is verified on the deployed version before release. |
 | Buttons | Menus are **reply-keyboard** buttons that send their label as a message. Inline buttons (`callback_query`) are not received. Messages cannot be edited, so old buttons stay on screen and Bot Services refuses stale taps politely. | RP-D2: accepted; courier is not patched |
 | Media to Development Agents | Sent as attachments, not forwards. The header shows the farmer's **registered name and Farmer ID** for a linked farmer (read from the beneficiary API at delivery time, not stored), or the **Telegram first name, marked "not verified"**, for an unlinked farmer. | RP-D4: accepted |
-| Operations | RapidPro is a larger platform (web, mailroom, courier, PostgreSQL, Valkey or Redis, Elasticsearch or OpenSearch, object storage) | RP-D6: **ATI DevOps** runs it self-hosted in the OAN cluster; the delivery team supplies Helm values, the pinned version, the backup and restore runbook (PostgreSQL and Garage, restore tested) and an upgrade checklist; contract tests are re-run before every upgrade |
+| Operations | RapidPro is a larger platform (web, mailroom, courier, PostgreSQL, Valkey or Redis, Elasticsearch or OpenSearch, object storage, and **DynamoDB or a compatible store**: required by the 26.3 line, found in the local stack on 24 Nov 2026, §5.2) | RP-D6: **ATI DevOps** runs it self-hosted in the OAN cluster; the delivery team supplies Helm values, the pinned version, the backup and restore runbook (PostgreSQL, Garage and DynamoDB, restore tested) and an upgrade checklist; contract tests are re-run before every upgrade |
 
 The custom router in Appendix A remains the fallback if RapidPro is later rejected; every
 module rule in chapter 6 applies to both.
@@ -55,8 +55,22 @@ Checked in courier `v26.3.82` and goflow source:
   Go v2 default chain; the web app uses the Django S3 storage backend with path-style
   addressing. Its "public" storage uploads with the `public-read` ACL.
 
-**Not verified** (deployed version unknown): whether the web app registers the webhook
-with a secret token; `/start` deep-link handling; courier's 429 back-off and reply
+Found while building the local stack (web `v26.3.222`, courier `v26.3.84`, mailroom
+`v26.3.156`; 24 Nov 2026):
+
+* **DynamoDB is required.** Courier, mailroom and the web app keep channel logs and
+  message history in DynamoDB (`DynamoEndpoint` in courier and mailroom, `migrate_dynamo`
+  in the web app). The cluster needs AWS DynamoDB or a compatible store; the local stack
+  uses `amazon/dynamodb-local`. This adds to RP-D6 (§8.2).
+* **The web app registers the Telegram webhook without a secret token**
+  (`temba/channels/types/telegram/type.py`). The §5.3 "Registration" step is therefore
+  always needed.
+* **Mailroom and courier refuse calls to private addresses** by default
+  (`DISALLOWED_NETWORKS`). Flows must reach Bot Services, so the list gets one narrow
+  hole for the Bot Services address only; every other private range stays blocked, and a
+  test checks that a flow webhook to another private address is refused.
+
+**Not verified** (deployed version unknown): `/start` deep-link handling; courier's 429 back-off and reply
 priority; message and media retention settings; RapidPro API rate limits; whether
 courier passes Telegram's own file URL (which contains the bot token) when relaying
 media; webhook log retention; deleting single messages through the API; how a flow
@@ -77,7 +91,7 @@ RV-01).
 | Isolation | Courier ingress only from the gateway. Courier egress only to `api.telegram.org:443` and RapidPro internals. RapidPro web and API only for staff (VPN and SSO). Mailroom has no external route. |
 | Secrets | Bot token per environment in courier's channel configuration (database encrypted, access restricted) **and** in OAN Messaging's Kubernetes Secret (it sends the broadcast copies); webhook secret in a Kubernetes Secret; one rotation runbook updates both places |
 | Monitoring | Gateway counts of rejected calls (alert on spikes); scheduled `getWebhookInfo` (`last_error_message`, `pending_update_count`) |
-| Registration | If RapidPro registers the webhook without the secret, DevOps re-registers it with the secret after the channel is added, and checks it after every channel change |
+| Registration | RapidPro registers the webhook without the secret (§5.2), so DevOps re-registers it with the secret after the channel is added, and checks it after every channel change |
 
 ## 5.4 Conversation rules (every module)
 

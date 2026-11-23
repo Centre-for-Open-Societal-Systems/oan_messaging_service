@@ -19,9 +19,14 @@
   RapidPro internals.
 * **OAN Bot Services:** egress to Master Data, Marketplace, the DA backend, the beneficiary
   API, the Auth service, Keycloak, Audit Manager, its PostgreSQL and the RapidPro API (and
-  Garage). No egress to OAN Messaging. Ingress: from mailroom (flow calls), the DA backend
+  Garage), and to the OAN Messaging API (Telegram broadcast copies, SMS-02). Ingress: from mailroom (flow calls), the DA backend
   (`/broadcasts`, Keycloak token) and Reports Central (chart API, credential to be agreed
   under ID-08), each on its own APISIX route.
+* **OAN Messaging `worker-telegram`:** egress to `api.telegram.org:443` and the database
+  only. The SMS worker keeps no Telegram egress.
+* **Mailroom and courier:** private addresses stay blocked (`DISALLOWED_NETWORKS`) except
+  the Bot Services address, for flow calls. Mailroom and courier also reach the DynamoDB
+  store.
 * On the Istio mesh, allow `api.telegram.org` by hostname (ServiceEntry, registry-only
   outbound) rather than by IP range.
 
@@ -34,7 +39,7 @@
 | Pause | `suspend --channel sms`, then `resume` | Stop the webhook (unregister or block at the gateway); updates queue at Telegram for up to 24 hours |
 | Credentials | `issue-credential`, `list-credentials`, `revoke-credentials` | Rotate the bot token (courier and OAN Messaging together) and webhook secret (runbook) |
 | Audit | Message metadata and receipts in OAN | Audit Manager events for every question created, delivered, replied, escalated and closed, and for every broadcast accepted (sender, scope, approval, recipient count) |
-| Restore | PostgreSQL backups; the cleanup sweeper resumes on recovery | RapidPro and OAN Bot Services backups |
+| Restore | PostgreSQL backups; the cleanup sweeper resumes on recovery | RapidPro (PostgreSQL, Garage, DynamoDB) and OAN Bot Services backups |
 
 **Rollout across versions (open):** the OAN Messaging chart runs migrations before an
 upgrade, but there is no phased compatibility matrix yet for upgrades that change
