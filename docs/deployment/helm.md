@@ -35,7 +35,8 @@ whose command is missing refuses to render instead of inventing one.
 |---|---|---|---|
 | `api` | Deployment ×2, ClusterIP Service, PDB, optional Ingress | enabled | database runtime URL, storage keys |
 | `migration` | Helm `pre-install,pre-upgrade` hook Job + hook ServiceAccount | enabled | **migration database URL only** |
-| `worker` | Deployment ×2 | off; on in `values-pilot.yaml` | storage keys, runtime URL, 8028 client secret, 8028 client certificate/key, Telegram tokens |
+| `worker` | Deployment ×2 | off; on in `values-pilot.yaml` | storage keys, runtime URL, 8028 client secret, 8028 client certificate/key; Telegram tokens only when `worker.channels` lists `telegram` |
+| `workerTelegram` | Deployment ×1 (component `worker-telegram`), its own ingress-deny and egress NetworkPolicies | off | storage keys, runtime URL, Telegram tokens. **No 8028 secret or certificate** |
 | `receipts` | Deployment ×2, L4 Service (LoadBalancer by default), PDB | off; on in `values-pilot.yaml` | storage keys, runtime URL, receipt server certificate/key, pinned 8028 certificates |
 | `cleanup` | CronJob (default) or Deployment ×1 | off; on in `values-pilot.yaml` | storage keys, runtime URL |
 | `statusCheck` | CronJob (`status --fail-on-alert`, every 5 minutes) | off; on in `values-pilot.yaml` | storage keys, runtime URL |
@@ -44,6 +45,25 @@ whose command is missing refuses to render instead of inventing one.
 Every component reads the storage keys because `StorageSettings` requires all of them at
 startup and the repository needs the cipher and fingerprinter. The 8028 and Telegram
 credentials reach the worker only; the receipt server key reaches the receipt ingress only.
+
+### 2.1 Telegram worker (SMS-02 revised, 23 November 2026)
+
+OAN Bot Services sends the Telegram copy of DA broadcasts through OAN Messaging. Telegram
+is added next to SMS, never through it:
+
+- `workerTelegram` is a second worker Deployment with `OAN_MSG_WORKER_CHANNELS=telegram`
+  and the bot tokens. It is off by default. The SMS worker keeps `channels: [sms]` and gets
+  no Telegram token, so a missing or wrong bot token can never stop SMS. Rendering fails if
+  both workers list `telegram`.
+- Pace: `workerTelegram.ratePerSecond` (`OAN_MSG_TELEGRAM_RATE_PER_SECOND`, default 20,
+  TG-08; refused above 30) and `workerTelegram.otpReserve` (`OAN_MSG_TELEGRAM_OTP_RESERVE`,
+  default 0: there is no Telegram OTP caller). Only the Telegram limit changes.
+- `workerTelegram.apiBaseUrl` (`OAN_MSG_TELEGRAM_API_BASE_URL`): empty uses
+  `https://api.telegram.org`; https origins only.
+- Link previews are always off on Telegram sends (`link_preview_options.is_disabled`).
+- `ci/regression/check_unchanged.py` proves `values.yaml`, `values-pilot.yaml` and
+  `ci/0[1-4]-*` render exactly as before (golden files in `ci/regression/golden/`), and
+  checks the Telegram worker with `ci/05-telegram-worker-values.yaml`.
 
 ## 3. Design decisions
 
@@ -352,6 +372,7 @@ template with the real commands).
 
 | Date | Check | Result |
 |---|---|---|
+| 24 November 2026 | `ci/run-regressions.sh` with the Telegram worker, helm v4, kubeconform | All pass; 4,159 render checks and 34 unchanged-render and Telegram worker checks, 0 failed |
 | 16 November 2026 | `ci/run-regressions.sh` (lint, render, secret scan, kubeconform) with helm v4.3.1, kubeconform v0.8.0 | All pass; **2,824 render checks**, 0 failed |
 | 15 November 2026 | Install on a throwaway local kind cluster with `values-pilot.yaml`: migration hook, grants, probes, cleanup Job, status CronJob (including a deliberate `suspended:sms` alert), worker pod replacement, `helm upgrade` to a new image | All pass |
 

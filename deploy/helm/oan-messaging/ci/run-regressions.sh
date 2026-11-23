@@ -55,4 +55,7 @@ echo "== snapshot script regression (files/tls_snapshot.py)"
 echo "== render regression"
 "$PYTHON" "$CHART/ci/regression/check_render.py"
 
+echo "== existing values render unchanged; Telegram worker checks"
+"$PYTHON" "$CHART/ci/regression/check_unchanged.py"
+
 echo "== all regression checks passed"

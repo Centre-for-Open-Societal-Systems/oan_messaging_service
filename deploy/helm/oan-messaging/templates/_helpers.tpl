@@ -210,7 +210,7 @@ args: v, name, min */}}
 "no limit" and max_overflow=-1 as "unlimited overflow", so both are refused here. */}}
 {{- define "oan.validateConnectionInputs" -}}
 {{- $v := .Values -}}
-{{- range $c := list "api" "worker" "receipts" "cleanup" -}}
+{{- range $c := list "api" "worker" "workerTelegram" "receipts" "cleanup" -}}
 {{- $cv := index $v $c -}}
 {{- include "oan.requireInt" (dict "v" $cv.pool.size "name" (printf "%s.pool.size" $c) "min" 1) -}}
 {{- include "oan.requireInt" (dict "v" $cv.pool.maxOverflow "name" (printf "%s.pool.maxOverflow" $c) "min" 0) -}}
@@ -220,6 +220,7 @@ args: v, name, min */}}
 {{- end -}}
 {{- end -}}
 {{- include "oan.requireInt" (dict "v" $v.worker.coordinationConnections "name" "worker.coordinationConnections" "min" 1) -}}
+{{- include "oan.requireInt" (dict "v" $v.workerTelegram.coordinationConnections "name" "workerTelegram.coordinationConnections" "min" 1) -}}
 {{- include "oan.requireInt" (dict "v" $v.database.connectionBudget "name" "database.connectionBudget" "min" 0) -}}
 {{- end -}}
 
@@ -228,7 +229,7 @@ worker rate limiter's coordination connections). args: root, component */}}
 {{- define "oan.perPod" -}}
 {{- $cv := index .root.Values .component -}}
 {{- $n := add $cv.pool.size $cv.pool.maxOverflow -}}
-{{- if eq .component "worker" -}}{{- $n = add $n $cv.coordinationConnections -}}{{- end -}}
+{{- if has .component (list "worker" "workerTelegram") -}}{{- $n = add $n $cv.coordinationConnections -}}{{- end -}}
 {{- $n -}}
 {{- end -}}
 
@@ -238,7 +239,7 @@ running. Cleanup: one CronJob pod (concurrencyPolicy Forbid) or one Deployment p
 {{- define "oan.connectionSteady" -}}
 {{- $v := .Values -}}
 {{- $t := 0 -}}
-{{- range $c := list "api" "worker" "receipts" -}}
+{{- range $c := list "api" "worker" "workerTelegram" "receipts" -}}
 {{- $cv := index $v $c -}}
 {{- if $cv.enabled -}}
 {{- $t = add $t (mul $cv.replicas (include "oan.perPod" (dict "root" $ "component" $c))) -}}
@@ -260,7 +261,7 @@ estimate from configured limits; nothing at runtime enforces it. */}}
 {{- define "oan.connectionRollout" -}}
 {{- $v := .Values -}}
 {{- $t := 0 -}}
-{{- range $c := list "api" "worker" "receipts" -}}
+{{- range $c := list "api" "worker" "workerTelegram" "receipts" -}}
 {{- $cv := index $v $c -}}
 {{- if $cv.enabled -}}
 {{- $pods := add (mul 2 $cv.replicas) $cv.rollout.maxSurge -}}

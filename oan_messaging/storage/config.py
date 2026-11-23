@@ -13,6 +13,9 @@ Environment variables (prefix ``OAN_MSG_``)::
     OAN_MSG_FINGERPRINT_KEY_CURRENT=k1
     OAN_MSG_CREDENTIAL_PEPPER=<base64 >=32 bytes>
     OAN_MSG_POLICY_DEDUP_WINDOW_SECONDS=2592000   (optional overrides, all policy fields)
+    OAN_MSG_TELEGRAM_RATE_PER_SECOND=20           (optional; 1-30)
+    OAN_MSG_TELEGRAM_OTP_RESERVE=0                (optional; below the rate)
+    OAN_MSG_TELEGRAM_API_BASE_URL=https://api.telegram.org   (optional; https only)
 """
 
 from __future__ import annotations
@@ -60,6 +63,13 @@ class StorageSettings(BaseSettings):
     sms_otp_reserve: int = Field(default=1, ge=0)
     #: 8028 batching: broadcast/alert numbers with the same text per request; 1 = off.
     sms_batch_max_recipients: int = Field(default=1, ge=1, le=100)
+    #: Telegram sends per second across all Telegram workers (TG-08: 20, Telegram allows
+    #: about 30 per bot), and the slots of each second only an OTP may use (none today:
+    #: there is no Telegram OTP caller). Only the Telegram limit; SMS pacing is separate.
+    telegram_rate_per_second: int = Field(default=20, gt=0, le=30)
+    telegram_otp_reserve: int = Field(default=0, ge=0)
+    #: Telegram Bot API origin (https only; the adapter checks it).
+    telegram_api_base_url: str = "https://api.telegram.org"
     #: How often the cleanup component rebuilds the statistics snapshot (GET /api/v1/charts).
     stats_refresh_seconds: int = Field(default=900, gt=0)
 

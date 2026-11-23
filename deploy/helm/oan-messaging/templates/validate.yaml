@@ -42,6 +42,39 @@ incoherent values. */ -}}
 {{- end -}}
 {{- end -}}
 
+{{- if $v.workerTelegram.enabled -}}
+{{- $wt := $v.workerTelegram -}}
+{{- $lease := int (default 120 $v.config.policy.workerLease) -}}
+{{- if lt (int $wt.terminationGracePeriodSeconds) $lease -}}
+{{- fail (printf "workerTelegram.terminationGracePeriodSeconds (%v) must be >= the worker lease (%v s)" $wt.terminationGracePeriodSeconds $lease) -}}
+{{- end -}}
+{{- if not $v.secrets.telegram.bots -}}
+{{- fail "workerTelegram.enabled needs secrets.telegram.bots" -}}
+{{- end -}}
+{{- $_ := required "secrets.telegram.existingSecret is required when workerTelegram is enabled" $v.secrets.telegram.existingSecret -}}
+{{- range $bot, $key := $v.secrets.telegram.bots -}}
+{{- if not (regexMatch "^[a-z0-9][a-z0-9_-]{0,63}$" $bot) -}}
+{{- fail (printf "secrets.telegram.bots: invalid bot key %q (must match ^[a-z0-9][a-z0-9_-]{0,63}$)" $bot) -}}
+{{- end -}}
+{{- end -}}
+{{- if and $v.worker.enabled (has "telegram" $v.worker.channels) -}}
+{{- fail "workerTelegram is enabled: keep worker.channels at [sms] so only one Deployment sends Telegram" -}}
+{{- end -}}
+{{- include "oan.requireInt" (dict "v" $wt.ratePerSecond "name" "workerTelegram.ratePerSecond" "min" 1) -}}
+{{- if gt (int $wt.ratePerSecond) 30 -}}
+{{- fail (printf "workerTelegram.ratePerSecond (%v) must be at most 30 (Telegram's limit per bot)" $wt.ratePerSecond) -}}
+{{- end -}}
+{{- include "oan.requireInt" (dict "v" $wt.otpReserve "name" "workerTelegram.otpReserve" "min" 0) -}}
+{{- if ge (int $wt.otpReserve) (int $wt.ratePerSecond) -}}
+{{- fail "workerTelegram.otpReserve must be below workerTelegram.ratePerSecond" -}}
+{{- end -}}
+{{- with $wt.apiBaseUrl -}}
+{{- if not (regexMatch "^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$" .) -}}
+{{- fail "workerTelegram.apiBaseUrl must be an https origin with no path or credentials" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- if $v.receipts.enabled -}}
 {{- $_ := required "secrets.receipts.serverTlsSecret is required when receipts are enabled" $v.secrets.receipts.serverTlsSecret -}}
 {{- if and (not $v.secrets.receipts.pinnedCertKeys) (not $v.secrets.receipts.clientCaKeys) -}}
