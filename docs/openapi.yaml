@@ -381,7 +381,10 @@ paths:
         per key and channel (the Telegram copy of a broadcast, `bc:<broadcast>`, and its
         SMS copy are two rows). `msgKpis` keeps one overall row and `msgTrend` one per
         period, labelled `channel: all`, each with `by_channel`: the same figures per
-        channel. The `channel` filter limits every chart, `msgCampaigns` included. Fields
+        channel, always listing both `sms` and `telegram` (zeros when there is no
+        traffic). With the `channel` filter, `all` means the filtered set and
+        `by_channel` lists only the filtered channels. The `channel` filter limits every
+        chart, `msgCampaigns` included. Fields
         were only added; nothing was removed or renamed.
       tags: [charts]
       parameters:

@@ -54,6 +54,9 @@ class RedactingFilter(logging.Filter):
         if record.exc_info:
             record.exc_text = clean(logging.Formatter().formatException(record.exc_info))
             record.exc_info = None
+        elif record.exc_text:
+            # Another filter (e.g. OAN Messaging's, in the same process) already rendered it.
+            record.exc_text = clean(record.exc_text)
         return True
 
 

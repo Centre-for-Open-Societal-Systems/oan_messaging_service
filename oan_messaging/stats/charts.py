@@ -17,7 +17,9 @@ own):
 Every row that counts messages carries ``channel`` (``sms`` or ``telegram``; contract
 3.3.0): charts with one row per key give one row per key and channel. ``msgKpis`` and
 ``msgTrend`` keep one overall row (``channel: "all"``, every channel counted) and add
-``by_channel``, the same figures per channel.
+``by_channel``, the same figures per channel: always both channels (zeros when there is
+no traffic); with the ``channel`` filter, "all" is the filtered set and ``by_channel``
+lists only the filtered channels.
 
 Rows are counts only. ``open`` = waiting or being sent; ``sent`` = with the gateway, no
 delivery report yet; the other columns are final statuses. Latency percentiles are read
@@ -217,12 +219,17 @@ def _channel_key(channel: str) -> int:
     return _CHANNEL_ORDER.get(channel, 99)
 
 
-def _by_channel(rows: list[Mapping[str, Any]], *, latency: bool = True) -> list[dict[str, Any]]:
-    """The same figures per channel, in channel order (sms, telegram)."""
+def _by_channel(
+    rows: list[Mapping[str, Any]], q: ChartQuery, *, latency: bool = True
+) -> list[dict[str, Any]]:
+    """The same figures per channel, in channel order (sms, telegram). A stable shape:
+    every channel is listed, with zeros when it had no traffic; with the ``channel``
+    filter, only the filtered channels."""
     groups = _grouped(rows, lambda r: r["channel"])
+    channels = q.channels or tuple(c.value for c in Channel)
     return [
-        {"channel": ch, **_figures(acc, latency=latency)}
-        for ch, acc in sorted(groups.items(), key=lambda kv: _channel_key(kv[0]))
+        {"channel": ch, **_figures(groups.get(ch, _empty()), latency=latency)}
+        for ch in sorted(channels, key=_channel_key)
     ]
 
 
@@ -234,7 +241,7 @@ async def chart_kpis(s: AsyncSession, q: ChartQuery, now: datetime) -> list[dict
     acc = _empty()
     for r in rows:
         _add(acc, r)
-    return [{"channel": ALL_CHANNELS, **_figures(acc), "by_channel": _by_channel(rows)}]
+    return [{"channel": ALL_CHANNELS, **_figures(acc), "by_channel": _by_channel(rows, q)}]
 
 
 async def chart_trend(s: AsyncSession, q: ChartQuery, now: datetime) -> list[dict[str, Any]]:
@@ -251,7 +258,7 @@ async def chart_trend(s: AsyncSession, q: ChartQuery, now: datetime) -> list[dic
                 "period": p.isoformat(),
                 "channel": ALL_CHANNELS,
                 **_figures(acc, latency=False),
-                "by_channel": _by_channel(rows, latency=False),
+                "by_channel": _by_channel(rows, q, latency=False),
             }
         )
     return out

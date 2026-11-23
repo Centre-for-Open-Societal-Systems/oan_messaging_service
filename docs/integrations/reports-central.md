@@ -27,6 +27,10 @@ Telegram.** Every chart counts every channel, and every row says which one:
 | `msgByCaller`, `msgByPurpose`, `msgFailureReasons`, `msgOtpLatency`, `msgCampaigns` | One row per key **and channel**; each row has `channel` | Group or pivot on `channel`; a report that wants one row per key sums the rows of that key |
 | `msgQueueNow`, `msgProviderHealth` | Unchanged (already per channel) | |
 
+`by_channel` always lists both `sms` and `telegram`, in that order, with zeros when a
+channel had no traffic, so its shape never changes. With the `channel` filter, the overall
+row (`channel: "all"`) counts only the filtered channels, and `by_channel` lists only them.
+
 Nothing was removed or renamed. A report that wants SMS only, as before, passes
 `channel=sms`. A broadcast sent on both channels appears in `msgCampaigns` twice: its
 Telegram copy as `bc:<broadcast>` (`channel: telegram`) and its SMS copy as

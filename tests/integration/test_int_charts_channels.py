@@ -127,8 +127,10 @@ async def test_sms_only_data_gives_the_same_numbers_as_before(h: Harness) -> Non
     assert await refresh(h.sf, h.clock())
     token = await h.caller("reports-central", stats_reader=True)
     [k] = await data(h, token, "msgKpis")
-    assert k["accepted"] == 2 and [r["channel"] for r in k["by_channel"]] == ["sms"]
-    assert k["by_channel"][0]["accepted"] == 2
+    # A stable shape: both channels, zeros for the one with no traffic.
+    assert k["accepted"] == 2 and [r["channel"] for r in k["by_channel"]] == ["sms", "telegram"]
+    assert [r["accepted"] for r in k["by_channel"]] == [2, 0]
+    assert k["by_channel"][1]["delivered_share"] is None
     assert [(r["caller"], r["channel"]) for r in await data(h, token, "msgByCaller")] == [
         ("da", "sms")
     ]
