@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import uuid
 
+from botenv import Bot, link_farmer
 from botsupport import Farmer, new_contact, rid, sensitive
-from conftest import Bot
-from test_flow_contacts import link_farmer
 
 from oan_bot_services import text_keys as tk
 

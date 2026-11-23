@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8100)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
-    logs.install()
+    logs.install_process()
     if args.component == "migrate":
         _migrate()
     elif args.component == "worker":

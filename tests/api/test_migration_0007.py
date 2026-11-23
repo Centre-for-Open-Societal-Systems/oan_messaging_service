@@ -3,9 +3,39 @@ that already holds campaign rows, and back."""
 
 from __future__ import annotations
 
+import secrets
+from pathlib import Path
+
 import psycopg
 from alembic import command
-from conftest import _libpq, alembic_config, create_database, drop_database
+from alembic.config import Config
+
+# Own helpers, never ``from conftest import`` (several conftest.py exist under tests/).
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _libpq(url: str) -> str:
+    return url.replace("postgresql+psycopg://", "postgresql://", 1)
+
+
+def alembic_config(url: str) -> Config:
+    cfg = Config(str(ROOT / "migrations" / "alembic.ini"))
+    cfg.attributes["database_url"] = url
+    cfg.attributes["skip_logging_config"] = True
+    return cfg
+
+
+def create_database(admin: str) -> str:
+    name = f"oan_msg_m7_{secrets.token_hex(4)}"
+    with psycopg.connect(_libpq(admin), autocommit=True) as conn:
+        conn.execute(f'CREATE DATABASE "{name}"')
+    return admin.rsplit("/", 1)[0] + "/" + name
+
+
+def drop_database(admin: str, url: str) -> None:
+    name = url.rsplit("/", 1)[1]
+    with psycopg.connect(_libpq(admin), autocommit=True) as conn:
+        conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
 
 ROW = (
     "INSERT INTO stats_campaigns (campaign, caller_id, purpose, first_at, last_at, recipients,"

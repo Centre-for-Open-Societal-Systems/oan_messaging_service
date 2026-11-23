@@ -3,8 +3,8 @@ chat id, Farmer ID, phone, code or token the tests used (§5.4)."""
 
 from __future__ import annotations
 
+from botenv import LOG_LINES
 from botsupport import SENSITIVE
-from conftest import LOG_LINES
 
 
 def test_no_personal_data_or_secret_in_any_log_line() -> None:

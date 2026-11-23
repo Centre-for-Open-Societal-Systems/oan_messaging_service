@@ -5,9 +5,8 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 
+from botenv import Bot, farmers_broadcast, link_farmer
 from botsupport import new_contact, rid
-from conftest import Bot
-from test_flow_contacts import link_farmer
 
 from oan_bot_services import jobs, worker
 
@@ -32,8 +31,6 @@ async def test_a_second_worker_waits_for_the_lock(bot: Bot) -> None:
 
 
 async def test_worker_sends_a_broadcast_end_to_end(bot: Bot) -> None:
-    from test_broadcasts import farmers_broadcast
-
     c = new_contact(700000501)
     await link_farmer(bot, c, "FR-TEST-0501", "+251900000501", "ET01010101")
     bid = (await farmers_broadcast(bot, "kebele", "ET01010101")).json()["broadcast_id"]
@@ -72,8 +69,6 @@ async def test_a_failing_job_does_not_stop_the_others(bot: Bot, monkeypatch) -> 
 
 
 async def test_purge_removes_what_is_past_its_keep_time(bot: Bot) -> None:
-    from test_broadcasts import farmers_broadcast
-
     c = new_contact(700000502)
     await link_farmer(bot, c, "FR-TEST-0502", "+251900000502", "ET01010101")
     await bot.flow("PUT", "/contacts/updates", {"request_id": rid(), "contact": c, "updates": "on"})

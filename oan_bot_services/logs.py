@@ -1,10 +1,13 @@
 """Log redaction for Bot Services (§5.4): no message text, phone number, chat id, Farmer ID,
 code or token in logs.
 
+``install`` touches only Bot Services' own loggers; ``install_process`` (the Bot Services
+process itself) also filters the root handlers and keeps ``httpx`` quiet.
+
 Code logs only ``contact_ref``, ids it generated and fixed words. This filter is the second
 line: it rewrites every record on the way out, replacing configured secrets, anything
 token-shaped, long digit runs (chat ids, phones, codes of 4+ digits) and Farmer-ID-shaped
-values. ``install`` adds it to the root handlers and the main library loggers.
+values.
 """
 
 from __future__ import annotations
@@ -61,24 +64,36 @@ class RedactingFilter(logging.Filter):
 
 
 FILTER = RedactingFilter()
-_LOGGERS = ("", "oan_bot_services", "httpx", "httpcore", "uvicorn", "uvicorn.error",
-            "uvicorn.access", "sqlalchemy", "alembic", "fastapi")
+PACKAGE = "oan_bot_services"
 
 
 def install(*secrets: str) -> None:
+    """Register secrets and filter Bot Services' own loggers. Changes nothing outside
+    ``oan_bot_services`` (safe when the package is imported next to other code)."""
     with _LOCK:
         _SECRETS.update(s for s in secrets if s)
-    # httpx logs every request URL at INFO; a beneficiary URL carries the Farmer ID.
+    logger = logging.getLogger(PACKAGE)
+    if FILTER not in logger.filters:
+        logger.addFilter(FILTER)
+
+
+def install_process() -> None:
+    """For a Bot Services process only (``python -m oan_bot_services``, the API factory):
+    filter every root handler, and keep ``httpx`` request logging off (a beneficiary URL
+    holds the Farmer ID). ``uvicorn.access`` is left alone: its formatter reads the
+    record's arguments, and Bot Services' paths carry no personal data."""
+    install()
+    root = logging.getLogger()
+    for handler in root.handlers:
+        if FILTER not in handler.filters:
+            handler.addFilter(FILTER)
     for name in ("httpx", "httpcore"):
-        if logging.getLogger(name).level < logging.WARNING:
+        if logging.getLogger(name).getEffectiveLevel() < logging.WARNING:
             logging.getLogger(name).setLevel(logging.WARNING)
-    for name in _LOGGERS:
+    for name in ("uvicorn.error", "sqlalchemy", "alembic"):
         logger = logging.getLogger(name)
         if FILTER not in logger.filters:
             logger.addFilter(FILTER)
-        for handler in logger.handlers:
-            if FILTER not in handler.filters:
-                handler.addFilter(FILTER)
 
 
 def get(name: str) -> logging.Logger:

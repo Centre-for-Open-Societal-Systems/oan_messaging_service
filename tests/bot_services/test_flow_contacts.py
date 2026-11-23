@@ -4,44 +4,11 @@ from __future__ import annotations
 
 import uuid
 
-from botsupport import Farmer, minutes, new_contact, rid, sensitive
-from conftest import Bot
+from botenv import Bot, farmers_broadcast, link_farmer
+from botsupport import minutes, new_contact, rid
 
 from oan_bot_services import keyed
 from oan_bot_services import text_keys as tk
-
-
-async def link_farmer(
-    bot: Bot,
-    contact: dict,
-    farmer_id: str = "FR-TEST-0001",
-    phone: str = "+251900000101",
-    kebele: str = "ET01010101",
-) -> None:
-    sensitive(farmer_id, phone, phone[-9:])
-    bot.up.farmers[farmer_id] = Farmer(farmer_id, phone, kebele)
-    r = await bot.flow(
-        "POST",
-        "/farmer-link/start",
-        {
-            "request_id": rid(),
-            "contact": contact,
-            "farmer_id": farmer_id,
-            "shared_contact": {"user_id": contact["telegram_id"], "phone_number": phone},
-        },
-    )
-    assert r.json()["result"] == "code_sent", r.json()
-    r = await bot.flow(
-        "POST",
-        "/farmer-link/verify",
-        {
-            "request_id": rid(),
-            "contact": contact,
-            "link_request_id": r.json()["link_request_id"],
-            "code": bot.up.otp_code,
-        },
-    )
-    assert r.json()["result"] == "linked", r.json()
 
 
 async def test_location_saves_kebele_and_returns_parents(bot: Bot) -> None:
@@ -244,8 +211,6 @@ async def test_stop_deletes_everything_in_order_and_records_each_step(bot: Bot) 
 
 
 async def test_stop_drops_broadcast_copies_not_yet_sent(bot: Bot) -> None:
-    from test_broadcasts import farmers_broadcast
-
     c = new_contact(700000113)
     await link_farmer(bot, c)
     r = await farmers_broadcast(bot, "woreda", "ET010101")

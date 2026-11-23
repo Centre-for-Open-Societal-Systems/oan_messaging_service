@@ -8,7 +8,7 @@ import secrets
 import psycopg
 from alembic import command
 from alembic.config import Config
-from conftest import ROOT, _libpq
+from botenv import ROOT, _libpq
 
 
 def test_upgrade_check_downgrade_upgrade() -> None:

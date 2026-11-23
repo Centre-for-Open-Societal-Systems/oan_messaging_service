@@ -7,28 +7,11 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
+from botenv import BODY, BROADCAST_TOKEN, Bot, farmers_broadcast, link_farmer
 from botsupport import new_contact, rid, sensitive
-from conftest import Bot
 from sqlalchemy import text
-from test_flow_contacts import link_farmer
 
 from oan_bot_services import broadcasts as bc
-
-BODY = {
-    "sender_ref": "COMMS-TEST-001",
-    "sender_role": "communications_officer",
-    "source": "Weather",
-    "source_reference": "da_broadcast:BC-1",
-    "title": "Heavy rain",
-    "body": "Expect heavy rain on Friday. Cover the harvest.",
-}
-
-
-async def farmers_broadcast(
-    bot: Bot, level: str, code: str, key: str | None = None, **over: Any
-) -> Any:
-    body = {"recipients": "farmers", "scope": {"level": level, "code": code}, **BODY, **over}
-    return await bot.bc("POST", "/broadcasts", key=key or str(uuid.uuid4()), body=body)
 
 
 async def seed_farmers(bot: Bot) -> dict[str, dict]:
@@ -92,8 +75,7 @@ async def test_progress_counts_and_telegram_recipients(bot: Bot) -> None:
     assert r.json() == {
         "broadcast_id": bid,
         "state": "running",
-        "counts": {"accepted": 3, "sending": 0, "sent": 0, "failed": 0, "expired": 0,
-                   "unknown": 0},
+        "counts": {"accepted": 3, "sending": 0, "sent": 0, "failed": 0, "expired": 0, "unknown": 0},
     }
     await bc.submit_pending(bot.deps)
     bot.up.settle("sent", chat_id=f["A1"]["telegram_id"])
@@ -282,7 +264,6 @@ async def test_auth_media_type_and_missing_key(bot: Bot) -> None:
     assert r.status_code == 422 and r.json()["errors"] == [
         {"field": "header.Idempotency-Key", "code": "required"}
     ]
-    from conftest import BROADCAST_TOKEN
 
     r = await bot.api.post(
         "/broadcasts",
@@ -329,7 +310,7 @@ async def test_upstream_down_gives_service_unavailable(bot: Bot) -> None:
         "/broadcasts",
         json=body,
         headers={
-            "Authorization": f"Bearer {__import__('conftest').BROADCAST_TOKEN}",
+            "Authorization": f"Bearer {BROADCAST_TOKEN}",
             "Idempotency-Key": "k5",
         },
     )

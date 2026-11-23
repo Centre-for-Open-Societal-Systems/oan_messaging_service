@@ -173,4 +173,38 @@ def test_redaction_filter_on_a_logger() -> None:
         logger.removeHandler(h)
     assert "900000101" not in records[0].getMessage()
     assert records[1].exc_text is not None and "700000999" not in records[1].exc_text
-    assert logging.getLogger("httpx").level >= logging.WARNING
+
+
+def test_install_changes_nothing_outside_bot_services() -> None:
+    before = (
+        logging.getLogger("httpx").level,
+        list(logging.getLogger("uvicorn.access").filters),
+        [list(h.filters) for h in logging.getLogger().handlers],
+    )
+    logs.install("another-secret-value")
+    after = (
+        logging.getLogger("httpx").level,
+        list(logging.getLogger("uvicorn.access").filters),
+        [list(h.filters) for h in logging.getLogger().handlers],
+    )
+    assert before == after
+    assert logs.FILTER in logging.getLogger("oan_bot_services").filters
+
+
+def test_install_process_quietens_httpx_and_filters_root_handlers() -> None:
+    root = logging.getLogger()
+    handler = logging.NullHandler()
+    root.addHandler(handler)
+    httpx_logger = logging.getLogger("httpx")
+    old_level = httpx_logger.level
+    try:
+        httpx_logger.setLevel(logging.NOTSET)
+        logs.install_process()
+        assert httpx_logger.level >= logging.WARNING
+        assert logs.FILTER in handler.filters
+        assert logs.FILTER not in logging.getLogger("uvicorn.access").filters
+    finally:
+        root.removeHandler(handler)
+        httpx_logger.setLevel(old_level)
+        for name in ("uvicorn.error", "sqlalchemy", "alembic"):
+            logging.getLogger(name).removeFilter(logs.FILTER)

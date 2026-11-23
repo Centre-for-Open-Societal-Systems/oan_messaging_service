@@ -75,6 +75,7 @@ def create_app(deps: Deps | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         if deps is None:
+            logs.install_process()
             app.state.deps = build(BotSettings())
         yield
         if deps is None:
