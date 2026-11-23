@@ -82,7 +82,7 @@ and then switched on kebele by kebele.
 | RP-D1 | RapidPro data held (19 Nov 2026) | Accepted: encryption at rest, operator-only access, retention configurable (default 90 days) for messages and media, Garage storage with a GET-only public media route, Stop deletes the contact, staff-side copies and media; verified on the deployed version before release (§5.1, §5.4, §5.9) |
 | RP-D2 | Buttons (19 Nov 2026) | Reply keyboards everywhere; courier not patched; stale taps refused politely |
 | RP-D4 | Farmer name for Development Agents (19 Nov 2026) | Linked farmer: registered name and Farmer ID, read at delivery and not stored; unlinked: Telegram first name marked "not verified" |
-| RP-D6 | Who runs RapidPro (19 Nov 2026) | ATI DevOps, self-hosted; the delivery team supplies Helm values, pinned version, backup and restore runbook and upgrade checklist |
+| RP-D6 | Who runs RapidPro (19 Nov 2026) | ATI DevOps, self-hosted; the delivery team supplies Helm values, pinned version, backup and restore runbook and upgrade checklist. **24 Nov 2026:** the 26.3 line also needs DynamoDB or a compatible store (§5.2); **ATI DevOps to confirm what they can run** |
 | TG-01 | Staff conversations (19 Nov 2026) | One bot. Staff messages pass through one thin staff flow to Bot Services, which holds all routing logic (§5.8) |
 | TG-02 | Texts (19 Nov 2026) | Bot Services returns text keys and parameters; every farmer and staff text is a RapidPro translation (§5.5) |
 | TG-03 | Roster changes (19 Nov 2026) | No roster copy; R1 and R4 read when needed, plus a sweep every 8 hours of kebeles with open questions |
