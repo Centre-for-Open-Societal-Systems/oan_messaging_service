@@ -85,6 +85,12 @@ added next to SMS, never through it:
    receipts, the connector or the API contract (3.2.0). The Telegram pace settings only
    change the Telegram limit.
 4. **Full existing suite passes unchanged.** No existing test is edited to make it pass. The only exception is chart tests that gain the new `channel` field (see Statistics below); they change no number.
+   Approved during worker 1b (23 Nov 2026), each changing one value and no behaviour:
+   - `tests/adapters/test_telegram.py` and `tests/integration/test_int_pipeline.py`: the
+     pinned `sendMessage` body gains `"link_preview_options": {"is_disabled": true}`;
+   - `tests/integration/test_int_process.py`: the expected migration head goes from
+     `"0006"` to `"0007"`.
+   In the end no chart test needed an edit.
 
 ## Statistics: all channels, labelled (decided 23 Nov 2026)
 
@@ -96,6 +102,12 @@ from Telegram once Telegram broadcasts start.
   chart today has one row per key (for example, per caller or per purpose), it gets one row
   per key and channel. The `channel` filter keeps working.
 - `msgKpis` and `msgTrend` give totals per channel as well as the overall total.
+  **Shape (decided 23 Nov 2026, built in PR #23):** `msgKpis` stays one row, labelled
+  `channel: "all"`, so Reports Central's `data[0]` is still the total. It adds `by_channel`,
+  which always lists `sms` and `telegram` (zeros when there is no traffic). With the
+  `channel` filter, "all" is the filtered set and `by_channel` lists only the filtered
+  channels. `msgTrend` has the same shape per period. Every other chart gives one row per
+  key and channel.
 - Broadcast campaigns (`stats_campaigns`) get a `channel` column (a migration). The
   Telegram copy (`bc:<broadcast_id>:…`) and the SMS copy of one broadcast show as two
   labelled rows.
