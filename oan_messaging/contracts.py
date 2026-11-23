@@ -64,7 +64,8 @@ from pydantic import (
     model_validator,
 )
 
-CONTRACT_VERSION = "3.2.0"
+#: 3.3.0 (24 Nov 2026): chart rows carry ``channel`` (fields only added).
+CONTRACT_VERSION = "3.3.0"
 
 # --------------------------------------------------------------------------------------
 # Enumerations

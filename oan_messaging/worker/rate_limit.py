@@ -191,8 +191,10 @@ class RateLimit:
 #: unit per second kept for OTP. Settings OAN_MSG_SMS_RATE_PER_SECOND and
 #: OAN_MSG_SMS_OTP_RESERVE override it.
 SMS_8028_DEFAULT = RateLimit(requests=4, window=timedelta(seconds=1), otp_reserve=1)
-#: Telegram Bot API guidance is about 30 messages/second per bot; stay below it.
-TELEGRAM_DEFAULT = RateLimit(requests=25, window=timedelta(seconds=1), otp_reserve=2)
+#: Telegram Bot API guidance is about 30 messages/second per bot; stay below it (TG-08:
+#: 20 a second). No slot is kept for OTP: there is no Telegram OTP caller. Settings
+#: OAN_MSG_TELEGRAM_RATE_PER_SECOND and OAN_MSG_TELEGRAM_OTP_RESERVE override it.
+TELEGRAM_DEFAULT = RateLimit(requests=20, window=timedelta(seconds=1), otp_reserve=0)
 
 
 @dataclass(frozen=True)

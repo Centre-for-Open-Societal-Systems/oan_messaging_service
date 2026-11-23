@@ -64,7 +64,7 @@ from oan_messaging.storage.repository import PostgresMessageRepository
 from oan_messaging.storage.schema import callers
 from oan_messaging.worker import SharedRateLimiter, Worker, WorkerConfig
 from oan_messaging.worker.cleanup import cleanup_forever, run_cleanup
-from oan_messaging.worker.rate_limit import TELEGRAM_DEFAULT, RateLimit, measure_dispatch_latency
+from oan_messaging.worker.rate_limit import RateLimit, measure_dispatch_latency
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +76,14 @@ def heartbeat_path() -> Path:
 def path_list(name: str) -> list[Path]:
     """Comma-separated file paths from an optional setting."""
     return [Path(p.strip()) for p in os.environ.get(name, "").split(",") if p.strip()]
+
+
+def telegram_limit(settings: StorageSettings) -> RateLimit:
+    """Telegram pace from configuration (TG-08). Refuses a reserve not below the rate."""
+    return RateLimit(
+        requests=settings.telegram_rate_per_second,
+        otp_reserve=settings.telegram_otp_reserve,
+    )
 
 
 def required(name: str) -> str:
@@ -272,7 +280,9 @@ async def run(
                     raise ValueError("enabled Telegram caller missing worker bot token")
                 install_redaction(*registry.secrets())
                 client = await stack.enter_async_context(telegram_client())
-                adapters[Channel.TELEGRAM] = TelegramAdapter(registry, client)
+                adapters[Channel.TELEGRAM] = TelegramAdapter(
+                    registry, client, api_base_url=settings.telegram_api_base_url
+                )
             limiter = SharedRateLimiter(
                 engine,
                 {
@@ -280,7 +290,7 @@ async def run(
                         requests=settings.sms_rate_per_second,
                         otp_reserve=settings.sms_otp_reserve,
                     ),
-                    Channel.TELEGRAM: TELEGRAM_DEFAULT,
+                    Channel.TELEGRAM: telegram_limit(settings),
                 },
             )
             stack.push_async_callback(limiter.aclose)

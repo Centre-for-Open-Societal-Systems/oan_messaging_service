@@ -208,6 +208,42 @@ worker:
       failureThreshold: 3
   extraEnv: []
 
+# ------------------------------------------------------------ Telegram worker
+# A second worker Deployment that sends only Telegram (SMS-02 revised: Bot Services sends
+# the Telegram copy of DA broadcasts through OAN Messaging). Off by default. It holds only
+# the Telegram bot tokens (secrets.telegram.bots) and no 8028 secret or certificate, so a
+# missing or wrong bot token can never stop SMS. Keep worker.channels at [sms] when this
+# is on: rendering fails if both workers list telegram.
+workerTelegram:
+  # values for an environment: command: [python, -m, oan_messaging.runtime, worker]
+  enabled: false
+  command: []
+  replicas: 1
+  # Must be >= the worker lease (ServicePolicy.worker_lease, default 120 s).
+  terminationGracePeriodSeconds: 150
+  pool: {size: 3, maxOverflow: 2}
+  rollout: {maxSurge: 1}   # maxUnavailable is fixed at 1
+  # Budget input ONLY, as worker.coordinationConnections. Integer >= 1.
+  coordinationConnections: 2
+  # Telegram sends per second across all Telegram workers (TG-08: 20; refused above 30),
+  # and the slots of each second kept for OTP (no Telegram OTP caller today: 0).
+  ratePerSecond: 20        # OAN_MSG_TELEGRAM_RATE_PER_SECOND
+  otpReserve: 0            # OAN_MSG_TELEGRAM_OTP_RESERVE
+  # Empty = code default (https://api.telegram.org). https only. OAN_MSG_TELEGRAM_API_BASE_URL.
+  apiBaseUrl: ""
+  resources:
+    requests: {cpu: 50m, memory: 160Mi}
+    limits: {cpu: 500m, memory: 384Mi}
+  probes:
+    liveness:
+      exec:
+        command: [python, -m, oan_messaging.runtime, check-heartbeat, --max-age, "90"]
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 3
+  extraEnv: []
+
 # ------------------------------------------------------------- receipt ingress
 receipts:
   # Off by default; values-pilot.yaml sets command: [python, -m, oan_messaging.runtime, receipts].
@@ -346,4 +382,4 @@ networkPolicy:
       podSelector: {matchLabels: {k8s-app: kube-dns}}
     postgres: {cidrs: [], port: 5432}
     sms8028: {cidrs: [], port: 3400}      # worker only; 8028 allow-lists our egress IP
-    telegram: {cidrs: [], port: 443}      # worker only
+    telegram: {cidrs: [], port: 443}      # worker and workerTelegram only

@@ -1,7 +1,7 @@
 """Telegram Bot API transport (MSG-04) implementing the frozen ``MessageAdapter`` contract.
 
-Scope: outbound plain-text ``sendMessage`` only. No inbound updates, webhooks, onboarding
-or conversations.
+Scope: outbound plain-text ``sendMessage`` only, with link previews off. No inbound
+updates, webhooks, onboarding or conversations.
 
 Recipients must have started the bot first. Telegram does not let a bot open a
 conversation with a user. Until the user sends ``/start`` (or any message) to the bot,
@@ -85,6 +85,8 @@ _TOKEN_SEARCH = re.compile(r"(?<![A-Za-z0-9])(bot)?[0-9]{5,16}:[A-Za-z0-9_-]{30,
 _REDACTED = "bot<redacted>"
 
 _CHAT_ID_LIMIT = 2**52
+#: Sent with every ``sendMessage`` (Bot API 7.0+ ``LinkPreviewOptions``).
+LINK_PREVIEW_OFF: dict[str, bool] = {"is_disabled": True}
 
 
 def redact_tokens(text: str, extra: tuple[str, ...] = ()) -> str:
@@ -277,7 +279,13 @@ class TelegramAdapter:
                                 detail="expired before the provider call")
 
         url = f"{self._base}/bot{token.get_secret_value()}/sendMessage"
-        payload: dict[str, Any] = {"chat_id": request.chat_id, "text": text}
+        # Link previews are always off (spec §6.8.4): a preview would fetch the linked
+        # page and show content OAN did not write.
+        payload: dict[str, Any] = {
+            "chat_id": request.chat_id,
+            "text": text,
+            "link_preview_options": LINK_PREVIEW_OFF,
+        }
         try:
             # Enforced per request, whatever the injected client's default: a redirect
             # must never forward the token-bearing URL or the message to another origin.

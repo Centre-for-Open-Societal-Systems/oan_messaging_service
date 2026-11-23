@@ -70,6 +70,8 @@ spec:
             - name: OAN_MSG_SMS8028_CA_CERT
               value: /run/oan-msg/tls/current/ca.crt
             {{- end }}
+            {{- /* Tokens only when this worker sends Telegram (SMS-only workers get none). */}}
+            {{- if has "telegram" .Values.worker.channels }}
             {{- range $bot, $key := $s.telegram.bots }}
             # Telegram bot "{{ $bot }}" (TelegramBotRegistry.from_environ)
             - name: OAN_MSG_TELEGRAM_BOT_TOKEN__{{ $bot | upper }}
@@ -77,6 +79,7 @@ spec:
                 secretKeyRef:
                   name: {{ $s.telegram.existingSecret }}
                   key: {{ $key }}
+            {{- end }}
             {{- end }}
             - name: OAN_MSG_WORKER_CHANNELS
               value: {{ join "," .Values.worker.channels | quote }}

@@ -1,0 +1,1606 @@
+---
+# Source: oan-messaging/templates/networkpolicy.yaml
+# API: ingress only from the configured peers (e.g. the gateway). Empty = none.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oan-msg-oan-messaging-api-ingress
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: oan-messaging
+      app.kubernetes.io/instance: oan-msg
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress: []
+
+---
+# Source: oan-messaging/templates/networkpolicy.yaml
+# Receipt ingress: ingress only from the 8028 callback CIDRs. Empty = none.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oan-msg-oan-messaging-receipts-ingress
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: receipts
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: oan-messaging
+      app.kubernetes.io/instance: oan-msg
+      app.kubernetes.io/component: receipts
+  policyTypes: [Ingress]
+  ingress: []
+
+---
+# Source: oan-messaging/templates/networkpolicy.yaml
+# Everything else in this release (worker, cleanup, migration, status check, statistics refresh): no ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oan-msg-oan-messaging-deny-ingress
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: internal
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app.kubernetes.io/instance, operator: In, values: ["oan-msg"]}
+      - {key: app.kubernetes.io/component, operator: In, values: [worker, cleanup, migration, status-check, stats]}
+  policyTypes: [Ingress]
+  ingress: []
+
+---
+# Source: oan-messaging/templates/api.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: oan-msg-oan-messaging-api
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oan-messaging
+      app.kubernetes.io/instance: oan-msg
+      app.kubernetes.io/component: api
+
+---
+# Source: oan-messaging/templates/receipts.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: oan-msg-oan-messaging-receipts
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: receipts
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oan-messaging
+      app.kubernetes.io/instance: oan-msg
+      app.kubernetes.io/component: receipts
+
+---
+# Source: oan-messaging/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oan-msg-oan-messaging
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: runtime
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+# The service never calls the Kubernetes API.
+automountServiceAccountToken: false
+
+---
+# Source: oan-messaging/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oan-msg-oan-messaging-config
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: config
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+data:
+  # Non-secret settings only. Credentials and keys come from existing Secrets.
+  OAN_MSG_CONTENT_KEY_CURRENT: "v1"
+  OAN_MSG_FINGERPRINT_KEY_CURRENT: "k1"
+  OAN_MSG_MAX_BODY_BYTES: "16384"
+  OAN_MSG_BROADCAST_ENABLED: "false"
+  OAN_MSG_BROADCAST_MAX_WAIT_SECONDS: "180"
+  OAN_MSG_SMS_RATE_PER_SECOND: "4"
+  OAN_MSG_SMS_OTP_RESERVE: "1"
+  OAN_MSG_SMS_BATCH_MAX_RECIPIENTS: "1"
+  OAN_MSG_STATS_REFRESH_SECONDS: "900"
+
+---
+# Source: oan-messaging/templates/api.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: oan-msg-oan-messaging-api
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+
+---
+# Source: oan-messaging/templates/receipts.yaml
+# L4 TCP pass-through: the load balancer forwards raw TCP, so the TLS handshake and the
+# client-certificate check happen inside the receipts process.
+apiVersion: v1
+kind: Service
+metadata:
+  name: oan-msg-oan-messaging-receipts
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: receipts
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  type: LoadBalancer
+  # Keeps the 8028 source IP visible to NetworkPolicy and the source-range filter.
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: receipts
+  ports:
+    - name: receipts
+      port: 443
+      targetPort: receipts
+      protocol: TCP
+
+---
+# Source: oan-messaging/templates/api.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oan-msg-oan-messaging-api
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oan-messaging
+      app.kubernetes.io/instance: oan-msg
+      app.kubernetes.io/component: api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: oan-messaging-0.1.0-draft.2
+        app.kubernetes.io/name: oan-messaging
+        app.kubernetes.io/instance: oan-msg
+        app.kubernetes.io/component: api
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: oan-messaging
+      annotations:
+        checksum/config: d45513c2c892543f6a81b7eb74a823655d22ea0901bb3a16c2744dd54231ceed
+    spec:
+      serviceAccountName: oan-msg-oan-messaging
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          command:
+            - uvicorn
+            - --factory
+            - oan_messaging.runtime.api:create_app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --timeout-graceful-shutdown
+            - "20"
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: oan-msg-oan-messaging-config
+          env:
+            - name: OAN_MSG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-database
+                  key: runtime-url
+            - name: OAN_MSG_CONTENT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-core
+                  key: content-keys
+            - name: OAN_MSG_FINGERPRINT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-core
+                  key: fingerprint-keys
+            - name: OAN_MSG_CREDENTIAL_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-core
+                  key: credential-pepper
+            - name: OAN_MSG_DB_POOL_SIZE
+              value: "5"
+            - name: OAN_MSG_DB_MAX_OVERFLOW
+              value: "5"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          startupProbe:
+            failureThreshold: 30
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 2
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 20
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            privileged: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+
+---
+# Source: oan-messaging/templates/receipts.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oan-msg-oan-messaging-receipts
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: receipts
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oan-messaging
+      app.kubernetes.io/instance: oan-msg
+      app.kubernetes.io/component: receipts
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: oan-messaging-0.1.0-draft.2
+        app.kubernetes.io/name: oan-messaging
+        app.kubernetes.io/instance: oan-msg
+        app.kubernetes.io/component: receipts
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: oan-messaging
+      annotations:
+        checksum/config: d45513c2c892543f6a81b7eb74a823655d22ea0901bb3a16c2744dd54231ceed
+    spec:
+      serviceAccountName: oan-msg-oan-messaging
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: snapshot-tls
+          image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -I
+            - -c
+            - |
+              """Publish a validated, 0600 snapshot of ONE Kubernetes Secret generation.
+              
+              Embedded verbatim by the chart (``python -I -c <this file>``) as the init container of
+              the worker and receipt-ingress pods. Standard library only.
+              
+              Why: Kubernetes projects a Secret volume as
+              
+                  <source>/..data -> ..<timestamp>     symlink, switched atomically on update
+                  <source>/..<timestamp>/<key>          the files of one generation
+                  <source>/<key> -> ..data/<key>
+              
+              Opening ``<source>/tls.crt`` and then ``<source>/tls.key`` can cross a generation switch
+              and return an old certificate with a new key. This script resolves ``..data`` once, reads
+              every file through that generation directory, confirms ``..data`` still points to it,
+              validates the set (the key matches the certificate; the CA, if any, parses), and only then
+              publishes it. A changed or vanished generation retries the WHOLE set; after the last
+              attempt it exits non-zero and publishes nothing. It never publishes a mixed or invalid set.
+              
+              Published layout in ``<dest>`` (a memory emptyDir):
+              
+                  <dest>/.gen-<id>/<files>     files 0600, directory 0700, owned by the running uid
+                  <dest>/current -> .gen-<id>  replaced atomically (os.replace of a symlink)
+              
+              Readers use ``<dest>/current/<file>``. A crash at any point leaves either the previous
+              complete set or none; leftovers are removed by the next successful run, so a rerun (pod
+              restart) is safe.
+              """
+              
+              from __future__ import annotations
+              
+              import argparse
+              import os
+              import secrets
+              import shutil
+              import ssl
+              import sys
+              import time
+              from collections.abc import Callable
+              
+              DATA_LINK = "..data"
+              CURRENT = "current"
+              
+              
+              class SnapshotError(Exception):
+                  """The snapshot could not be published. Messages never contain file contents."""
+              
+              
+              class GenerationChanged(SnapshotError):
+                  """``..data`` switched (or the generation vanished) while the set was being read."""
+              
+              
+              def _read_bytes(path: str) -> bytes:
+                  with open(path, "rb") as f:
+                      return f.read()
+              
+              
+              def resolve_generation(source: str) -> str:
+                  try:
+                      target = os.readlink(os.path.join(source, DATA_LINK))
+                  except OSError:
+                      raise SnapshotError(
+                          f"{source}/{DATA_LINK} is missing: not a Kubernetes Secret volume; refusing "
+                          "to read files without a pinned generation") from None
+                  if os.path.isabs(target) or os.sep in target or not target.startswith(".."):
+                      raise SnapshotError(f"unexpected {DATA_LINK} target")
+                  return target
+              
+              
+              def read_generation(source: str, names: list[str],
+                                  read: Callable[[str], bytes] = _read_bytes) -> tuple[str, dict[str, bytes]]:
+                  gen = resolve_generation(source)
+                  data: dict[str, bytes] = {}
+                  try:
+                      for name in names:
+                          data[name] = read(os.path.join(source, gen, name))
+                  except FileNotFoundError:
+                      raise GenerationChanged("generation vanished during read") from None
+                  if resolve_generation(source) != gen:
+                      raise GenerationChanged("generation switched during read")
+                  return gen, data
+              
+              
+              def _write_0600(path: str, content: bytes) -> None:
+                  fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                  try:
+                      os.write(fd, content)
+                  finally:
+                      os.close(fd)
+                  os.chmod(path, 0o600)
+              
+              
+              def _validate(gen_dir: str, cert: str, key: str, ca: str | None) -> None:
+                  key_path = os.path.join(gen_dir, key)
+                  if os.stat(key_path).st_mode & 0o077:
+                      raise SnapshotError("staged key is accessible by group or others")
+                  ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                  try:
+                      ctx.load_cert_chain(certfile=os.path.join(gen_dir, cert), keyfile=key_path)
+                  except (ssl.SSLError, OSError, ValueError):
+                      raise SnapshotError("certificate and key do not form a valid pair") from None
+                  if ca is not None:
+                      try:
+                          ctx.load_verify_locations(cafile=os.path.join(gen_dir, ca))
+                      except (ssl.SSLError, OSError, ValueError):
+                          raise SnapshotError("CA bundle could not be loaded") from None
+              
+              
+              def _cleanup(dest: str, keep: str | None) -> None:
+                  for entry in os.listdir(dest):
+                      path = os.path.join(dest, entry)
+                      if entry.startswith(".gen-") and entry != keep:
+                          shutil.rmtree(path, ignore_errors=True)
+                      elif entry.startswith(".current.tmp-"):
+                          try:
+                              os.unlink(path)
+                          except FileNotFoundError:
+                              pass
+              
+              
+              def publish_once(source: str, dest: str, cert: str, key: str, ca: str | None,
+                               read: Callable[[str], bytes] = _read_bytes) -> str:
+                  names = [cert, key] + ([ca] if ca else [])
+                  _gen, data = read_generation(source, names, read)
+                  gen_name = ".gen-" + secrets.token_hex(8)
+                  gen_dir = os.path.join(dest, gen_name)
+                  os.mkdir(gen_dir, 0o700)
+                  os.chmod(gen_dir, 0o700)
+                  try:
+                      for name, content in data.items():
+                          _write_0600(os.path.join(gen_dir, name), content)
+                      _validate(gen_dir, cert, key, ca)
+                      tmp = os.path.join(dest, ".current.tmp-" + secrets.token_hex(8))
+                      os.symlink(gen_name, tmp)
+                      os.replace(tmp, os.path.join(dest, CURRENT))  # atomic switch to the new set
+                  except BaseException:
+                      shutil.rmtree(gen_dir, ignore_errors=True)
+                      raise
+                  _cleanup(dest, keep=gen_name)
+                  return gen_name
+              
+              
+              def snapshot(source: str, dest: str, cert: str, key: str, ca: str | None = None, *,
+                           attempts: int = 5, delay: float = 1.0,
+                           read: Callable[[str], bytes] = _read_bytes,
+                           sleep: Callable[[float], None] = time.sleep) -> str:
+                  """Publish one validated generation, retrying the whole set; raise if impossible."""
+                  if attempts < 1:
+                      raise ValueError("attempts must be >= 1")
+                  last: SnapshotError | None = None
+                  for attempt in range(1, attempts + 1):
+                      try:
+                          return publish_once(source, dest, cert, key, ca, read)
+                      except SnapshotError as exc:
+                          last = exc
+                          if attempt < attempts:
+                              sleep(delay)
+                  raise SnapshotError(f"no consistent, valid set after {attempts} attempts: {last}")
+              
+              
+              def main(argv: list[str]) -> int:
+                  p = argparse.ArgumentParser(prog="tls_snapshot")
+                  p.add_argument("--source", required=True)
+                  p.add_argument("--dest", required=True)
+                  p.add_argument("--cert", required=True)
+                  p.add_argument("--key", required=True)
+                  p.add_argument("--ca")
+                  p.add_argument("--attempts", type=int, default=5)
+                  p.add_argument("--delay", type=float, default=1.0)
+                  args = p.parse_args(argv)
+                  try:
+                      gen = snapshot(args.source, args.dest, args.cert, args.key, args.ca,
+                                     attempts=args.attempts, delay=args.delay)
+                  except SnapshotError as exc:
+                      print(f"tls_snapshot: {exc}", file=sys.stderr)
+                      return 1
+                  print(f"tls_snapshot: published {gen}", file=sys.stderr)
+                  return 0
+              
+              
+              if __name__ == "__main__":
+                  sys.exit(main(sys.argv[1:]))
+              
+            - --source
+            - /secrets/tls-source
+            - --dest
+            - /run/oan-msg/tls
+            - --cert
+            - tls.crt
+            - --key
+            - tls.key
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            privileged: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          volumeMounts:
+            - name: tls-source
+              mountPath: /secrets/tls-source
+              readOnly: true
+            - name: tls-snapshot
+              mountPath: /run/oan-msg/tls
+      containers:
+        - name: receipts
+          image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          command:
+            - python
+            - -m
+            - oan_messaging.runtime
+            - receipts
+          # TLS (server certificate + required, pinned 8028 client certificate) is
+          # terminated by this process (receipts.ingress.build_server_ssl_context). It
+          # never reads a certificate from an HTTP header. Mounted files:
+          #   server certificate  /run/oan-msg/tls/current/tls.crt   (0600 snapshot)
+          #   server private key  /run/oan-msg/tls/current/tls.key   (0600 snapshot)
+          #   pinned 8028 certs   /etc/oan-msg/receipts/pins/<key>
+          # passed to the entrypoint through the OAN_MSG_RECEIPTS_* variables below.
+          ports:
+            - name: receipts
+              containerPort: 8443
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: oan-msg-oan-messaging-config
+          env:
+            - name: OAN_MSG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-database
+                  key: runtime-url
+            - name: OAN_MSG_CONTENT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-core
+                  key: content-keys
+            - name: OAN_MSG_FINGERPRINT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-core
+                  key: fingerprint-keys
+            - name: OAN_MSG_CREDENTIAL_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-core
+                  key: credential-pepper
+            - name: OAN_MSG_DB_POOL_SIZE
+              value: "2"
+            - name: OAN_MSG_DB_MAX_OVERFLOW
+              value: "2"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            # Read by `python -m oan_messaging.runtime receipts` (MSG-08).
+            - name: OAN_MSG_RECEIPTS_SERVER_CERT
+              value: /run/oan-msg/tls/current/tls.crt
+            - name: OAN_MSG_RECEIPTS_SERVER_KEY
+              value: /run/oan-msg/tls/current/tls.key
+            - name: OAN_MSG_RECEIPTS_PINNED_CERTS
+              value: "/etc/oan-msg/receipts/pins/current.pem"
+            - name: OAN_MSG_RECEIPTS_CLIENT_CA_CERTS
+              value: ""
+            - name: OAN_MSG_RECEIPTS_CALLBACK_SECRET
+              valueFrom:
+                secretKeyRef: {name: "oan-messaging-8028-callback", key: "callback-secret"}
+            - name: OAN_MSG_RECEIPTS_PATH
+              value: "/sms-status-receiver/v1/update-status"
+            - name: OAN_MSG_RECEIPTS_PORT
+              value: "8443"
+          readinessProbe:
+            failureThreshold: 3
+            periodSeconds: 15
+            tcpSocket:
+              port: receipts
+          livenessProbe:
+            failureThreshold: 3
+            periodSeconds: 30
+            tcpSocket:
+              port: receipts
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            privileged: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: tls-snapshot
+              mountPath: /run/oan-msg/tls
+              readOnly: true
+            - name: pins
+              mountPath: /etc/oan-msg/receipts/pins
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+        - name: pins
+          secret:
+            secretName: oan-messaging-8028-pins
+            defaultMode: 0444
+            items:
+              - {key: "current.pem", path: "current.pem"}
+        # Server certificate + key, mounted ONLY into the init container.
+        - name: tls-source
+          secret:
+            secretName: oan-messaging-receipts-server-tls
+            defaultMode: 0440
+            items:
+              - {key: tls.crt, path: tls.crt}
+              - {key: tls.key, path: tls.key}
+        - name: tls-snapshot
+          emptyDir: {medium: Memory, sizeLimit: 1Mi}
+
+---
+# Source: oan-messaging/templates/worker.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oan-msg-oan-messaging-worker
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oan-messaging
+      app.kubernetes.io/instance: oan-msg
+      app.kubernetes.io/component: worker
+  strategy:
+    # Workers coordinate through PostgreSQL leases and advisory locks, so old and new
+    # pods may overlap safely; stopping pods must finish or release in-flight claims.
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: 1}
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: oan-messaging-0.1.0-draft.2
+        app.kubernetes.io/name: oan-messaging
+        app.kubernetes.io/instance: oan-msg
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: oan-messaging
+      annotations:
+        checksum/config: d45513c2c892543f6a81b7eb74a823655d22ea0901bb3a16c2744dd54231ceed
+    spec:
+      serviceAccountName: oan-msg-oan-messaging
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # >= worker lease (checked at render time): an in-flight provider call must be
+      # able to finish and record its outcome after SIGTERM.
+      terminationGracePeriodSeconds: 150
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: snapshot-tls
+          image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -I
+            - -c
+            - |
+              """Publish a validated, 0600 snapshot of ONE Kubernetes Secret generation.
+              
+              Embedded verbatim by the chart (``python -I -c <this file>``) as the init container of
+              the worker and receipt-ingress pods. Standard library only.
+              
+              Why: Kubernetes projects a Secret volume as
+              
+                  <source>/..data -> ..<timestamp>     symlink, switched atomically on update
+                  <source>/..<timestamp>/<key>          the files of one generation
+                  <source>/<key> -> ..data/<key>
+              
+              Opening ``<source>/tls.crt`` and then ``<source>/tls.key`` can cross a generation switch
+              and return an old certificate with a new key. This script resolves ``..data`` once, reads
+              every file through that generation directory, confirms ``..data`` still points to it,
+              validates the set (the key matches the certificate; the CA, if any, parses), and only then
+              publishes it. A changed or vanished generation retries the WHOLE set; after the last
+              attempt it exits non-zero and publishes nothing. It never publishes a mixed or invalid set.
+              
+              Published layout in ``<dest>`` (a memory emptyDir):
+              
+                  <dest>/.gen-<id>/<files>     files 0600, directory 0700, owned by the running uid
+                  <dest>/current -> .gen-<id>  replaced atomically (os.replace of a symlink)
+              
+              Readers use ``<dest>/current/<file>``. A crash at any point leaves either the previous
+              complete set or none; leftovers are removed by the next successful run, so a rerun (pod
+              restart) is safe.
+              """
+              
+              from __future__ import annotations
+              
+              import argparse
+              import os
+              import secrets
+              import shutil
+              import ssl
+              import sys
+              import time
+              from collections.abc import Callable
+              
+              DATA_LINK = "..data"
+              CURRENT = "current"
+              
+              
+              class SnapshotError(Exception):
+                  """The snapshot could not be published. Messages never contain file contents."""
+              
+              
+              class GenerationChanged(SnapshotError):
+                  """``..data`` switched (or the generation vanished) while the set was being read."""
+              
+              
+              def _read_bytes(path: str) -> bytes:
+                  with open(path, "rb") as f:
+                      return f.read()
+              
+              
+              def resolve_generation(source: str) -> str:
+                  try:
+                      target = os.readlink(os.path.join(source, DATA_LINK))
+                  except OSError:
+                      raise SnapshotError(
+                          f"{source}/{DATA_LINK} is missing: not a Kubernetes Secret volume; refusing "
+                          "to read files without a pinned generation") from None
+                  if os.path.isabs(target) or os.sep in target or not target.startswith(".."):
+                      raise SnapshotError(f"unexpected {DATA_LINK} target")
+                  return target
+              
+              
+              def read_generation(source: str, names: list[str],
+                                  read: Callable[[str], bytes] = _read_bytes) -> tuple[str, dict[str, bytes]]:
+                  gen = resolve_generation(source)
+                  data: dict[str, bytes] = {}
+                  try:
+                      for name in names:
+                          data[name] = read(os.path.join(source, gen, name))
+                  except FileNotFoundError:
+                      raise GenerationChanged("generation vanished during read") from None
+                  if resolve_generation(source) != gen:
+                      raise GenerationChanged("generation switched during read")
+                  return gen, data
+              
+              
+              def _write_0600(path: str, content: bytes) -> None:
+                  fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                  try:
+                      os.write(fd, content)
+                  finally:
+                      os.close(fd)
+                  os.chmod(path, 0o600)
+              
+              
+              def _validate(gen_dir: str, cert: str, key: str, ca: str | None) -> None:
+                  key_path = os.path.join(gen_dir, key)
+                  if os.stat(key_path).st_mode & 0o077:
+                      raise SnapshotError("staged key is accessible by group or others")
+                  ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                  try:
+                      ctx.load_cert_chain(certfile=os.path.join(gen_dir, cert), keyfile=key_path)
+                  except (ssl.SSLError, OSError, ValueError):
+                      raise SnapshotError("certificate and key do not form a valid pair") from None
+                  if ca is not None:
+                      try:
+                          ctx.load_verify_locations(cafile=os.path.join(gen_dir, ca))
+                      except (ssl.SSLError, OSError, ValueError):
+                          raise SnapshotError("CA bundle could not be loaded") from None
+              
+              
+              def _cleanup(dest: str, keep: str | None) -> None:
+                  for entry in os.listdir(dest):
+                      path = os.path.join(dest, entry)
+                      if entry.startswith(".gen-") and entry != keep:
+                          shutil.rmtree(path, ignore_errors=True)
+                      elif entry.startswith(".current.tmp-"):
+                          try:
+                              os.unlink(path)
+                          except FileNotFoundError:
+                              pass
+              
+              
+              def publish_once(source: str, dest: str, cert: str, key: str, ca: str | None,
+                               read: Callable[[str], bytes] = _read_bytes) -> str:
+                  names = [cert, key] + ([ca] if ca else [])
+                  _gen, data = read_generation(source, names, read)
+                  gen_name = ".gen-" + secrets.token_hex(8)
+                  gen_dir = os.path.join(dest, gen_name)
+                  os.mkdir(gen_dir, 0o700)
+                  os.chmod(gen_dir, 0o700)
+                  try:
+                      for name, content in data.items():
+                          _write_0600(os.path.join(gen_dir, name), content)
+                      _validate(gen_dir, cert, key, ca)
+                      tmp = os.path.join(dest, ".current.tmp-" + secrets.token_hex(8))
+                      os.symlink(gen_name, tmp)
+                      os.replace(tmp, os.path.join(dest, CURRENT))  # atomic switch to the new set
+                  except BaseException:
+                      shutil.rmtree(gen_dir, ignore_errors=True)
+                      raise
+                  _cleanup(dest, keep=gen_name)
+                  return gen_name
+              
+              
+              def snapshot(source: str, dest: str, cert: str, key: str, ca: str | None = None, *,
+                           attempts: int = 5, delay: float = 1.0,
+                           read: Callable[[str], bytes] = _read_bytes,
+                           sleep: Callable[[float], None] = time.sleep) -> str:
+                  """Publish one validated generation, retrying the whole set; raise if impossible."""
+                  if attempts < 1:
+                      raise ValueError("attempts must be >= 1")
+                  last: SnapshotError | None = None
+                  for attempt in range(1, attempts + 1):
+                      try:
+                          return publish_once(source, dest, cert, key, ca, read)
+                      except SnapshotError as exc:
+                          last = exc
+                          if attempt < attempts:
+                              sleep(delay)
+                  raise SnapshotError(f"no consistent, valid set after {attempts} attempts: {last}")
+              
+              
+              def main(argv: list[str]) -> int:
+                  p = argparse.ArgumentParser(prog="tls_snapshot")
+                  p.add_argument("--source", required=True)
+                  p.add_argument("--dest", required=True)
+                  p.add_argument("--cert", required=True)
+                  p.add_argument("--key", required=True)
+                  p.add_argument("--ca")
+                  p.add_argument("--attempts", type=int, default=5)
+                  p.add_argument("--delay", type=float, default=1.0)
+                  args = p.parse_args(argv)
+                  try:
+                      gen = snapshot(args.source, args.dest, args.cert, args.key, args.ca,
+                                     attempts=args.attempts, delay=args.delay)
+                  except SnapshotError as exc:
+                      print(f"tls_snapshot: {exc}", file=sys.stderr)
+                      return 1
+                  print(f"tls_snapshot: published {gen}", file=sys.stderr)
+                  return 0
+              
+              
+              if __name__ == "__main__":
+                  sys.exit(main(sys.argv[1:]))
+              
+            - --source
+            - /secrets/tls-source
+            - --dest
+            - /run/oan-msg/tls
+            - --cert
+            - tls.crt
+            - --key
+            - tls.key
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            privileged: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          volumeMounts:
+            - name: tls-source
+              mountPath: /secrets/tls-source
+              readOnly: true
+            - name: tls-snapshot
+              mountPath: /run/oan-msg/tls
+      containers:
+        - name: worker
+          image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          command:
+            - python
+            - -m
+            - oan_messaging.runtime
+            - worker
+          envFrom:
+            - configMapRef:
+                name: oan-msg-oan-messaging-config
+          env:
+            - name: OAN_MSG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-database
+                  key: runtime-url
+            - name: OAN_MSG_CONTENT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-core
+                  key: content-keys
+            - name: OAN_MSG_FINGERPRINT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-core
+                  key: fingerprint-keys
+            - name: OAN_MSG_CREDENTIAL_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-core
+                  key: credential-pepper
+            - name: OAN_MSG_DB_POOL_SIZE
+              value: "5"
+            - name: OAN_MSG_DB_MAX_OVERFLOW
+              value: "5"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            # 8028 adapter (oan_messaging.adapters.sms8028.Sms8028Settings.from_environ)
+            - name: OAN_MSG_SMS8028_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-sms8028
+                  key: client-secret
+            - name: OAN_MSG_SMS8028_CLIENT_CERT
+              value: /run/oan-msg/tls/current/tls.crt
+            - name: OAN_MSG_SMS8028_CLIENT_KEY
+              value: /run/oan-msg/tls/current/tls.key
+            - name: OAN_MSG_WORKER_CHANNELS
+              value: "sms"
+            - name: OAN_MSG_WORKER_HEARTBEAT_FILE
+              value: /tmp/oan-msg-worker.alive
+          livenessProbe:
+            exec:
+              command:
+              - python
+              - -m
+              - oan_messaging.runtime
+              - check-heartbeat
+              - --max-age
+              - "90"
+            failureThreshold: 3
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            privileged: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: tls-snapshot
+              mountPath: /run/oan-msg/tls
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+        # 8028 client certificate + key (+ CA), mounted ONLY into the init container.
+        - name: tls-source
+          secret:
+            secretName: oan-messaging-sms8028-client-tls
+            defaultMode: 0440
+            items:
+              - {key: tls.crt, path: tls.crt}
+              - {key: tls.key, path: tls.key}
+        # 0600 snapshot owned by the pod uid; memory-backed, never on node disk.
+        - name: tls-snapshot
+          emptyDir: {medium: Memory, sizeLimit: 1Mi}
+
+---
+# Source: oan-messaging/templates/cleanup.yaml
+# One run_cleanup pass per schedule (recover_stale, then purge_due in bounded batches).
+# Every step is conditional SQL, so overlap is harmless; Forbid just avoids pile-ups.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: oan-msg-oan-messaging-cleanup
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: cleanup
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        helm.sh/chart: oan-messaging-0.1.0-draft.2
+        app.kubernetes.io/name: oan-messaging
+        app.kubernetes.io/instance: oan-msg
+        app.kubernetes.io/component: cleanup
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: oan-messaging
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            helm.sh/chart: oan-messaging-0.1.0-draft.2
+            app.kubernetes.io/name: oan-messaging
+            app.kubernetes.io/instance: oan-msg
+            app.kubernetes.io/component: cleanup
+            app.kubernetes.io/version: "0.1.0"
+            app.kubernetes.io/managed-by: Helm
+            app.kubernetes.io/part-of: oan-messaging
+        spec:
+          restartPolicy: Never
+          serviceAccountName: oan-msg-oan-messaging
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          terminationGracePeriodSeconds: 30
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: cleanup
+              image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+              imagePullPolicy: IfNotPresent
+              workingDir: /app
+              command:
+                - python
+                - -m
+                - oan_messaging.runtime
+                - cleanup
+              envFrom:
+                - configMapRef:
+                    name: oan-msg-oan-messaging-config
+              env:
+                - name: OAN_MSG_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-database
+                      key: runtime-url
+                - name: OAN_MSG_CONTENT_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: content-keys
+                - name: OAN_MSG_FINGERPRINT_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: fingerprint-keys
+                - name: OAN_MSG_CREDENTIAL_PEPPER
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: credential-pepper
+                - name: OAN_MSG_DB_POOL_SIZE
+                  value: "2"
+                - name: OAN_MSG_DB_MAX_OVERFLOW
+                  value: "0"
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                privileged: false
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {sizeLimit: 64Mi}
+
+---
+# Source: oan-messaging/templates/stats-refresh.yaml
+# Statistics refresh: one `stats-refresh` run per schedule rebuilds the snapshot behind
+# GET /api/v1/charts. A run that finds another in progress skips (database lock).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: oan-msg-oan-messaging-stats
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: stats
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        helm.sh/chart: oan-messaging-0.1.0-draft.2
+        app.kubernetes.io/name: oan-messaging
+        app.kubernetes.io/instance: oan-msg
+        app.kubernetes.io/component: stats
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: oan-messaging
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            helm.sh/chart: oan-messaging-0.1.0-draft.2
+            app.kubernetes.io/name: oan-messaging
+            app.kubernetes.io/instance: oan-msg
+            app.kubernetes.io/component: stats
+            app.kubernetes.io/version: "0.1.0"
+            app.kubernetes.io/managed-by: Helm
+            app.kubernetes.io/part-of: oan-messaging
+        spec:
+          restartPolicy: Never
+          serviceAccountName: oan-msg-oan-messaging
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: stats-refresh
+              image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+              imagePullPolicy: IfNotPresent
+              workingDir: /app
+              command:
+                - python
+                - -m
+                - oan_messaging.runtime
+                - stats-refresh
+              envFrom:
+                - configMapRef:
+                    name: oan-msg-oan-messaging-config
+              env:
+                - name: OAN_MSG_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-database
+                      key: runtime-url
+                - name: OAN_MSG_CONTENT_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: content-keys
+                - name: OAN_MSG_FINGERPRINT_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: fingerprint-keys
+                - name: OAN_MSG_CREDENTIAL_PEPPER
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: credential-pepper
+                - name: OAN_MSG_DB_POOL_SIZE
+                  value: "1"
+                - name: OAN_MSG_DB_MAX_OVERFLOW
+                  value: "0"
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                privileged: false
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {sizeLimit: 64Mi}
+
+---
+# Source: oan-messaging/templates/status-check.yaml
+# Alert check: one `status --fail-on-alert` run per schedule. Exit 2 (an active alert)
+# fails the Job; route failed Jobs of this CronJob to paging. Prints counts only.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: oan-msg-oan-messaging-status-check
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: status-check
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        helm.sh/chart: oan-messaging-0.1.0-draft.2
+        app.kubernetes.io/name: oan-messaging
+        app.kubernetes.io/instance: oan-msg
+        app.kubernetes.io/component: status-check
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: oan-messaging
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            helm.sh/chart: oan-messaging-0.1.0-draft.2
+            app.kubernetes.io/name: oan-messaging
+            app.kubernetes.io/instance: oan-msg
+            app.kubernetes.io/component: status-check
+            app.kubernetes.io/version: "0.1.0"
+            app.kubernetes.io/managed-by: Helm
+            app.kubernetes.io/part-of: oan-messaging
+        spec:
+          restartPolicy: Never
+          serviceAccountName: oan-msg-oan-messaging
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: status-check
+              image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+              imagePullPolicy: IfNotPresent
+              workingDir: /app
+              command:
+                - python
+                - -m
+                - oan_messaging.runtime
+                - status
+                - --fail-on-alert
+              envFrom:
+                - configMapRef:
+                    name: oan-msg-oan-messaging-config
+              env:
+                - name: OAN_MSG_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-database
+                      key: runtime-url
+                - name: OAN_MSG_CONTENT_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: content-keys
+                - name: OAN_MSG_FINGERPRINT_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: fingerprint-keys
+                - name: OAN_MSG_CREDENTIAL_PEPPER
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: credential-pepper
+                - name: OAN_MSG_DB_POOL_SIZE
+                  value: "1"
+                - name: OAN_MSG_DB_MAX_OVERFLOW
+                  value: "0"
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+              resources:
+                limits:
+                  cpu: 250m
+                  memory: 192Mi
+                requests:
+                  cpu: 20m
+                  memory: 96Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                privileged: false
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {sizeLimit: 16Mi}
+---
+# Source: oan-messaging/templates/migration-job.yaml
+# Hook resources run before the chart's normal resources exist (install) or alongside the
+# previous release's resources (upgrade), so the migration has its own hook ServiceAccount
+# and NetworkPolicy, and reads only the migration database URL (no storage keys, no
+# ConfigMap, no runtime credentials).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oan-msg-oan-messaging-migration
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+automountServiceAccountToken: false
+
+---
+# Source: oan-messaging/templates/migration-job.yaml
+# Serialized schema migration for THIS release: one Job, one pod, no parallelism, no
+# retries. On install it completes before Helm creates any workload. On upgrade the
+# previous release's workloads keep running during it, so migrations must be backward
+# compatible. Helm's release lock stops two operations on this release from running hooks
+# at once; it is NOT a database-wide lock (see docs/deployment/helm.md).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: oan-msg-oan-messaging-migration
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+    oan.coss/migration-network-mode: "unrestricted"
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: oan-messaging-0.1.0-draft.2
+        app.kubernetes.io/name: oan-messaging
+        app.kubernetes.io/instance: oan-msg
+        app.kubernetes.io/component: migration
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: oan-messaging
+    spec:
+      restartPolicy: Never
+      serviceAccountName: oan-msg-oan-messaging-migration
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          command:
+            - alembic
+            - -c
+            - migrations/alembic.ini
+            - upgrade
+            - head
+          env:
+            # Read by migrations/env.py.
+            - name: OAN_MSG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-database
+                  key: migration-url
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            privileged: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+

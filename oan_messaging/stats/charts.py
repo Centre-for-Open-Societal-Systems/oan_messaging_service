@@ -14,6 +14,13 @@ own):
 * ``granularity``: ``day`` (default), ``week`` (from Monday) or ``month``;
 * ``caller``, ``purpose``, ``channel``: comma-separated lists.
 
+Every row that counts messages carries ``channel`` (``sms`` or ``telegram``; contract
+3.3.0): charts with one row per key give one row per key and channel. ``msgKpis`` and
+``msgTrend`` keep one overall row (``channel: "all"``, every channel counted) and add
+``by_channel``, the same figures per channel: always both channels (zeros when there is
+no traffic); with the ``channel`` filter, "all" is the filtered set and ``by_channel``
+lists only the filtered channels.
+
 Rows are counts only. ``open`` = waiting or being sent; ``sent`` = with the gateway, no
 delivery report yet; the other columns are final statuses. Latency percentiles are read
 from histograms and given as the upper edge of their bucket, in seconds (86400 = a day or
@@ -61,6 +68,9 @@ CAMPAIGN_LIMIT = 200
 _CALLER_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 COUNTS = ("accepted", *STATUS_COLUMNS)
+#: Label of a row that counts every channel (msgKpis, msgTrend).
+ALL_CHANNELS = "all"
+_CHANNEL_ORDER = {c.value: i for i, c in enumerate(Channel)}
 
 
 class ChartQueryError(ValueError):
@@ -205,59 +215,101 @@ def _grouped(
     return groups
 
 
+def _channel_key(channel: str) -> int:
+    return _CHANNEL_ORDER.get(channel, 99)
+
+
+def _by_channel(
+    rows: list[Mapping[str, Any]], q: ChartQuery, *, latency: bool = True
+) -> list[dict[str, Any]]:
+    """The same figures per channel, in channel order (sms, telegram). A stable shape:
+    every channel is listed, with zeros when it had no traffic; with the ``channel``
+    filter, only the filtered channels."""
+    groups = _grouped(rows, lambda r: r["channel"])
+    channels = q.channels or tuple(c.value for c in Channel)
+    return [
+        {"channel": ch, **_figures(groups.get(ch, _empty()), latency=latency)}
+        for ch in sorted(channels, key=_channel_key)
+    ]
+
+
 # ----------------------------------------------------------------------------- charts
 
 
 async def chart_kpis(s: AsyncSession, q: ChartQuery, now: datetime) -> list[dict[str, Any]]:
+    rows = await _daily(s, q)
     acc = _empty()
-    for r in await _daily(s, q):
+    for r in rows:
         _add(acc, r)
-    return [_figures(acc)]
+    return [{"channel": ALL_CHANNELS, **_figures(acc), "by_channel": _by_channel(rows, q)}]
 
 
 async def chart_trend(s: AsyncSession, q: ChartQuery, now: datetime) -> list[dict[str, Any]]:
-    groups = _grouped(await _daily(s, q), lambda r: _period(r["day"], q.granularity))
-    return [
-        {"period": p.isoformat(), **_figures(acc, latency=False)}
-        for p, acc in sorted(groups.items())
-    ]
+    periods: dict[date, list[Mapping[str, Any]]] = {}
+    for r in await _daily(s, q):
+        periods.setdefault(_period(r["day"], q.granularity), []).append(r)
+    out = []
+    for p, rows in sorted(periods.items()):
+        acc = _empty()
+        for r in rows:
+            _add(acc, r)
+        out.append(
+            {
+                "period": p.isoformat(),
+                "channel": ALL_CHANNELS,
+                **_figures(acc, latency=False),
+                "by_channel": _by_channel(rows, q, latency=False),
+            }
+        )
+    return out
 
 
 async def chart_by_caller(s: AsyncSession, q: ChartQuery, now: datetime) -> list[dict[str, Any]]:
-    groups = _grouped(await _daily(s, q), lambda r: r["caller_id"])
-    rows = [{"caller": c, **_figures(acc)} for c, acc in groups.items()]
-    return sorted(rows, key=lambda r: (-r["accepted"], r["caller"]))
+    groups = _grouped(await _daily(s, q), lambda r: (r["caller_id"], r["channel"]))
+    rows = [{"caller": c, "channel": ch, **_figures(acc)} for (c, ch), acc in groups.items()]
+    return sorted(rows, key=lambda r: (-r["accepted"], r["caller"], _channel_key(r["channel"])))
 
 
 async def chart_by_purpose(s: AsyncSession, q: ChartQuery, now: datetime) -> list[dict[str, Any]]:
     order = {p.value: i for i, p in enumerate(Purpose)}
-    groups = _grouped(await _daily(s, q), lambda r: r["purpose"])
-    rows = [{"purpose": p, **_figures(acc)} for p, acc in groups.items()]
-    return sorted(rows, key=lambda r: order.get(r["purpose"], 99))
+    groups = _grouped(await _daily(s, q), lambda r: (r["purpose"], r["channel"]))
+    rows = [{"purpose": p, "channel": ch, **_figures(acc)} for (p, ch), acc in groups.items()]
+    return sorted(
+        rows, key=lambda r: (order.get(r["purpose"], 99), _channel_key(r["channel"]))
+    )
 
 
 async def chart_failure_reasons(
     s: AsyncSession, q: ChartQuery, now: datetime
 ) -> list[dict[str, Any]]:
+    """One row per failure code and channel; ``share`` is of all failures shown."""
+    t = stats_failures
     rows = await s.execute(
-        select(stats_failures.c.failure_code, func.sum(stats_failures.c.total).label("total"))
-        .where(and_(*_filters(stats_failures, q)))
-        .group_by(stats_failures.c.failure_code)
+        select(t.c.failure_code, t.c.channel, func.sum(t.c.total).label("total"))
+        .where(and_(*_filters(t, q)))
+        .group_by(t.c.failure_code, t.c.channel)
     )
-    data = [{"failure_code": r.failure_code, "total": int(r.total)} for r in rows]
+    data = [
+        {"failure_code": r.failure_code, "channel": r.channel, "total": int(r.total)}
+        for r in rows
+    ]
     grand = sum(r["total"] for r in data)
     for r in data:
         r["share"] = round(r["total"] / grand, 4) if grand else None
-    return sorted(data, key=lambda r: (-r["total"], r["failure_code"]))
+    return sorted(
+        data, key=lambda r: (-r["total"], r["failure_code"], _channel_key(r["channel"]))
+    )
 
 
 async def chart_otp_latency(s: AsyncSession, q: ChartQuery, now: datetime) -> list[dict[str, Any]]:
     groups = _grouped(
-        await _daily(s, q, purposes=("otp",)), lambda r: _period(r["day"], q.granularity)
+        await _daily(s, q, purposes=("otp",)),
+        lambda r: (_period(r["day"], q.granularity), r["channel"]),
     )
     return [
         {
             "period": p.isoformat(),
+            "channel": ch,
             "accepted": acc["accepted"],
             "sent_or_delivered": sum(acc["send_hist"]),
             "send_p50_s": percentile(acc["send_hist"], 0.5),
@@ -265,7 +317,9 @@ async def chart_otp_latency(s: AsyncSession, q: ChartQuery, now: datetime) -> li
             "deliver_p50_s": percentile(acc["deliver_hist"], 0.5),
             "deliver_p95_s": percentile(acc["deliver_hist"], 0.95),
         }
-        for p, acc in sorted(groups.items())
+        for (p, ch), acc in sorted(
+            groups.items(), key=lambda kv: (kv[0][0], _channel_key(kv[0][1]))
+        )
     ]
 
 
@@ -279,6 +333,8 @@ async def chart_campaigns(s: AsyncSession, q: ChartQuery, now: datetime) -> list
         where.append(t.c.caller_id.in_(q.callers))
     if q.purposes:
         where.append(t.c.purpose.in_(q.purposes))
+    if q.channels:
+        where.append(t.c.channel.in_(q.channels))
     rows = await s.execute(
         select(t).where(and_(*where)).order_by(t.c.first_at.desc()).limit(CAMPAIGN_LIMIT)
     )
@@ -289,6 +345,7 @@ async def chart_campaigns(s: AsyncSession, q: ChartQuery, now: datetime) -> list
                 "campaign": r["campaign"],
                 "caller": r["caller_id"],
                 "purpose": r["purpose"],
+                "channel": r["channel"],
                 "first_at": r["first_at"].isoformat(),
                 "last_at": r["last_at"].isoformat(),
                 "recipients": r["recipients"],

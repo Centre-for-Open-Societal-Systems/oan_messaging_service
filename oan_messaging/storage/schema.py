@@ -354,6 +354,8 @@ stats_campaigns = Table(
     Column("campaign", Text, nullable=False),
     Column("caller_id", Text, nullable=False),
     Column("purpose", Text, nullable=False),
+    #: ``sms`` or ``telegram`` (contract 3.3.0): the two copies of a broadcast are two rows.
+    Column("channel", Text, nullable=False, server_default=text("'sms'")),
     Column("first_at", TZ, nullable=False),
     Column("last_at", TZ, nullable=False),
     Column("recipients", Integer, nullable=False),
@@ -363,7 +365,9 @@ stats_campaigns = Table(
     Column("failed", Integer, nullable=False),
     Column("unknown", Integer, nullable=False),
     Column("expired", Integer, nullable=False),
-    PrimaryKeyConstraint("caller_id", "campaign", "purpose", name="pk_stats_campaigns"),
+    PrimaryKeyConstraint(
+        "caller_id", "campaign", "purpose", "channel", name="pk_stats_campaigns"
+    ),
 )
 
 stats_state = Table(

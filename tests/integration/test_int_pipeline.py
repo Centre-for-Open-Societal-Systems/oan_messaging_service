@@ -104,7 +104,8 @@ async def test_telegram_sent_is_never_delivered(h: Harness, certs: Certs) -> Non
     await h.worker().run_once()
     [call] = h.tg.calls
     assert h.tg.bot_of(call) == "grievance"
-    assert call.body == {"chat_id": 555000111, "text": "Grievance G-1 updated."}
+    assert call.body == {"chat_id": 555000111, "text": "Grievance G-1 updated.",
+                         "link_preview_options": {"is_disabled": True}}
     view = await h.status(token, mid)
     assert view["status"] == "sent" and view["final"] is False
     assert view["delivery_receipts_supported"] is False and "delivered_at" not in view

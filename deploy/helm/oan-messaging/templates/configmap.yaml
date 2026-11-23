@@ -1,4 +1,4 @@
-{{- if or .Values.api.enabled .Values.worker.enabled .Values.receipts.enabled .Values.cleanup.enabled }}
+{{- if or .Values.api.enabled .Values.worker.enabled .Values.workerTelegram.enabled .Values.receipts.enabled .Values.cleanup.enabled }}
 {{- $policyNames := dict "maxOtpTtl" "MAX_OTP_TTL" "maxExpiryHorizon" "MAX_EXPIRY_HORIZON" "dedupWindow" "DEDUP_WINDOW" "receiptWindow" "RECEIPT_WINDOW" "receiptEvidenceRetention" "RECEIPT_EVIDENCE_RETENTION" "purgeSweepInterval" "PURGE_SWEEP_INTERVAL" "workerLease" "WORKER_LEASE" }}
 apiVersion: v1
 kind: ConfigMap
