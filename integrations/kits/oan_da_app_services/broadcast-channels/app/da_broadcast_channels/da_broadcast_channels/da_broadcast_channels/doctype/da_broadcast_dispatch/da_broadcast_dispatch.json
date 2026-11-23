@@ -39,6 +39,8 @@
   "telegram_finished",
   "telegram_started_at",
   "not_on_telegram",
+  "telegram_failed",
+  "telegram_error",
   "sec_sms",
   "sms_started_at",
   "sms_cursor",
@@ -47,9 +49,13 @@
   "sms_skipped_on_telegram",
   "sms_no_phone",
   "sms_not_queued",
+  "sms_retry",
+  "sms_not_sent",
   "sec_end",
   "finished_at",
-  "error"
+  "error",
+  "retry_count",
+  "next_run_at"
  ],
  "fields": [
   {
@@ -221,6 +227,19 @@
    "description": "DA refs returned by Bot Services; they get the SMS copy"
   },
   {
+   "fieldname": "telegram_failed",
+   "fieldtype": "Check",
+   "label": "Telegram failed",
+   "description": "Telegram could not be sent; the SMS copy went to everyone instead",
+   "read_only": 1
+  },
+  {
+   "fieldname": "telegram_error",
+   "fieldtype": "Data",
+   "label": "Telegram error",
+   "read_only": 1
+  },
+  {
    "fieldname": "sec_sms",
    "fieldtype": "Section Break",
    "label": "SMS"
@@ -269,6 +288,20 @@
    "read_only": 1
   },
   {
+   "fieldname": "sms_retry",
+   "fieldtype": "JSON",
+   "label": "SMS retry list",
+   "description": "Recipients whose SMS could not be queued: Farmer ID (or DA ID), language, row number and tries. No phone numbers",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sms_not_sent",
+   "fieldtype": "Int",
+   "label": "SMS not sent",
+   "description": "Recipients still not queued after every retry",
+   "read_only": 1
+  },
+  {
    "fieldname": "sec_end",
    "fieldtype": "Section Break",
    "label": ""
@@ -285,6 +318,19 @@
    "label": "Error",
    "read_only": 1,
    "description": "A value-free code; details are in the Error Log"
+  },
+  {
+   "fieldname": "retry_count",
+   "fieldtype": "Int",
+   "label": "Retries after an upstream error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "next_run_at",
+   "fieldtype": "Datetime",
+   "label": "Next run",
+   "description": "The scheduler re-enters the dispatch only from this time (backoff)",
+   "read_only": 1
   }
  ],
  "autoname": "hash",

@@ -14,16 +14,13 @@ import threading
 import frappe
 from frappe import _
 
-from da_broadcast_channels import dispatch
+from da_broadcast_channels import dispatch, rules
 from da_services.api.router import route
-from da_services.services import constants as C
-from da_services.utils.permissions import require_roles
+from da_services.utils.permissions import require_permission
 from oan_auth_service.api.utils import handle_api_errors, success_response
 
 _REGISTERED = False
 _LOCK = threading.Lock()
-#: Same senders as POST /notifications/broadcast.
-SENDER_ROLES = (C.ROLE_COMMS, C.ROLE_ADMIN, C.ROLE_DA)
 
 
 @route("/broadcasts", methods=("POST",), summary="Broadcast to farmers or agents on in-app, SMS, Telegram")
@@ -47,11 +44,13 @@ def create_broadcast():
 	Returns 200 with the dispatch status; a replay of the same client_op_id and body
 	returns the original with ``duplicate: true``; the same key with another body is 409.
 	"""
-	ctx = require_roles(*SENDER_ROLES)
+	# Same senders as POST /notifications/broadcast: DA Broadcast create (Role Permission
+	# Manager). The area is checked against the sender's User Permissions in dispatch.create.
+	require_permission("DA Broadcast", "create")
 	data = frappe.request.get_json(silent=True) if frappe.request else None
 	if not isinstance(data, dict):
 		frappe.throw(_("A JSON object body is required."), frappe.ValidationError)
-	out = dispatch.create(ctx, data)
+	out = dispatch.create(rules.sender(), data)
 	return success_response(
 		data=out, message="Broadcast already sent." if out["duplicate"] else "Broadcast queued."
 	)
@@ -61,9 +60,9 @@ def create_broadcast():
 @frappe.whitelist()
 @handle_api_errors
 def get_broadcast(broadcast_id: str):
-	ctx = require_roles(*C.DA_SERVICES_ROLES)
+	require_permission("DA Broadcast", "read")
 	name = dispatch.find(broadcast_id)
-	if not name or not dispatch.can_read(ctx, name):
+	if not name or not dispatch.can_read(rules.sender(), name):
 		frappe.throw(_("Broadcast {0} not found.").format(broadcast_id), frappe.DoesNotExistError)
 	return success_response(data=dispatch.status(name))
 

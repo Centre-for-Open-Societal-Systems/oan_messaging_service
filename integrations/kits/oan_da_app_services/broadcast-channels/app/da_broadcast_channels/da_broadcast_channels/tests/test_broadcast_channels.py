@@ -17,12 +17,11 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, now_datetime, today
 
-from da_broadcast_channels import dispatch
+from da_broadcast_channels import dispatch, rules
 from da_broadcast_channels.clients import beneficiary, bot_services
 from da_broadcast_channels.clients.http import UpstreamError
 from da_services.services import constants as C
 from da_services.tests.fixtures import live_geo, set_da_registry_id
-from da_services.utils.permissions import get_scope_context
 
 COMMS = "bcc-comms@da.local"  # national desk: no scope on the grant
 COMMS_W = "bcc-comms-w@da.local"  # one woreda only
@@ -77,6 +76,13 @@ class FakeBeneficiary:
 		nxt = str(start + page_size) if start + page_size < len(items) else None
 		return beneficiary.Page([beneficiary.to_farmer(r) for r in chunk], nxt)
 
+	def farmer(self, farmer_id):
+		for items in FakeBeneficiary.rows.values():
+			for r in items:
+				if r["farmer_id"] == farmer_id:
+					return beneficiary.to_farmer(r)
+		return None
+
 
 class FakeBot:
 	created: ClassVar[list[tuple[str, dict]]] = []
@@ -84,6 +90,7 @@ class FakeBot:
 	sent: ClassVar[set[str]] = set()
 	not_on_telegram: ClassVar[list[str]] = []
 	fail: UpstreamError | None = None
+	progress_fail: UpstreamError | None = None
 
 	def create(self, key, body):
 		if FakeBot.fail:
@@ -92,6 +99,8 @@ class FakeBot:
 		return bot_services.Created("BOT-1", 3, list(FakeBot.not_on_telegram))
 
 	def progress(self, broadcast_id):
+		if FakeBot.progress_fail:
+			raise FakeBot.progress_fail
 		counts = dict.fromkeys(bot_services.STATUSES, 0) | {"sent": len(FakeBot.sent)}
 		return bot_services.Progress(broadcast_id, FakeBot.finished, counts)
 
@@ -138,10 +147,17 @@ class TestBroadcastChannels(IntegrationTestCase):
 		FakeBeneficiary.rows = {self.geo["woreda"]: [_farmer(i) for i in range(1, 6)] + [_farmer(6, False)]}
 		FakeBeneficiary.calls = []
 		FakeBot.created, FakeBot.finished, FakeBot.sent, FakeBot.not_on_telegram = [], False, set(), []
-		FakeBot.fail = None
+		FakeBot.fail = FakeBot.progress_fail = None
 		FakeRegistry.phones = {DA_ID: "0900000951", DA_OTHER_ID: "0900000952"}
 		settings = frappe.get_single("DA Broadcast Channel Settings")
-		settings.update({"sms_fallback_wait_minutes": 15, "page_size": 2})
+		settings.update(
+			{
+				"sms_fallback_wait_minutes": 15,
+				"page_size": 2,
+				"sms_retry_attempts": 3,
+				"retry_backoff_minutes": 1,
+			}
+		)
 		settings.save(ignore_permissions=True)
 
 		patches = [
@@ -158,6 +174,7 @@ class TestBroadcastChannels(IntegrationTestCase):
 		for p in patches:
 			p.start()
 			self.addCleanup(p.stop)
+		self.addCleanup(frappe.set_user, "Administrator")
 
 	# -- helpers ---------------------------------------------------------------
 
@@ -172,7 +189,12 @@ class TestBroadcastChannels(IntegrationTestCase):
 			"source": "Informational",
 			"client_op_id": str(uuid.uuid4()),
 		} | kw
-		return dispatch.create(get_scope_context(user), body)
+		# The DA backend checks the area against the session user's User Permissions.
+		frappe.set_user(user)
+		try:
+			return dispatch.create(rules.sender(user), body)
+		finally:
+			frappe.set_user("Administrator")
 
 	def dispatch_of(self, out):
 		return dispatch.find(out["broadcast_id"])
@@ -205,6 +227,23 @@ class TestBroadcastChannels(IntegrationTestCase):
 		self.send(COMMS_W)
 		with self.assertRaises(frappe.PermissionError):
 			self.send(COMMS_W, scope_value=self.geo["foreign_woreda"])
+
+	def test_region_scoped_comms_under_the_da_backend_rules(self):
+		"""F-23, rechecked on DA backend 656985b: the area rule is the backend's own (read on the
+		area's DocType under the sender's User Permissions), unchanged by this add-on."""
+		comms_r = "bcc-comms-r@da.local"
+		frappe.db.delete("DA RBAC Assignment", {"user": comms_r})
+		frappe.db.delete("DA Broadcast Dispatch", {"sent_by": comms_r})
+		frappe.db.delete("DA Broadcast", {"sent_by": comms_r})
+		_user(comms_r, [C.ROLE_COMMS])
+		_grant(comms_r, C.ROLE_COMMS, region_scope=self.geo["region"])
+		self.assertEqual(
+			self.send(comms_r, scope="region", scope_value=self.geo["region"])["scope"], "region"
+		)
+		self.assertEqual(self.send(comms_r, scope="woreda")["scope"], "woreda")  # inside the region
+		if self.geo["foreign_region"] != self.geo["region"]:
+			with self.assertRaises(frappe.PermissionError):
+				self.send(comms_r, scope="region", scope_value=self.geo["foreign_region"])
 
 	def test_unknown_area_code_is_refused(self):
 		with self.assertRaises(frappe.ValidationError):
@@ -240,14 +279,18 @@ class TestBroadcastChannels(IntegrationTestCase):
 		self.assertEqual(len(FakeBeneficiary.calls), 3)  # page size 2
 		rows = self.sms_rows(name)
 		self.assertEqual({r.purpose for r in rows}, {"alert"})  # SMS-06: Weather -> alert
-		self.assertEqual(rows[0].source_reference, f"da_broadcast:{doc.broadcast}:FR-BCC-0001")
+		# Part 3 is the farmer's row number in the broadcast, never the Farmer ID.
+		self.assertEqual(rows[0].source_reference, f"da_broadcast:{doc.broadcast}:1")
+		self.assertFalse(any("FR-BCC" in r.source_reference for r in rows))
 		self.assertEqual(frappe.db.get_value("DA Broadcast", doc.broadcast, "recipients"), 6)
 		self.assertEqual(dispatch.status(name)["sms"]["by_status"], {"queued": 5})
 
 	def test_a_multi_part_sms_copy_is_queued(self):
 		name = self.dispatch_of(self.send(COMMS, body="ቅ" * 150))  # 3 parts
 		dispatch.run(name)
-		self.assertEqual(frappe.db.get_value(dispatch.DOCTYPE, name, ["sms_queued", "sms_not_queued"]), (5, 0))
+		self.assertEqual(
+			frappe.db.get_value(dispatch.DOCTYPE, name, ["sms_queued", "sms_not_queued"]), (5, 0)
+		)
 
 	def test_informational_goes_as_broadcast_purpose(self):
 		name = self.dispatch_of(self.send(COMMS, source="Informational"))
@@ -259,7 +302,12 @@ class TestBroadcastChannels(IntegrationTestCase):
 		doc = frappe.get_doc(dispatch.DOCTYPE, name)
 		doc.db_set({"state": "SMS sending", "sms_cursor": "4", "sms_targeted": 4, "sms_queued": 4})
 		dispatch.run(name)
-		self.assertEqual(len(self.sms_rows(name)), 1)  # farmer 5; farmer 6 has no phone
+		rows = self.sms_rows(name)
+		self.assertEqual(len(rows), 1)  # farmer 5; farmer 6 has no phone
+		self.assertEqual(
+			rows[0].source_reference,
+			f"da_broadcast:{frappe.db.get_value(dispatch.DOCTYPE, name, 'broadcast')}:5",
+		)
 		self.assertEqual(frappe.db.get_value(dispatch.DOCTYPE, name, "sms_queued"), 5)
 
 	# -- Telegram first ----------------------------------------------------------
@@ -340,3 +388,125 @@ class TestBroadcastChannels(IntegrationTestCase):
 		dispatch.run(name)
 		self.assertEqual(frappe.db.get_value(dispatch.DOCTYPE, name, "error"), "expired")
 		self.assertEqual(self.sms_rows(name), [])
+
+	# -- retry list --------------------------------------------------------------
+
+	def _fail_first(self, failing, times=1):
+		"""queue_sms returns None for the given row numbers ``times`` times each (nothing queued)."""
+		real = dispatch.queue_sms
+		left = dict.fromkeys(failing, times)
+
+		def fake(**kw):
+			row = int(kw["source_reference"].rsplit(":", 1)[1])
+			if left.get(row):
+				left[row] -= 1
+				return None
+			return real(**kw)
+
+		return mock.patch.object(dispatch, "queue_sms", fake)
+
+	def _make_retries_due(self, name):
+		retry = json.loads(frappe.db.get_value(dispatch.DOCTYPE, name, "sms_retry") or "[]")
+		for entry in retry:
+			entry["next"] = add_to_date(now_datetime(), minutes=-1).isoformat()
+		frappe.db.set_value(dispatch.DOCTYPE, name, "sms_retry", json.dumps(retry))
+
+	def test_a_farmer_not_queued_is_kept_and_retried_without_storing_the_phone(self):
+		name = self.dispatch_of(self.send(COMMS))
+		# Fails in the pass and in the retry at its end: kept on the list for a later run.
+		with self._fail_first({2}, times=2):
+			dispatch.run(name)
+		doc = frappe.get_doc(dispatch.DOCTYPE, name)
+		self.assertEqual((doc.state, doc.sms_queued, doc.sms_not_queued), ("SMS sending", 4, 1))
+		retry = json.loads(doc.sms_retry)
+		self.assertEqual(
+			[(e["who"], e["row"], e["language"], e["tries"]) for e in retry], [("FR-BCC-0002", 2, "am", 1)]
+		)
+		self.assertNotIn("0900000902", doc.sms_retry)  # never the phone
+		self.assertIsNotNone(doc.next_run_at)
+		self._make_retries_due(name)
+		dispatch.run(name)  # the third try queues it
+		doc.reload()
+		self.assertEqual((doc.state, doc.sms_queued, doc.sms_not_sent), ("Done", 5, 0))
+		self.assertEqual(json.loads(doc.sms_retry), [])
+		refs = sorted(r.source_reference for r in self.sms_rows(name))
+		self.assertEqual(refs, sorted(f"da_broadcast:{doc.broadcast}:{n}" for n in range(1, 6)))
+
+	def test_the_retry_waits_longer_each_time_and_gives_up(self):
+		frappe.db.set_single_value(dispatch.SETTINGS, "sms_retry_attempts", 2)
+		frappe.clear_document_cache(dispatch.SETTINGS, dispatch.SETTINGS)
+		name = self.dispatch_of(self.send(COMMS))
+		with mock.patch.object(dispatch, "queue_sms", lambda **kw: None):
+			dispatch.run(name)  # every farmer fails once and goes on the list
+			doc = frappe.get_doc(dispatch.DOCTYPE, name)
+			self.assertEqual(len(json.loads(doc.sms_retry)), 5)
+			self._make_retries_due(name)
+			dispatch.run(name)  # second and last try fails too
+		doc.reload()
+		self.assertEqual((doc.state, doc.sms_queued, doc.sms_not_sent), ("Done", 0, 5))
+		self.assertEqual(dispatch.status(name)["sms"]["not_sent"], 5)
+		self.assertEqual([dispatch.backoff_minutes(n) for n in (1, 2, 3, 7, 9)], [1, 2, 4, 60, 60])
+
+	def test_resume_open_waits_for_the_backoff(self):
+		name = self.dispatch_of(self.send(COMMS, channels=["telegram"]))
+		queued = []
+		with mock.patch.object(dispatch, "enqueue", queued.append):
+			frappe.db.set_value(dispatch.DOCTYPE, name, "next_run_at", add_to_date(now_datetime(), minutes=5))
+			dispatch.resume_open()
+			self.assertNotIn(name, queued)
+			frappe.db.set_value(
+				dispatch.DOCTYPE, name, "next_run_at", add_to_date(now_datetime(), minutes=-1)
+			)
+			dispatch.resume_open()
+			self.assertIn(name, queued)
+
+	def test_an_upstream_error_backs_off(self):
+		name = self.dispatch_of(self.send(COMMS, channels=["telegram"]))
+		FakeBot.fail = UpstreamError("bot_services", "timeout")
+		dispatch.run(name)
+		first = frappe.db.get_value(dispatch.DOCTYPE, name, ["retry_count", "next_run_at"])
+		self.assertEqual(first[0], 1)
+		self.assertGreater(first[1], now_datetime())
+
+	# -- Telegram does not hold the SMS back (F-18) ------------------------------
+
+	def test_the_fallback_wait_is_checked_first_when_telegram_progress_fails(self):
+		name = self.dispatch_of(self.send(COMMS, channels=["sms", "telegram"]))
+		dispatch.run(name)  # Telegram created, still sending
+		frappe.db.set_value(
+			dispatch.DOCTYPE, name, "telegram_started_at", add_to_date(now_datetime(), minutes=-16)
+		)
+		FakeBot.progress_fail = UpstreamError("bot_services", "timeout")
+		dispatch.run(name)
+		doc = frappe.get_doc(dispatch.DOCTYPE, name)
+		self.assertEqual((doc.state, doc.sms_queued), ("Done", 5))
+
+	def test_the_fallback_clock_starts_with_the_dispatch_even_if_telegram_never_answers(self):
+		FakeBot.fail = UpstreamError("bot_services", "timeout")
+		name = self.dispatch_of(self.send(COMMS, channels=["sms", "telegram"]))
+		self.assertIsNotNone(frappe.db.get_value(dispatch.DOCTYPE, name, "telegram_started_at"))
+		dispatch.run(name)
+		self.assertEqual(frappe.db.get_value(dispatch.DOCTYPE, name, "sms_queued"), 0)  # still waiting
+		frappe.db.set_value(
+			dispatch.DOCTYPE, name, "telegram_started_at", add_to_date(now_datetime(), minutes=-16)
+		)
+		dispatch.run(name)
+		doc = frappe.get_doc(dispatch.DOCTYPE, name)
+		self.assertEqual((doc.state, doc.sms_queued, doc.telegram_error), ("Done", 5, "timeout"))
+
+	def test_a_definite_telegram_refusal_never_stops_the_sms_copy(self):
+		FakeBot.fail = UpstreamError("bot_services", "validation_failed", 422)
+		name = self.dispatch_of(self.send(COMMS, channels=["sms", "telegram"]))
+		dispatch.run(name)
+		doc = frappe.get_doc(dispatch.DOCTYPE, name)
+		self.assertEqual((doc.state, doc.telegram_failed, doc.sms_queued), ("Done", 1, 5))
+		self.assertTrue(dispatch.status(name)["telegram"]["failed"])
+
+	def test_agents_get_the_sms_copy_when_telegram_is_refused(self):
+		FakeBot.fail = UpstreamError("bot_services", "forbidden", 403)
+		name = self.dispatch_of(
+			self.send(COMMS, recipients="das", scope="woreda", channels=["sms", "telegram"])
+		)
+		dispatch.run(name)
+		self.assertIn("0900000952", [r.recipient for r in self.sms_rows(name)])
+		self.assertEqual(frappe.db.get_value(dispatch.DOCTYPE, name, "state"), "Done")

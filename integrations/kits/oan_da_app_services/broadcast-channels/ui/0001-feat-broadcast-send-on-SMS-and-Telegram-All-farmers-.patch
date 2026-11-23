@@ -1,4 +1,4 @@
-From cb54b9fa171af2e719cc284d5a785bd96ecb0520 Mon Sep 17 00:00:00 2001
+From e749d547fa7fc2d06dcbacf4101594ce1aa1e5f7 Mon Sep 17 00:00:00 2001
 From: dineshriyer <249892547+dineshriyer@users.noreply.github.com>
 Date: Fri, 20 Nov 2026 10:13:15 +0530
 Subject: [PATCH] feat(broadcast): send on SMS and Telegram; All farmers for
@@ -19,23 +19,31 @@ gives farmer broadcasts to the Communications Officer.
   shows when the SMS turns multi-part; Send is disabled beyond three.
   The preview and the Knowledge Base send dialog use the same count.
 ---
- .../components/BroadcastWorkspace.tsx         | 112 ++++++++++++------
+ .../components/BroadcastWorkspace.tsx         | 143 ++++++++++++------
  .../components/SendToFarmersModal.tsx         |   3 +-
  .../communication/components/SmsPreview.tsx   |   5 +-
  src/features/communication/index.ts           |   1 +
- src/features/communication/smsParts.test.ts   |  32 +++++
- src/features/communication/smsParts.ts        |  29 +++++
+ src/features/communication/smsParts.test.ts   |  32 ++++
+ src/features/communication/smsParts.ts        |  29 ++++
  src/features/notifications/api.test.ts        |  13 +-
- src/features/notifications/api.ts             |  58 +++++++++
- 8 files changed, 217 insertions(+), 36 deletions(-)
+ src/features/notifications/api.ts             |  58 +++++++
+ 8 files changed, 237 insertions(+), 47 deletions(-)
  create mode 100644 src/features/communication/smsParts.test.ts
  create mode 100644 src/features/communication/smsParts.ts
 
 diff --git a/src/app/(dashboard)/broadcast/components/BroadcastWorkspace.tsx b/src/app/(dashboard)/broadcast/components/BroadcastWorkspace.tsx
-index 79e4ff8..1f7d288 100644
+index dee434d..2580af6 100644
 --- a/src/app/(dashboard)/broadcast/components/BroadcastWorkspace.tsx
 +++ b/src/app/(dashboard)/broadcast/components/BroadcastWorkspace.tsx
-@@ -10,21 +10,21 @@ import { Textarea } from "@/components/ui/Textarea";
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useEffect, useState } from "react";
++import { useEffect, useRef, useState } from "react";
+ import { useSearchParams } from "next/navigation";
+ import { cn } from "@/lib/utils";
+ import { Card } from "@/components/ui/Card";
+@@ -11,21 +11,21 @@ import { Textarea } from "@/components/ui/Textarea";
  import { Select } from "@/components/ui/Select";
  import { Checkbox } from "@/components/ui/Checkbox";
  import { SmsPreview } from "@/features/communication";
@@ -61,7 +69,7 @@ index 79e4ff8..1f7d288 100644
        <Select id={id} value={level.selected?.code ?? ""} disabled={level.status !== "ready"} onChange={(e) => onSelect(e.target.value)}>
          <option value="">{placeholder}</option>
          {level.options.map((o) => <option key={o.code} value={o.code}>{o.name}</option>)}
-@@ -35,11 +35,15 @@ function GeoSelect({ field, label, level, hint, onSelect, onRetry }: { field: Ge
+@@ -36,11 +36,15 @@ function GeoSelect({ field, label, level, hint, onSelect, onRetry }: { field: Ge
  }
  
  // FR-10 / §4.4: Communications Officer crafts a message, picks audience + channels, dispatches.
@@ -79,7 +87,7 @@ index 79e4ff8..1f7d288 100644
    // A DA broadcasts to their own Kebele only: the Kebeles they are posted to, from /me.
    const ownKebeleOnly = role === "DA";
    const ownKebeles = useAuthStore((s) => (s.role === "DA" ? s.profile?.kebeles : undefined));
-@@ -70,8 +74,10 @@ export function BroadcastWorkspace() {
+@@ -71,48 +75,90 @@ export function BroadcastWorkspace() {
    }, [ownWoreda]);
    // In-app, the only live channel, reaches Development Agents only, so that is the default for everyone until SMS / Telegram reach farmers.
    const [group, setGroup] = useState<RecipientGroup>("Development Agents");
@@ -91,7 +99,12 @@ index 79e4ff8..1f7d288 100644
    const [notice, setNotice] = useState<string | null>(null);
    const [error, setError] = useState<string | null>(null);
    const [sending, setSending] = useState(false);
-@@ -80,28 +86,62 @@ export function BroadcastWorkspace() {
++  // One client_op_id per form: created when the form opens and reused on every Send of it,
++  // so a double click or a retry after an error never sends the broadcast twice.
++  const [clientOpId, setClientOpId] = useState(() => crypto.randomUUID());
++  const inFlight = useRef(false);
+   const [evidence, setEvidence] = useState<File[]>([]);
+ 
    const toDAs = group === "Development Agents";
    // A Supervisor's Woreda is fixed: their own code is what goes out. Everyone else (but a DA) picks Region, Zone, Woreda.
    const woreda = ownWoredaOnly ? (ownWoreda ? { code: ownWoreda, name: ownWoredaName ?? ownWoreda } : null) : geo.woreda.selected;
@@ -124,7 +137,8 @@ index 79e4ff8..1f7d288 100644
      }
 -    const target = ownKebeleOnly ? kebele : woreda;
 -    if (!target || !area) return;
-+    if (!area) return;
++    if (!area || inFlight.current) return;
++    inFlight.current = true;
      setSending(true);
      try {
 -      const input = { title: title.trim(), body: message.trim(), href: "/notifications", source };
@@ -134,7 +148,8 @@ index 79e4ff8..1f7d288 100644
 -          ? `Already sent to ${area} — no duplicate created.`
 -          : `Broadcast delivered to ${res.recipients} Development Agent${res.recipients === 1 ? "" : "s"} in ${area} — it is now in their notification bell.`,
 -      );
-+      const input = { title: title.trim(), body: message.trim(), source };
+-      setTitle(""); setMessage(""); setEvidence([]);
++      const input = { title: title.trim(), body: message.trim(), source, clientOpId };
 +      if (channels.length === 1 && channels[0] === "in_app") {
 +        // Unchanged: the in-app broadcast to DAs.
 +        const target = ownKebeleOnly ? kebele : woreda;
@@ -164,10 +179,13 @@ index 79e4ff8..1f7d288 100644
 +            : `Broadcast to ${toDAs ? "Development Agents" : "farmers"} in ${area} is on its way: ${how}.`,
 +        );
 +      }
-       setTitle(""); setMessage(""); setEvidence([]);
++      setTitle(""); setMessage(""); setEvidence([]); setClientOpId(crypto.randomUUID());
      } catch (err) {
        // ApiError.message already carries the backend's reason (e.g. "Woreda X is not in your scope", or no DA is posted there).
-@@ -111,7 +151,7 @@ export function BroadcastWorkspace() {
+       setError(err instanceof Error ? err.message : "Could not send the broadcast. Try again.");
+     } finally {
++      inFlight.current = false;
+       setSending(false);
      }
    };
  
@@ -176,7 +194,7 @@ index 79e4ff8..1f7d288 100644
  
    return (
      <>
-@@ -145,33 +185,39 @@ export function BroadcastWorkspace() {
+@@ -168,13 +214,13 @@ export function BroadcastWorkspace() {
                ) : (
                  <>
                    <GeoSelect field="region" label="Region" level={geo.region} onSelect={(code) => select("region", code)} onRetry={() => retry("region")} />
@@ -187,14 +205,17 @@ index 79e4ff8..1f7d288 100644
                  </>
                )}
 -              <FormField label="Recipients" htmlFor="bc-group" required hint={`${toDAs ? "Development Agents" : "Farmers"} in ${areaLabel}${toDAs ? "" : ". In-app delivery reaches Development Agents only."}`}>
--                <Select id="bc-group" value={group} onChange={(e) => setGroup(e.target.value as RecipientGroup)}>{RECIPIENT_GROUPS.map((g) => <option key={g} value={g}>{g === "Farmers" ? "All farmers" : "All Development Agents"}</option>)}</Select>
 +              <FormField label="Recipients" htmlFor="bc-group" required hint={`${toDAs ? "Development Agents" : "Farmers"} in ${areaLabel}${toDAs ? "" : ". Farmers receive SMS and Telegram; in-app reaches Development Agents only."}`}>
-+                <Select id="bc-group" value={group} onChange={(e) => setGroup(e.target.value as RecipientGroup)}>{groups.map((g) => <option key={g} value={g}>{g === "Farmers" ? "All farmers" : "All Development Agents"}</option>)}</Select>
+                 <Select id="bc-group" value={group} onChange={(e) => setGroup(e.target.value as RecipientGroup)}>
+-                  {RECIPIENT_GROUPS.map((g) => <option key={g} value={g}>{g === "Farmers" ? "All farmers" : "All Development Agents"}</option>)}
++                  {groups.map((g) => <option key={g} value={g}>{g === "Farmers" ? "All farmers" : "All Development Agents"}</option>)}
+                 </Select>
                </FormField>
              </div>
-             <FormField label="Title" htmlFor="bc-title" required hint="Shown as the notification heading (3 to 140 characters)." hintTone={title.trim().length > 0 && title.trim().length < 3 ? "error" : "muted"}>
+@@ -183,9 +229,14 @@ export function BroadcastWorkspace() {
                <Input id="bc-title" value={title} maxLength={140} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Fertiliser distribution starts Monday" />
              </FormField>
+ 
 -            <FormField label="Message" htmlFor="bc-message" required hint={`At least 5 characters · ${message.length} characters · ${Math.max(1, Math.ceil(message.length / 160))} SMS segment${message.length > 160 ? "s" : ""} · Amharic + English supported`} hintTone={message.trim().length > 0 && message.trim().length < 5 ? "error" : "muted"}>
 +            <FormField label="Message" htmlFor="bc-message" required hint={smsTooLong ? `Too long for SMS: ${parts} parts, at most ${SMS_MAX_PARTS}. Shorten the message or untick SMS.` : `At least 5 characters · ${message.length} characters · ${parts} SMS part${parts > 1 ? "s" : ""} · Amharic + English supported`} hintTone={smsTooLong || (message.trim().length > 0 && message.trim().length < 5) ? "error" : "muted"}>
                <Textarea id="bc-message" rows={5} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Write the message farmers or DAs will receive…" />
@@ -204,30 +225,77 @@ index 79e4ff8..1f7d288 100644
 +                Each recipient gets one message joined from {parts} SMS parts, and every part is charged. {/[^\x00-\x7F]/.test(message) ? "Amharic letters fit 67 per part (70 in a single SMS)." : "English fits 153 characters per part (160 in a single SMS)."}
 +              </Banner>
 +            )}
-             <fieldset>
-               <legend className="text-[14px] font-medium text-ink">Channels<span className="ml-1 text-danger">*</span></legend>
-               <div className="mt-2 flex flex-wrap gap-5">
-+                <label className={`flex items-center gap-2 text-[13.5px] ${toDAs ? "cursor-pointer text-slate-700" : "cursor-not-allowed text-slate-400"}`} title={toDAs ? undefined : "In-app reaches Development Agents only"}>
-+                  <Checkbox checked={toDAs && inApp} disabled={!toDAs} onChange={() => setInApp((v) => !v)} /> In-app
-+                </label>
-+                <label className="flex cursor-pointer items-center gap-2 text-[13.5px] text-slate-700">
-+                  <Checkbox checked={sms} onChange={() => setSms((v) => !v)} /> SMS
-+                </label>
-                 <label className="flex cursor-pointer items-center gap-2 text-[13.5px] text-slate-700">
--                  <Checkbox checked={inApp} onChange={() => setInApp((v) => !v)} /> In-app
-+                  <Checkbox checked={telegram} onChange={() => setTelegram((v) => !v)} /> Telegram
+ 
+             {/* Mobile / Tablet inline preview right after message */}
+             <div className="lg:hidden rounded-2xl border border-line bg-surface/50 p-4 shadow-xs">
+@@ -209,11 +260,11 @@ export function BroadcastWorkspace() {
+               </legend>
+               <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                 <label className={cn(
+-                  "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-all",
+-                  inApp ? "border-brand-green/60 bg-emerald-50/40 shadow-xs" : "border-line bg-white hover:border-gray-300"
+-                )}>
++                  "flex items-start gap-3 rounded-xl border p-3 transition-all",
++                  !toDAs ? "cursor-not-allowed border-line/70 bg-slate-50/60 opacity-65" : inApp ? "cursor-pointer border-brand-green/60 bg-emerald-50/40 shadow-xs" : "cursor-pointer border-line bg-white hover:border-gray-300"
++                )} title={toDAs ? undefined : "In-app reaches Development Agents only"}>
+                   <div className="pt-0.5">
+-                    <Checkbox checked={inApp} onChange={() => setInApp((v) => !v)} />
++                    <Checkbox checked={toDAs && inApp} disabled={!toDAs} onChange={() => setInApp((v) => !v)} />
+                   </div>
+                   <div className="min-w-0 flex-1">
+                     <div className="flex items-center justify-between gap-1">
+@@ -226,27 +277,31 @@ export function BroadcastWorkspace() {
+                   </div>
                  </label>
+ 
 -                {(["SMS", "Telegram"] as const).map((c) => (
--                  <label key={c} className="flex cursor-not-allowed items-center gap-2 text-[13.5px] text-slate-400" title="Not wired yet">
--                    <Checkbox checked={false} disabled onChange={() => {}} /> {c}
--                  </label>
--                ))}
+-                  <div key={c} className="flex cursor-not-allowed items-start gap-3 rounded-xl border border-line/70 bg-slate-50/60 p-3 opacity-65" title={`${c} gateway not wired yet`}>
++                {([
++                  ["SMS", sms, setSms, "Direct phone text"],
++                  ["Telegram", telegram, setTelegram, "Bot announcement"],
++                ] as const).map(([c, on, set, note]) => (
++                  <label key={c} className={cn(
++                    "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-all",
++                    on ? "border-brand-green/60 bg-emerald-50/40 shadow-xs" : "border-line bg-white hover:border-gray-300"
++                  )}>
+                     <div className="pt-0.5">
+-                      <Checkbox checked={false} disabled onChange={() => {}} />
++                      <Checkbox checked={on} onChange={() => set((v) => !v)} />
+                     </div>
+                     <div className="min-w-0 flex-1">
+                       <div className="flex items-center justify-between gap-1">
+-                        <span className="text-[13px] font-medium text-slate-500">{c}</span>
+-                        <span className="inline-flex items-center rounded-full bg-slate-200/80 px-1.5 py-0.2 text-[9.5px] font-medium text-slate-500">
+-                          Soon
++                        <span className="text-[13px] font-semibold text-ink">{c}</span>
++                        <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.2 text-[10px] font-semibold text-emerald-800">
++                          Live
+                         </span>
+                       </div>
+-                      <p className="mt-0.5 text-[11px] leading-tight text-muted">
+-                        {c === "SMS" ? "Direct phone text" : "Bot announcement"}
+-                      </p>
++                      <p className="mt-0.5 text-[11px] leading-tight text-ink-soft">{note}</p>
+                     </div>
+-                  </div>
++                  </label>
+                 ))}
                </div>
--              <p className="mt-1.5 text-[12px] text-muted">In-app delivers to the Development Agents&apos; notification bell (live). SMS / Telegram are not wired yet.</p>
-+              <p className="mt-1.5 text-[12px] text-muted">In-app goes to the Development Agents&apos; notification bell. Telegram reaches those linked in the bot; with both ticked, Telegram goes first and the SMS copy reaches everyone not reached on Telegram.</p>
+               <p className="mt-1.5 text-[12px] text-muted">
+-                In-app delivers directly to the Development Agents&apos; notification bell (live). SMS & Telegram are coming soon.
++                In-app goes to the Development Agents&apos; notification bell. Telegram reaches those linked in the bot; with both ticked, Telegram goes first and the SMS copy reaches everyone not reached on Telegram.
+               </p>
              </fieldset>
-             <FileDropInput label="Evidence" actionLabel="Upload evidence" hint="Field photos or documents · PDF, JPG or PNG up to 5 MB each" files={evidence} onChange={setEvidence} />
-             {canDispatch && !canSend && !sending && <p className="text-right text-[12.5px] text-muted">Complete every field marked * to enable Send.</p>}
+ 
+@@ -264,7 +319,7 @@ export function BroadcastWorkspace() {
+               <div className="flex items-center justify-end gap-2.5">
+                 <button
+                   type="button"
+-                  onClick={() => { setTitle(""); setMessage(""); setEvidence([]); }}
++                  onClick={() => { setTitle(""); setMessage(""); setEvidence([]); setClientOpId(crypto.randomUUID()); }}
+                   className="h-10 flex-1 sm:flex-initial inline-flex items-center justify-center rounded-lg border border-line bg-white px-4 text-[14px] font-medium text-ink-soft hover:bg-slate-50 transition-colors shadow-2xs"
+                 >
+                   Clear
 diff --git a/src/features/communication/components/SendToFarmersModal.tsx b/src/features/communication/components/SendToFarmersModal.tsx
 index 6e362f7..32e0f24 100644
 --- a/src/features/communication/components/SendToFarmersModal.tsx
@@ -250,20 +318,20 @@ index 6e362f7..32e0f24 100644
              </FormField>
              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 diff --git a/src/features/communication/components/SmsPreview.tsx b/src/features/communication/components/SmsPreview.tsx
-index fabe391..8777ad0 100644
+index 1b901fd..93fc608 100644
 --- a/src/features/communication/components/SmsPreview.tsx
 +++ b/src/features/communication/components/SmsPreview.tsx
 @@ -1,6 +1,9 @@
- // Live SMS preview — a feature-phone frame so officers see what a farmer receives (FR-10).
+ // Live SMS preview — a realistic mobile handset frame so officers see what a farmer receives (FR-10).
 +import { smsParts } from "../smsParts";
 +
  export function SmsPreview({ text, sender }: { text: string; sender: string }) {
 -  const segments = Math.max(1, Math.ceil(text.length / 160));
 +  // Counted as OAN counts it: 70 characters per SMS once the text has any Amharic letter.
 +  const segments = smsParts(text);
+   const senderDisplay = sender?.trim() || "Kebele Office";
+ 
    return (
-     <div className="flex flex-col items-center">
-       <div className="w-full max-w-[260px] rounded-[22px] border-[6px] border-ink bg-slate-900 p-3 shadow-lg">
 diff --git a/src/features/communication/index.ts b/src/features/communication/index.ts
 index a941e93..36b6504 100644
 --- a/src/features/communication/index.ts
@@ -444,5 +512,5 @@ index b7e4401..e80090a 100644
 +  return { broadcastId: d.broadcast_id, duplicate: d.duplicate, state: d.state, inApp: d.in_app, sms: d.sms, telegram: d.telegram };
 +}
 -- 
-2.54.0 (Apple Git-157)
+2.43.0
 

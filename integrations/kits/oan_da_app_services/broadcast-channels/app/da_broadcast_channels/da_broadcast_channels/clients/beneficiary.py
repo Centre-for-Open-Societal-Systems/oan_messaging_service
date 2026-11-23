@@ -43,6 +43,8 @@ class Page:
 class BeneficiaryClient(Protocol):
 	def farmers_by_area(self, level: str, code: str, cursor: str | None, page_size: int) -> Page: ...
 
+	def farmer(self, farmer_id: str) -> Farmer | None: ...
+
 
 def primary_phone(row: dict) -> str | None:
 	"""``primary_phone`` when given, else the phone marked primary, else the first one."""

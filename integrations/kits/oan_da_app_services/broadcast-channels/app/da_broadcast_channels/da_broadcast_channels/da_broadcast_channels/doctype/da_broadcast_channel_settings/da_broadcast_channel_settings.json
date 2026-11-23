@@ -29,7 +29,9 @@
   "sec_run",
   "sms_fallback_wait_minutes",
   "page_size",
-  "http_timeout_seconds"
+  "http_timeout_seconds",
+  "sms_retry_attempts",
+  "retry_backoff_minutes"
  ],
  "fields": [
   {
@@ -119,6 +121,20 @@
    "fieldtype": "Int",
    "label": "HTTP Timeout (seconds)",
    "default": "20"
+  },
+  {
+   "fieldname": "sms_retry_attempts",
+   "fieldtype": "Int",
+   "label": "SMS retries per recipient",
+   "default": "3",
+   "description": "How many times an SMS that could not be queued is tried again before it counts as not sent"
+  },
+  {
+   "fieldname": "retry_backoff_minutes",
+   "fieldtype": "Int",
+   "label": "First retry wait (minutes)",
+   "default": "1",
+   "description": "The wait doubles after every try, up to 60 minutes"
   }
  ],
  "issingle": 1,

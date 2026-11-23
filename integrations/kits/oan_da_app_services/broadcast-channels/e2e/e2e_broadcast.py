@@ -38,10 +38,9 @@ frappe.flags.in_import = True
 from frappe.utils import today
 
 from da_broadcast_channels import api as bc_api
-from da_broadcast_channels import dispatch
+from da_broadcast_channels import dispatch, rules
 from da_services.services import constants as C
 from da_services.tests.fixtures import live_geo
-from da_services.utils.permissions import get_scope_context
 from oan_messaging_connector import outbox
 
 
@@ -179,7 +178,9 @@ try:
 		"Heavy rain is expected in your woreda from Saturday to Monday. Harvest ripe crops, "
 		"clear drainage ditches and keep seed and fertiliser dry. Your Development Agent can advise."
 	)
-	ctx = get_scope_context(COMMS)
+	# The DA backend checks the area against the session user's User Permissions.
+	frappe.set_user(COMMS)
+	ctx = rules.sender(COMMS)
 	req = {
 		"recipients": "farmers",
 		"scope": "woreda",

@@ -1,8 +1,8 @@
 # DA broadcast: validation against the Channels Specification
 
-**Checked:** 20 November 2026
-**Code:** `oan_da_app_services` `develop` `2ae3d13` and `oan_da_app_ui` `develop` `4e9dd4d`
-(no newer commits on any branch at the time)
+**Checked:** 20 November 2026; rebased and checked again 23 November 2026
+**Code:** `oan_da_app_services` `develop` `656985b` and `oan_da_app_ui` `develop` `b99685e`
+(first checked on `2ae3d13` and `4e9dd4d`)
 **Against:** Channels Specification v2.0 §6.8 (area broadcasts) and §8.4 (ID-03, ID-09), and
 the DA team's own notes (`docs/api-da-screens.md`, `docs/data-model.md`)
 
@@ -14,7 +14,7 @@ real errors or oversights. Each finding says which it is and what the package do
 | Area | Where | State |
 |---|---|---|
 | In-app broadcast to agents | `services/notifications.py` `broadcast()`, `POST /notifications/broadcast` | Works. Scopes are all, region, zone, woreda or kebele. `client_op_id` is unique at the database, the write is atomic, and each send is audited |
-| Who may target what | `_assert_broadcast_scope_allowed` (`services/notifications.py:232`) | Works. The Admin may send anywhere. A Communications Officer stays within their grant (none = national desk). A Supervisor or Executive with the DA role sends to their own woreda. A DA sends to their own kebele |
+| Who may target what | `_assert_broadcast_scope_allowed(scope, scope_value)` (`services/notifications.py:229`) | Works. Since `656985b` it has no role branches: a sender may target an area they may read (read on DA Region / Zone / Woreda / Kebele under their User Permissions), and "all" needs no area User Permission. Who may send at all is DA Broadcast `create` (Role Permission Manager) |
 | Agents of a kebele | `_kebele_recipients` | Works. An Effective `DA Kebele Assignment` plus an active Development Agent grant |
 | Broadcast screen | `BroadcastWorkspace.tsx` | Composes, picks the area, and sends in-app to agents |
 
@@ -36,6 +36,52 @@ The package reuses all of these unchanged.
 | V-10 | **The DA backend parts of ID-03 are still missing:** Telegram link (D4), routing mode (D5), routes R1–R4 | none | Gap (ID-03) | Not in this package. Telegram staff features wait on them; Bot Services returns agents not on Telegram meanwhile |
 | V-11 | **`DA Broadcast` records neither the recipient group nor the channels** | `doctype/da_broadcast` | Design | **Not changed.** The add-on keeps them in its own `DA Broadcast Dispatch`, linked one-to-one |
 | V-12 | **Area code formats differ:** `DA Region/Zone/Woreda/Kebele` use bare P-codes (`ET04080101`), `DA Administrative Area` examples use `ET04-W01-K03`, and the new Dev catalogue uses `kebele-ET04…` | doctype descriptions; `oan-helm` commons-services values | Risk | The add-on checks the area code against `DA Region/Zone/Woreda/Kebele`. One format must be settled with the registry (B-1) |
+
+## Rebase on `656985b` (23 November 2026)
+
+`ScopeContext` left `da_services/utils/permissions.py`, and `broadcast(...)` and
+`_assert_broadcast_scope_allowed(scope, scope_value)` no longer take it, so the add-on failed
+on install. The add-on now uses the DA backend's permission code the way the backend does:
+
+- `POST /broadcasts` checks `require_permission("DA Broadcast", "create")`, as
+  `POST /notifications/broadcast` does; `GET /broadcasts/<id>` checks read on DA Broadcast.
+- The area is checked by the backend's own `_assert_broadcast_scope_allowed`, unchanged.
+- The add-on keeps one rule of its own: farmer broadcasts are for the Communications Officer
+  and the Admin (OAN Administrator, System Manager, Administrator).
+
+What changed for senders (the DA backend's decision, accepted by the owner on 23 November).
+Each level is checked on its own DocType, and User Permissions are created only at the
+levels a grant names, so a grant limits that level and the levels below it:
+
+| Sender | Before (`2ae3d13`) | Now (`656985b`) |
+|---|---|---|
+| Communications Officer, Region-scoped (F-23) | Only inside their Region | Their Region, and the Zones in it. A Woreda or Kebele is checked on its own DocType, which links only to its Zone or Woreda, so the Region grant does not restrict it |
+| Communications Officer, Zone- or Woreda-scoped | Only inside their area | Their area; a Region (and, for a Zone grant, a Kebele) is not restricted by it |
+| Development Agent | Own Kebele only | Own Kebele; a Woreda, Zone or Region limited only by the User Permissions their grant gives (none: not limited) |
+| Supervisor or Executive | Own Woreda only | Only with a role that has DA Broadcast `create` |
+| An area code that does not exist | Refused | Passes the area check; the add-on refuses it (not in Master Data) |
+
+F-23 rechecked: a Region-scoped Communications Officer can send to their Region and to a
+Woreda inside it, and is refused for another Region (test
+`test_region_scoped_comms_under_the_da_backend_rules`). Wider reach across levels follows
+the backend's rule above.
+
+Fixed in this round:
+
+- A farmer whose SMS was not queued was counted and lost; the cursor moved on. Now kept on a
+  retry list (Farmer ID or DA ID, language, row number; never the phone), retried with a
+  fresh lookup and backoff, then counted as not sent. Done only when the list is empty or spent.
+- The scheduler retried every minute after an upstream error. Now it waits
+  (`next_run_at`: 1, 2, 4 … minutes, at most 60).
+- `source_reference` held the Farmer ID. It now holds the recipient's row number in the
+  broadcast (spec 03-sms-service.md: no personal data), the same after a restart or retry.
+- F-18 (Telegram): the fallback wait was checked after `progress()`, so any error there
+  skipped it; a failed `create()` left the dispatch Queued for good; and a Telegram 4xx
+  failed the whole dispatch, so no SMS went out. Now the wait is checked first and counts
+  from the start of the dispatch, and a Telegram failure never stops the SMS copy.
+- Double send: the screen never passed `client_op_id`, so each click made a new one. The UI
+  patch now creates one per form, reuses it on every Send of that form, and ignores a second
+  click while a send is in progress.
 
 ## Dependencies outside the DA team
 

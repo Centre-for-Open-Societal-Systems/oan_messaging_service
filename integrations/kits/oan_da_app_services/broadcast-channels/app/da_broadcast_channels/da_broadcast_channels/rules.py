@@ -1,9 +1,12 @@
 """Who may send what, where, on which channel: checked before anything is written.
 
-Development Agents as recipients keep the DA backend's own rule
-(``services.notifications._assert_broadcast_scope_allowed``). Farmers as recipients are
-for the Communications Officer and the OAN Administrator only, and only for a whole
-region, zone or woreda (the FSD: "broadcast to the Communications Officer").
+Who may send at all is the DA backend's: DA Broadcast ``create`` (Role Permission
+Manager). Which area a sender may target is also the DA backend's rule
+(``services.notifications._assert_broadcast_scope_allowed``): the sender's User
+Permissions must let them read that DA Region / Zone / Woreda / Kebele, and "all" is for a
+sender with no area User Permission. This add-on adds one rule of its own: farmers as
+recipients are for the Communications Officer and the OAN Administrator only, and only
+for a whole region, zone or woreda (the FSD: "broadcast to the Communications Officer").
 """
 
 from __future__ import annotations
@@ -18,7 +21,6 @@ from frappe import _
 
 from da_services.services import constants as C
 from da_services.services import notifications as svc
-from da_services.utils.permissions import ScopeContext
 from oan_messaging_connector.sms import MAX_PARTS, sms_parts
 
 RECIPIENTS = ("farmers", "das")
@@ -35,6 +37,30 @@ SMS_PURPOSE = {
 #: The Master Data DocType that holds each level's codes.
 AREA_DOCTYPE = {"region": "DA Region", "zone": "DA Zone", "woreda": "DA Woreda", "kebele": "DA Kebele"}
 MAX_EXPIRY = timedelta(days=7)
+#: Roles that may broadcast to farmers anywhere (with the Communications Officer). The DA
+#: backend no longer keeps this list, so the add-on keeps the earlier one.
+ADMIN_ROLES = frozenset({C.ROLE_ADMIN, "System Manager", "Administrator"})
+
+
+@dataclass(frozen=True)
+class Sender:
+	"""The signed-in sender: who they are and which roles they hold. Areas are not kept
+	here: the DA backend checks them against the session user's User Permissions."""
+
+	user: str
+	roles: frozenset[str]
+
+	@property
+	def unrestricted(self) -> bool:
+		return bool(self.roles & ADMIN_ROLES) or self.user == "Administrator"
+
+	def has_any_role(self, *roles: str) -> bool:
+		return bool(self.roles & set(roles))
+
+
+def sender(user: str | None = None) -> Sender:
+	user = user or frappe.session.user
+	return Sender(user=user, roles=frozenset(frappe.get_roles(user)))
 
 
 @dataclass(frozen=True)
@@ -148,18 +174,20 @@ def parse(data: dict) -> Request:
 	return req
 
 
-def authorize(ctx: ScopeContext, req: Request) -> None:
-	"""Deny, never widen: the sender's grants must cover the area."""
+def authorize(who: Sender, req: Request) -> None:
+	"""Deny, never widen. ``who`` must be the session user: the DA backend's area rule reads
+	``frappe.session.user``'s User Permissions."""
+	if who.user != frappe.session.user:
+		frappe.throw(_("A broadcast is sent as the signed-in user."), frappe.PermissionError)
 	if req.recipients == "farmers":
-		if not (ctx.unrestricted or ctx.has_any_role(C.ROLE_COMMS)):
+		if not (who.unrestricted or who.has_any_role(C.ROLE_COMMS)):
 			_fail(
 				_("Only a Communications Officer or an OAN Administrator can broadcast to farmers."),
 				frappe.PermissionError,
 			)
-	# The DA backend's rule: Admin anything; Communications Officer within their grant
-	# (none = national desk); Supervisor / Executive with the DA role their own woreda;
-	# Development Agent their own kebele.
-	svc._assert_broadcast_scope_allowed(ctx, req.scope, req.scope_value)
+	# The DA backend's rule, unchanged: the sender may target an area their User
+	# Permissions let them read.
+	svc._assert_broadcast_scope_allowed(req.scope, req.scope_value)
 
 
 def sms_expiry(req: Request) -> datetime | None:
