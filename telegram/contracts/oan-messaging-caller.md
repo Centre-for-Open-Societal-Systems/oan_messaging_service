@@ -67,3 +67,21 @@ Bot Services maps them in one table, with a test per code; check the exact strin
    environments can point it elsewhere if needed. The stack uses the default name.
 4. Tests for each change. Contract version stays **3.2.0**: no request, response or status
    changes.
+
+## SMS must not change (rule for every OAN Messaging change)
+
+OAN Messaging, the connector and the module kits are already delivered. Telegram is
+added next to SMS, never through it:
+
+1. **Separate Telegram worker.** Helm gets an optional second worker Deployment,
+   `worker-telegram`, with `OAN_MSG_WORKER_CHANNELS=telegram` and the bot token. It is off by
+   default. The existing worker keeps `channels: [sms]` and gets no Telegram token, so a
+   missing or wrong bot token can never stop SMS. The claim query already filters by the
+   worker's channels (`claim_due`), so SMS workers never pick up Telegram messages.
+2. **Existing values render the same.** `helm template` with today's `values.yaml`,
+   `values-pilot.yaml` and every file in `ci/` must give the same output as before, except
+   new objects that are off by default. Add a regression check for this.
+3. **SMS code paths untouched.** No change to the SMS adapter, batching, SMS pacing,
+   receipts, the connector or the API contract (3.2.0). The Telegram pace settings only
+   change the Telegram limit.
+4. **Full existing suite passes unchanged.** No existing test is edited to make it pass.
