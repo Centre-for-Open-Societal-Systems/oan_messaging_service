@@ -12,7 +12,8 @@ messages table.
 * Only counts and latency histograms are stored: no recipient, text or reference.
 * Campaigns are alert and broadcast messages of one caller that share the first two
   ``:``-separated parts of their ``source_reference`` (``da_broadcast:<broadcast>:<who>``
-  gives ``da_broadcast:<broadcast>``), with at least two recipients.
+  gives ``da_broadcast:<broadcast>``), with at least two recipients, one row per channel
+  (the Telegram copy ``bc:<broadcast>:<n>`` and the SMS copy are two labelled rows).
 """
 
 from __future__ import annotations
@@ -87,6 +88,7 @@ SELECT m.caller_id,
        split_part(m.source_reference, ':', 1) || ':' || split_part(m.source_reference, ':', 2)
            AS campaign,
        m.purpose,
+       m.channel,
        min(m.created_at) AS first_at,
        max(m.created_at) AS last_at,
        count(*) AS recipients,
@@ -100,7 +102,7 @@ FROM messages m
 WHERE m.created_at >= :lookback
   AND m.purpose IN ('alert', 'broadcast')
   AND m.source_reference LIKE '%:%:%'
-GROUP BY 1, 2, 3
+GROUP BY 1, 2, 3, 4
 HAVING count(*) >= 2 AND max(m.created_at) >= :since
 """
 

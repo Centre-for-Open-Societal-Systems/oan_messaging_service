@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OAN Messaging Service
-  version: 3.2.0
+  version: 3.3.0
   summary: Outbound SMS (8028) and Telegram with durable acceptance and honest outcomes.
   description: |
     Frozen by MSG-01 (contract 3.0.0). Python mirror: `oan_messaging/contracts.py`.
@@ -374,6 +374,15 @@ paths:
         Charts: `msgKpis`, `msgTrend`, `msgByCaller`, `msgByPurpose`, `msgFailureReasons`,
         `msgOtpLatency`, `msgCampaigns`, `msgQueueNow`, `msgProviderHealth`,
         `msgFilterCallers`.
+
+        **Channels (3.3.0).** Charts count every channel (SMS and Telegram), and every row
+        that counts messages carries `channel` (`sms` or `telegram`). `msgByCaller`,
+        `msgByPurpose`, `msgFailureReasons`, `msgOtpLatency` and `msgCampaigns` give one row
+        per key and channel (the Telegram copy of a broadcast, `bc:<broadcast>`, and its
+        SMS copy are two rows). `msgKpis` keeps one overall row and `msgTrend` one per
+        period, labelled `channel: all`, each with `by_channel`: the same figures per
+        channel. The `channel` filter limits every chart, `msgCampaigns` included. Fields
+        were only added; nothing was removed or renamed.
       tags: [charts]
       parameters:
         - name: chartId

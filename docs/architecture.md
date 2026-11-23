@@ -20,6 +20,7 @@ Frozen interfaces: [`oan_messaging/contracts.py`](../oan_messaging/contracts.py)
 | Version | Change |
 |---|---|
 | 3.1.0 | SMS of up to 3 parts (SMS-09); an OTP stays one part (`too_long_for_sms`, `too_long_for_single_sms`). Broadcast ageing (SMS-03, migration `0004`). 8028 paced at 4 SMS/s with one OTP slot (SMS-10); a 500 from 8028 is retried (SMS-11); receipts read `status` only (SMS-07) |
+| 3.3.0 | **Charts labelled by channel** (decided 23 November 2026): every counting row carries `channel` (`sms` or `telegram`); one row per key and channel; `msgKpis` and `msgTrend` keep the overall row (`channel: all`) and add `by_channel`. Migration `0007`: `stats_campaigns.channel`. Telegram pace (`OAN_MSG_TELEGRAM_RATE_PER_SECOND`, default 20) and API address from configuration, link previews off, optional `worker-telegram` Deployment (SMS-02 revised). Fields only added |
 | 3.2.0 | **Statistics:** `GET /api/v1/charts/{chartId}` and `GET /api/v1/charts?charts=`, the dashboard service contract of the OAN dashboards, for statistics readers only (see [Statistics](#statistics-get-apiv1charts)). Migration `0005`: snapshot tables, `callers.can_read_stats`, `ix_messages_created_at` |
 
 ## Changes in 3.0.0 (from the review of 2.0.0)
@@ -89,6 +90,11 @@ Grievance), so Reports Central reads it as one more upstream:
   `msgOtpLatency`, `msgCampaigns` (alert and broadcast messages sharing the first two parts
   of `source_reference`, two or more recipients) from the snapshot; `msgQueueNow`,
   `msgProviderHealth` and `msgFilterCallers` live.
+* **Channels (3.3.0):** every channel is counted, and every row that counts messages
+  carries `channel`. Charts with one row per key give one row per key and channel;
+  `msgKpis` and `msgTrend` give the overall figures (`channel: all`) plus `by_channel`.
+  The Telegram copy of a DA broadcast (`bc:<broadcast>:<n>`) and its SMS copy
+  (`da_broadcast:<broadcast>:<who>`) are two `msgCampaigns` rows.
 * **Filters:** `from`, `to` (default the last 30 days, at most 366), `granularity`
   (day, week, month), `caller`, `purpose`, `channel`; other parameters are ignored.
 * **Latency:** median and p95 from histograms (buckets 1 s … 1 day), reported as the bucket's
