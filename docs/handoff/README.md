@@ -15,7 +15,9 @@ eSignet or DA visits):**
 * OAN accepts SMS of up to 3 parts, but only for callers that ask for it (DA broadcasts).
   The connector still refuses text longer than one part by default, so your templates and
   tests stay as they are.
-* OAN sends to 8028 at 4 SMS a second (8028 sends 2–5 a second). OTPs always go first.
+* OAN sends to 8028 at a true 4 SMS a second, counted per SMS part (8028 sends 2–5 a
+  second). One of each second's 4 is kept for OTP, so broadcasts go at 3 a second, and
+  OTPs always go first. A 1 million SMS broadcast takes about 3.9 days (one-part texts).
 * A 500 from 8028 is now retried by OAN (8028 confirmed nothing was queued).
 * New connector version (`develop` `96fc5d1`): adds the option `max_parts`. You can update
   to it; nothing else changes.

@@ -1197,7 +1197,7 @@ EXAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
     "sms_otp_submission": (
         SmsSubmission,
         {
-            "recipient": "+251912000001",
+            "recipient": "+251900000401",
             "text": "Your OAN code is 482913. It expires in 5 minutes.",
             "source_reference": "esignet:otp:7f3c9a",
             "purpose": "otp",
@@ -1207,7 +1207,7 @@ EXAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
     "sms_amharic_submission": (
         SmsSubmission,
         {
-            "recipient": "0712000002",
+            "recipient": "0900000412",
             "text": "እንደምን አደርሩ! የእርሻ ምክር ለማግኘት 8028 ይደውሉ።",
             "source_reference": "advisory:2026-09-01:w12",
             "purpose": "broadcast",
@@ -1292,7 +1292,7 @@ EXAMPLES.update(
             "failure_code": "timeout", "started_at": "2026-09-01T05:12:13Z",
             "finished_at": "2026-09-01T05:12:28Z"}),
         "receipt_delivered": (DeliveryReceipt, {
-            "provider_message_id": "17006100", "recipient": "+251912000001",
+            "provider_message_id": "17006100", "recipient": "+251900000401",
             "raw_status": "Delivered", "event_time": "2026-09-01T08:12:19+03:00",
             "received_at": "2026-09-01T05:12:20Z"}),
     }
@@ -1302,7 +1302,7 @@ EXAMPLES.update(
 INVALID_EXAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
     "otp_without_expiry": (
         SmsSubmission,
-        {"recipient": "0912000001", "text": "Code 1", "source_reference": "x1", "purpose": "otp"},
+        {"recipient": "0900000401", "text": "Code 1", "source_reference": "x1", "purpose": "otp"},
     ),
     "invalid_number_9_digits": (
         SmsSubmission,
@@ -1314,22 +1314,22 @@ INVALID_EXAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
     ),
     "amharic_over_part_limit": (
         SmsSubmission,
-        {"recipient": "0912000001", "text": "ሀ" * 202, "source_reference": "x4",
+        {"recipient": "0900000401", "text": "ሀ" * 202, "source_reference": "x4",
          "purpose": "broadcast"},
     ),
     "latin_over_part_limit": (
         SmsSubmission,
-        {"recipient": "0912000001", "text": "a" * 460, "source_reference": "x5",
+        {"recipient": "0900000401", "text": "a" * 460, "source_reference": "x5",
          "purpose": "broadcast"},
     ),
     "naive_expiry": (
         SmsSubmission,
-        {"recipient": "0912000001", "text": "hi", "source_reference": "x6", "purpose": "otp",
+        {"recipient": "0900000401", "text": "hi", "source_reference": "x6", "purpose": "otp",
          "expires_at": "2026-09-01T05:17:13"},
     ),
     "idempotency_key_in_body": (
         SmsSubmission,
-        {"recipient": "0912000001", "text": "hi", "source_reference": "x6b", "purpose": "alert",
+        {"recipient": "0900000401", "text": "hi", "source_reference": "x6b", "purpose": "alert",
          "idempotency_key": "body-is-not-allowed"},
     ),
     "telegram_token_field": (
@@ -1378,7 +1378,7 @@ INVALID_EXAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
     ),
     "telegram_receipt": (
         DeliveryReceipt,
-        {"provider": "telegram", "provider_message_id": "55", "recipient": "+251912000001",
+        {"provider": "telegram", "provider_message_id": "55", "recipient": "+251900000401",
          "raw_status": "Delivered", "event_time": "2026-09-01T08:12:19+03:00",
          "received_at": "2026-09-01T05:12:20Z"},
     ),
@@ -1450,9 +1450,9 @@ def _check_idempotency_and_fingerprints(failures: list[str]) -> None:
     caller = "esignet"
     event = "esignet:otp:7f3c9a"
     exp = _T0 + timedelta(minutes=5)
-    a = SmsSubmission(recipient="0912000001", text="Code 482913", source_reference=event,
+    a = SmsSubmission(recipient="0900000401", text="Code 482913", source_reference=event,
                       purpose=Purpose.OTP, expires_at=exp)
-    b = SmsSubmission(recipient="0912000002", text="Code 482913", source_reference=event,
+    b = SmsSubmission(recipient="0900000402", text="Code 482913", source_reference=event,
                       purpose=Purpose.OTP, expires_at=exp)
 
     def pfp(sub: Submission, version: str = "k1") -> KeyedFingerprint:
@@ -1469,7 +1469,7 @@ def _check_idempotency_and_fingerprints(failures: list[str]) -> None:
     _check(failures, not pfp(a).matches(pfp(b)), "shared event: payload fingerprints collide")
 
     row_a = store[(caller, Channel.SMS, _K_R1)]
-    same_a_other_format = a.model_copy(update={"recipient": normalize_et_mobile("+251912000001")})
+    same_a_other_format = a.model_copy(update={"recipient": normalize_et_mobile("+251900000401")})
     later = _T0 + timedelta(seconds=3)
     _check(failures, classify_idempotent_request(row_a, pfp(same_a_other_format))
            is IdempotencyDecision.REPLAY, "replay: identical payload not recognized")
@@ -1586,15 +1586,15 @@ def _check_idempotency_and_fingerprints(failures: list[str]) -> None:
            "current key retirable")
 
     # Domain separation; not a plain hash.
-    _check(failures, fp.fingerprint(FingerprintDomain.PAYLOAD, b"+251912000001").digest
-           != fp.fingerprint(FingerprintDomain.RECIPIENT, b"+251912000001").digest,
+    _check(failures, fp.fingerprint(FingerprintDomain.PAYLOAD, b"+251900000401").digest
+           != fp.fingerprint(FingerprintDomain.RECIPIENT, b"+251900000401").digest,
            "fingerprint domains not separated")
-    _check(failures, fp.fingerprint(FingerprintDomain.RECIPIENT, b"+251912000001").digest
-           != hashlib.sha256(b"+251912000001").hexdigest(), "fingerprint is a plain hash")
+    _check(failures, fp.fingerprint(FingerprintDomain.RECIPIENT, b"+251900000401").digest
+           != hashlib.sha256(b"+251900000401").hexdigest(), "fingerprint is a plain hash")
 
     # Receipt matching after purge, using only the retained recipient fingerprint.
     assert sent.recipient_fingerprint is not None
-    for phone, expect in [("0912000001", True), ("+251912000001", True), ("0912000002", False)]:
+    for phone, expect in [("0900000401", True), ("+251900000401", True), ("0900000402", False)]:
         rec = DeliveryReceipt(provider_message_id="17006100", recipient=normalize_et_mobile(phone),
                               raw_status="Delivered", event_time=later, received_at=later)
         cand = fp.fingerprint(FingerprintDomain.RECIPIENT, canonical_recipient(rec.recipient),
@@ -1691,9 +1691,9 @@ def _self_check(openapi_path: str | None = None) -> list[str]:
             _check(failures, not ok, f"check_expiry rejected {purpose} {exp}")
 
     # Normalization and masking.
-    for raw in ("0912000001", "+251912000001", "251912000001"):
-        _check(failures, normalize_et_mobile(raw) == "+251912000001", f"normalize {raw}")
-    _check(failures, mask_recipient("+251912000001") == "+2519******01", "mask_recipient")
+    for raw in ("0900000401", "+251900000401", "251900000401"):
+        _check(failures, normalize_et_mobile(raw) == "+251900000401", f"normalize {raw}")
+    _check(failures, mask_recipient("+251900000401") == "+2519******01", "mask_recipient")
     _check(failures, mask_chat_id(123456789) == "chat:*******89", "mask_chat_id")
 
     # Length boundaries.
@@ -1704,14 +1704,14 @@ def _self_check(openapi_path: str | None = None) -> list[str]:
                      ("ሀ" * 202, False), ("a" * 199 + "😀", True),
                      ("ሀ" * 66 + "😀" + "ሀ" * 133, False)]:
         try:
-            SmsSubmission(recipient="0912000001", text=text, source_reference="b",
+            SmsSubmission(recipient="0900000401", text=text, source_reference="b",
                           purpose=Purpose.ALERT)
             _check(failures, ok, f"sms length accepted len={len(text)}")
         except ValidationError:
             _check(failures, not ok, f"sms length rejected len={len(text)}")
     for text, ok in [("a" * 160, True), ("a" * 161, False), ("ሀ" * 70, True), ("ሀ" * 71, False)]:
         try:
-            SmsSubmission(recipient="0912000001", text=text, source_reference="b",
+            SmsSubmission(recipient="0900000401", text=text, source_reference="b",
                           purpose=Purpose.OTP, expires_at=_T0 + timedelta(minutes=5))
             _check(failures, ok, f"otp length accepted len={len(text)}")
         except ValidationError:

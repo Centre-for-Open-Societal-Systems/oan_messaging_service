@@ -400,7 +400,8 @@ grants (`deploy/sql/grants.sql`).
 * The L4 load balancer type on the target cluster (NLB, MetalLB, ingress-nginx
   pass-through or APISIX stream route).
 * Which certificate 8028 presents on callbacks (CA-issued or fixed) and its source addresses;
-  routing of the registered callback host (`iiss.et`) to the receipts Service.
+  routing of the registered callback host (for example `callback.example.invalid`; the
+  real address is in the 8028 guide §8) to the receipts Service.
 * Database: a dedicated database with separate DDL and DML roles, `max_connections`
   share, and no transaction-mode pooler.
 * Whether the API sits behind APISIX (an `ApisixRoute` is not templated here, to avoid a

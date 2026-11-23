@@ -173,7 +173,7 @@ def test_base_url_must_be_plain_https_origin(base: str) -> None:
 
 async def test_wrong_channel_request_is_refused_without_a_call() -> None:
     adapter, rec = adapter_for(respond(200, ok_body()))
-    sms = SmsSendRequest(message_id=uuid.uuid4(), attempt=1, recipient="+251912000001",
+    sms = SmsSendRequest(message_id=uuid.uuid4(), attempt=1, recipient="+251900000401",
                          text="hi")
     result = await adapter.send(sms)
     assert result.outcome is ProviderOutcome.NOT_SENT

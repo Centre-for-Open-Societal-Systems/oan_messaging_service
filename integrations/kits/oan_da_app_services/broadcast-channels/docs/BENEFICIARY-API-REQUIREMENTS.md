@@ -18,7 +18,7 @@ else keeps a second copy of farmer phones.
 
 | Route | Why it does not serve this |
 |---|---|
-| `iam-bene-portal-api` (`bene-iam.development.oanstaging.com`) | Farmer **login** (eSignet/Fayda, session cookie). Holds no farmer data |
+| `iam-bene-portal-api` (`bene-iam.example.invalid`) | Farmer **login** (eSignet/Fayda, session cookie). Holds no farmer data |
 | Registry bene-portal API (`openg2p-registry-bene-api`) | Disabled on Dev (`enabled: false`); upstream it returns register metadata only |
 | Aggregation layer Beneficiary-360, partner `/dci/registry/sync/search` | One farmer per call, keyed by Fayda number, with that **farmer's consent** on every call. Unworkable for a broadcast |
 | Staff API `POST /register-data/search_in_a_register` (used by the DA backend and A2C) | Filters on **names** only (`region_name` … `kebele_name`, text `eq`/`contains`). Names are not unique. The filter list is at its limit of 10 fields (`farmer-registry` `05_registers.sql`). Rows carry `primary_phone_number` but no area codes and no language. On Dev on 29 Oct it ignored `filter_by`, so the DA backend reads everything and filters itself |

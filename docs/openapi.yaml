@@ -87,7 +87,7 @@ paths:
               otp:
                 summary: OTP (expiry mandatory); header example `otp`
                 value:
-                  recipient: '+251912000001'
+                  recipient: '+251900000401'
                   text: Your OAN code is 482913. It expires in 5 minutes.
                   source_reference: esignet:otp:7f3c9a
                   purpose: otp
@@ -95,28 +95,28 @@ paths:
               shared_event_recipient_1:
                 summary: One grievance event, first recipient; header example `shared_event_recipient_1`
                 value:
-                  recipient: '0912000003'
+                  recipient: '0900000403'
                   text: Grievance G-1042 was updated.
                   source_reference: grievance:G-1042:update:3
                   purpose: transactional
               shared_event_recipient_2:
                 summary: Same event, second recipient (different key); header example `shared_event_recipient_2`
                 value:
-                  recipient: '0912000004'
+                  recipient: '0900000404'
                   text: Grievance G-1042 was updated.
                   source_reference: grievance:G-1042:update:3
                   purpose: transactional
               amharic_broadcast:
                 summary: Amharic advisory, domestic number format
                 value:
-                  recipient: '0712000002'
+                  recipient: '0900000412'
                   text: እንደምን አደርሩ! የእርሻ ምክር ለማግኘት 8028 ይደውሉ።
                   source_reference: advisory:2026-09-01:w12
                   purpose: broadcast
               invalid_otp_without_expiry:
                 summary: Rejected with 422 — OTP without expires_at
                 value:
-                  recipient: '0912000001'
+                  recipient: '0900000401'
                   text: Code 1
                   source_reference: x1
                   purpose: otp
@@ -130,7 +130,7 @@ paths:
               invalid_key_in_body:
                 summary: Rejected with 422 — the key belongs in the header
                 value:
-                  recipient: '0912000001'
+                  recipient: '0900000401'
                   text: hi
                   source_reference: x6b
                   purpose: alert

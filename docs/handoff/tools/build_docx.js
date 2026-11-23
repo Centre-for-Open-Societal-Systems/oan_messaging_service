@@ -241,7 +241,7 @@ const title = [
   ...[
     ["Version", "15 November 2026"],
     ["Status", "Review (not deployed)"],
-    ["Contract", "OAN Messaging external contract 3.0.0"],
+    ["Contract", "OAN Messaging external contract 3.2.0"],
     ["Audience", "Credit (A2C), DPI Consent Manager, Grievance, DA Services, Auth and eSignet teams; QA; DevOps"],
     ["Note", "All hosts are example.invalid placeholders and all phone numbers are 0900000xxx test numbers."],
   ].map(([k, v]) => new Paragraph({ spacing: { before: 160 }, children: [

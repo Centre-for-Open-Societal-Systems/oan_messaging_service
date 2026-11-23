@@ -15,7 +15,7 @@ Two factors, both checked **by this process**, never by a header:
 
 Callback body (guide 8.1)::
 
-    {"clientSecret": "...", "sms_id": 4433006, "phone_number": "251911234567",
+    {"clientSecret": "...", "sms_id": 4433006, "phone_number": "251900000467",
      "status": "Delivered", "event_time": "2026-11-11 21:33:20"}
 
 ``status`` is read (8028 confirmed 20 Nov 2026: field ``status``, values ``Pending``,

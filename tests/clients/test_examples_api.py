@@ -81,7 +81,7 @@ def all_example_deliveries() -> list[Any]:
                            T0),
         *to_deliveries(VisitEvent("ve-1", "V-77", "planned", (
             VisitRecipient("farmer", "0900000004", "DA visit planned: 3 Sep 09:00."),
-            VisitRecipient("da-agent", "0700000005", "Visit V-77 with farmer, 3 Sep 09:00."),
+            VisitRecipient("da-agent", "0900000405", "Visit V-77 with farmer, 3 Sep 09:00."),
         ), T0 + timedelta(days=2)), T0),
         tg_delivery(TelegramNotice("grievance", "ge-3", 555000111,
                                    "Your grievance G-1042 was updated."), T0),
@@ -186,7 +186,7 @@ def test_delivery_keys_are_stable_opaque_and_distinct() -> None:
     assert a1 != delivery_key("grievance", "ge-2", "farmer", "sms")
     assert a1 != delivery_key("grievance", "ge-1", "farmer", "telegram")
     uuid.UUID(a1)
-    for pii in ("0912345678", "251912345678", "evt-0712345678"):
+    for pii in ("0900000478", "251900000478", "evt-0900000477"):
         with pytest.raises(ValueError):
             delivery_key("svc", pii, "farmer", "sms")
     # UUID-shaped event ids with all-digit groups are not mistaken for phones.

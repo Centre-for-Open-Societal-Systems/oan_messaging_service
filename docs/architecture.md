@@ -172,7 +172,7 @@ live (partial unique index `WHERE binding_released_at IS NULL`).
 **Canonical payload** (`canonical_payload`, version 1): JSON with sorted keys and no
 whitespace over `caller_id`, `channel`, `purpose`, `source_reference`, normalized E.164
 `recipient` or `chat_id`, byte-exact `text` (no Unicode normalization) and `expires_at`
-in UTC with microseconds. `0912000001` and `+251912000001` canonicalize the same, as do
+in UTC with microseconds. `0900000401` and `+251900000401` canonicalize the same, as do
 equivalent instants written with different offsets. Text is not Unicode-normalized:
 retries must resend the original text and `expires_at` exactly.
 

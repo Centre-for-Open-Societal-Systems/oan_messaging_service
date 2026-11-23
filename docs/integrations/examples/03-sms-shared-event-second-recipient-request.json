@@ -11,7 +11,7 @@
   "schema": "SmsSubmission",
   "expect_status": 202,
   "body": {
-    "recipient": "0700000005",
+    "recipient": "0900000405",
     "text": "Visit V-77 with farmer, 3 Sep 09:00.",
     "source_reference": "da:visit:V-77:ve-1",
     "purpose": "transactional",

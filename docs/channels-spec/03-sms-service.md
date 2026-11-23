@@ -5,7 +5,7 @@ sends them from background workers through the 8028 SMS gateway, and reports hon
 outcomes. It does **not** generate or check OTPs, validate identities, receive SMS, run
 conversations or decide who should receive what.
 
-The frozen interfaces are `docs/openapi.yaml` (HTTP, contract 3.1.0) and
+The frozen interfaces are `docs/openapi.yaml` (HTTP, contract 3.2.0) and
 `oan_messaging/contracts.py` (Python). 8028 specifics are in `docs/8028-contract.md`.
 
 ## 3.1 API
@@ -80,21 +80,28 @@ provider URL or priority.
   purpose (an older alert keeps its place), then the rest by priority; the starvation test
   passes. Turned on with `OAN_MSG_BROADCAST_ENABLED`. A large campaign delays newer
   transactional and alert SMS until it drains (user's choice, 20 Nov 2026).
-* **Batching (decided 19 Nov 2026):** queued messages with exactly the same text are sent
-  in one 8028 request of up to `batch_max_recipients` numbers (configuration, default
-  **100**). Each recipient stays its own message (own key, status and receipt); the
-  `sms_id`s in the response are matched back in order. 8028 requests are all or nothing,
-  so a batch that may have left without a response makes every message in it `unknown`,
-  never resent. OTPs and personal notices are sent one per request.
+* **Batching (decided 19 Nov 2026, built 23 Nov 2026, off by default):** broadcast and
+  alert messages from one caller with exactly the same text are sent in one 8028 request
+  of up to `batch_max_recipients` numbers (`OAN_MSG_SMS_BATCH_MAX_RECIPIENTS`, Helm
+  `smsBatchMaxRecipients`; default **1**, which is off; at most 100). Each recipient stays
+  its own message (own key, status and receipt); the `sms_id`s in the response are matched
+  back by position and number (guide v1.1 §5.2). 8028 requests are all or nothing, so a
+  batch that may have left without a usable response makes every message in it `unknown`,
+  never resent; a 500 retries them; a 413 retries them one by one. OTPs and every other
+  purpose are sent one per request. A batch counts numbers × parts against the pace, so it
+  does not send a campaign faster, and an OTP can wait behind it (up to 25 s after 100
+  one-part SMS); it is off unless fewer 8028 requests matter more.
 * **Expiry** is checked again immediately before each network call.
 * **Pacing (SMS-10, 20 Nov 2026):** 8028 has no API rate limit and queues everything, but
   the operator sends only 2–5 SMS a second. Anything sent faster waits in 8028's queue,
   where our order (OTP first, broadcast ageing) no longer applies. So OAN paces 8028 at
-  **4 SMS a second** (`OAN_MSG_SMS_RATE_PER_SECOND`), one slot of each second kept for OTP
-  (`OAN_MSG_SMS_OTP_RESERVE`), counted per SMS (a batch counts each number). The worker
-  reserves a slot inside the same database transaction that records the attempt (a
+  a true **4 SMS a second** (`OAN_MSG_SMS_RATE_PER_SECOND`), counted per SMS part (a
+  3-part SMS uses 3; a batch uses numbers × parts), with one of each second's 4 kept for
+  OTP (`OAN_MSG_SMS_OTP_RESERVE`), so broadcasts go at 3 a second. The worker reserves its
+  share inside the same database transaction that records the attempt (a
   transaction-scoped advisory lock), so the pace holds across workers. A 1 million SMS
-  campaign takes about 3 days at this pace.
+  broadcast takes about 3.9 days with one-part texts, 7.7 days with two parts and 11.6
+  days with three, with or without batching.
 * **Before the call**, the attempt is committed. After it, the result is recorded:
   `sent`, `failed`, back to `accepted` with a back-off if the message provably never
   left (connection refused, TLS failure, or an HTTP 500, which 8028 confirmed queues

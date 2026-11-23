@@ -46,8 +46,22 @@ if [ -n "$forbidden" ]; then echo "FORBIDDEN files present:"; echo "$forbidden";
 if grep -rIlE 'BEGIN [A-Z ]*PRIVATE KEY|oanmsg_[A-Za-z0-9_-]{43}' "$DEST"; then
   echo "FAIL: key or token material found (files above)"; fail=1
 fi
-paths="$(grep -rIlE '/Volumes/|/Users/[A-Za-z]|/home/[a-z]' "$DEST" \
-  | grep -v -e 'tests/api/test_migrations.py' -e 'deploy/export-package.sh' || true)"
+# Known, harmless absolute paths that are not anyone's machine, matched per line:
+# - /home/runner/: the GitHub Actions runner (working-directory: lines in upstream ci.yml
+#   files that the kit patches edit, kept as context so the patches still apply);
+# - /home/frappe: the home of the frappe user inside the trial stack's container image
+#   (trial/stack/*/Dockerfile and compose.yaml only).
+# Any other /Volumes/, /Users/ or /home/ path, anywhere, still fails.
+paths="$(grep -rInE '/Volumes/|/Users/[A-Za-z]|/home/[a-z]' "$DEST" \
+  | grep -v -e '^[^:]*tests/api/test_migrations.py:' -e '^[^:]*deploy/export-package.sh:' \
+  | grep -vE '^[^:]+:[0-9]+:.*working-directory: /home/runner/' \
+  | grep -vE '^[^:]*/trial/stack/[^/:]+/(Dockerfile|compose\.yaml):[0-9]+:' \
+  | cut -d: -f1 | sort -u || true)"
+# A trial-stack line is only skipped when its absolute paths are all /home/frappe.
+trial="$(grep -rInE '/Volumes/|/Users/[A-Za-z]|/home/[a-z]' "$DEST" --include Dockerfile --include compose.yaml \
+  | grep -E '^[^:]*/trial/stack/' | grep -vE '^[^:]+:[0-9]+:([^/]|/[^VUh]|/home/frappe)*$' \
+  | cut -d: -f1 | sort -u || true)"
+paths="$(printf '%s\n%s\n' "$paths" "$trial" | sed '/^$/d' | sort -u)"
 if [ -n "$paths" ]; then
   echo "FAIL: local absolute paths found in:"; echo "$paths"; fail=1
 fi

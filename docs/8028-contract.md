@@ -29,7 +29,7 @@ written here, in the repository or in logs. They live in the secret store only.
 
 | Field | Guide | Decision |
 |---|---|---|
-| `phonenums` | At least one; each exactly `09XXXXXXXX` or `07XXXXXXXX`; `+251…`/`251…` rejected; all or nothing | **One recipient per request** (one message = one `sms_id`). The adapter converts E.164 to `09…`/`07…` |
+| `phonenums` | At least one; each exactly `09XXXXXXXX` or `07XXXXXXXX`; `+251…`/`251…` rejected; all or nothing | **One recipient per request** (one message = one `sms_id`), except with batching turned on (broadcast and alert only, off by default): one number per message, `sms_id`s matched back by position and number. The adapter converts E.164 to `09…`/`07…` |
 | `pushdatetime` | Optional; omitted or empty sends now; a past **date** is rejected | Sent as "now" in EAT (today's date, so accepted). Scheduling is out of scope |
 | `smstext` | Not empty; trimmed; Unicode supported; no length limit (body < 100 KB); multi-part joined on the handset | **Up to 3 parts** (SMS-09, 20 Nov 2026): one part is 160 GSM-7 characters (extension characters count 2), otherwise 70 UTF-16 units; a longer text is sent whole and counted at 153 / 67 per part, so at most 459 / 201. OTPs stay one part |
 
@@ -57,7 +57,7 @@ it is **never** stored or logged verbatim; only `http_<code>` is kept.
 ## Status callback (8028 → this service) → `DeliveryReceipt`
 
 8028 calls the registered endpoint **`https://iiss.et/sms-status-receiver/v1/update-status`**
-(guide 8), oldest first, in batches about every 5 seconds:
+(from 8028 guide §8), oldest first, in batches about every 5 seconds:
 
 ```json
 {"clientSecret": "<callback secret>", "sms_id": 4433006, "phone_number": "251900000901",
@@ -66,8 +66,8 @@ it is **never** stored or logged verbatim; only `http_<code>` is kept.
 
 | Item | Guide v1.1 | Decision (receipt listener) |
 |---|---|---|
-| Path | `/sms-status-receiver/v1/update-status` on `iiss.et` | Default `OAN_MSG_RECEIPTS_PATH`; `iiss.et` must route (TCP pass-through) to the listener |
-| Server certificate | Publicly trusted, matching the hostname | The listener presents the public certificate for `iiss.et` (`OAN_MSG_RECEIPTS_SERVER_CERT`) |
+| Path | `/sms-status-receiver/v1/update-status` on `iiss.et` (from 8028 guide §8) | Default `OAN_MSG_RECEIPTS_PATH`; `iiss.et` must route (TCP pass-through) to the listener |
+| Server certificate | Publicly trusted, matching the hostname | The listener presents the public certificate for `iiss.et` (from 8028 guide §8) (`OAN_MSG_RECEIPTS_SERVER_CERT`) |
 | Client certificate | 8028 presents its own client certificate; 8028 supplied its callback CA (`CN=StatusAPIPrivateCA`) | Trust that CA (`OAN_MSG_RECEIPTS_CLIENT_CA_CERTS`). Optional pins (`OAN_MSG_RECEIPTS_PINNED_CERTS`) narrow it to specific certificates |
 | Callback secret | `clientSecret` in every body; check it on every call | Constant-time check against `OAN_MSG_RECEIPTS_CALLBACK_SECRET` (and `_PREVIOUS` during rotation); wrong or missing → 401; never stored or logged |
 | Status field | `status` | Read `status` only (8028 confirmed 20 Nov 2026; values `Pending`, `Delivered`, `Rejected`). The Postman collection's `sms_status` is not read |
@@ -123,10 +123,12 @@ here with the answer.
 5. **Production endpoint and certificate**, if different from the test ones. 8028 also
    asks for **our callback URL** for each environment (DevOps, OPS-02).
 6. **Rate limit.** **Answered:** no limit on the API; everything is queued at 8028 and the
-   operator sends 2–5 SMS a second. The service now paces 8028 at **4 SMS a second**
-   (`OAN_MSG_SMS_RATE_PER_SECOND`, one slot kept for OTP: `OAN_MSG_SMS_OTP_RESERVE`), so
-   messages wait in OAN, where OTPs go first and broadcasts age (SMS-03), instead of in
-   8028's queue. At that pace a 1 million SMS campaign takes about 3 days.
+   operator sends 2–5 SMS a second. The service now paces 8028 at a true **4 SMS a
+   second**, counted per SMS part (`OAN_MSG_SMS_RATE_PER_SECOND`, one kept for OTP:
+   `OAN_MSG_SMS_OTP_RESERVE`, so broadcasts go at 3 a second), so messages wait in OAN,
+   where OTPs go first and broadcasts age (SMS-03), instead of in 8028's queue. At that
+   pace a 1 million SMS broadcast takes about 3.9 days with one-part texts (7.7 days with
+   two parts, 11.6 with three).
 7. **No idempotency at 8028.** There is no caller reference or status lookup, so an
    ambiguous submission (timeout after sending) stays `unknown` and is never resent.
 8. **Callback certificate.** **Answered:** the certificates are those in the package's
