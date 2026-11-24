@@ -1,0 +1,229 @@
+{
+ "actions": [],
+ "creation": "2026-11-15 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "OAN Messaging Connector",
+ "owner": "Administrator",
+ "states": [],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "name": "OAN Message",
+ "autoname": "format:OAN-MSG-{######}",
+ "naming_rule": "Expression",
+ "field_order": [
+  "reference_doctype",
+  "reference_name",
+  "event",
+  "desk_status",
+  "needs_attention",
+  "language",
+  "oan_section",
+  "delivery_id",
+  "recipient",
+  "text",
+  "source_reference",
+  "purpose",
+  "expires_at",
+  "first_submitted_at",
+  "state",
+  "attempts",
+  "next_attempt_at",
+  "col_oan",
+  "oan_message_id",
+  "oan_status",
+  "oan_final",
+  "polls",
+  "next_poll_at",
+  "poll_deadline",
+  "poll_complete",
+  "error_code"
+ ],
+ "fields": [
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Reference DocType",
+   "options": "DocType",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Reference",
+   "options": "reference_doctype",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "event",
+   "fieldtype": "Data",
+   "label": "Event",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "desk_status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Queued\nSubmitted\nFailed",
+   "default": "Queued",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "needs_attention",
+   "fieldtype": "Check",
+   "label": "Needs Attention",
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "language",
+   "fieldtype": "Data",
+   "label": "Language",
+   "read_only": 1
+  },
+  {
+   "fieldname": "oan_section",
+   "fieldtype": "Section Break",
+   "label": "Delivery"
+  },
+  {
+   "fieldname": "delivery_id",
+   "fieldtype": "Data",
+   "label": "Delivery ID (Idempotency-Key)",
+   "unique": 1,
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "recipient",
+   "fieldtype": "Data",
+   "label": "Recipient",
+   "read_only": 1
+  },
+  {
+   "fieldname": "text",
+   "fieldtype": "Small Text",
+   "label": "Message",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_reference",
+   "fieldtype": "Data",
+   "label": "Source Reference",
+   "read_only": 1
+  },
+  {
+   "fieldname": "purpose",
+   "fieldtype": "Data",
+   "label": "Purpose",
+   "read_only": 1
+  },
+  {
+   "fieldname": "expires_at",
+   "fieldtype": "Data",
+   "label": "Expires At (UTC)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "first_submitted_at",
+   "fieldtype": "Data",
+   "label": "First Submitted At (UTC)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "state",
+   "fieldtype": "Data",
+   "label": "Outbox State",
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "attempts",
+   "fieldtype": "Int",
+   "label": "Dispatch Runs",
+   "read_only": 1
+  },
+  {
+   "fieldname": "next_attempt_at",
+   "fieldtype": "Data",
+   "label": "Next Attempt At (UTC)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_oan",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "oan_message_id",
+   "fieldtype": "Data",
+   "label": "OAN Message ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "oan_status",
+   "fieldtype": "Data",
+   "label": "OAN Status",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "oan_final",
+   "fieldtype": "Check",
+   "label": "OAN Final",
+   "read_only": 1
+  },
+  {
+   "fieldname": "polls",
+   "fieldtype": "Int",
+   "label": "Status Polls",
+   "read_only": 1
+  },
+  {
+   "fieldname": "next_poll_at",
+   "fieldtype": "Data",
+   "label": "Next Poll At (UTC)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "poll_deadline",
+   "fieldtype": "Data",
+   "label": "Poll Deadline (UTC)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "poll_complete",
+   "fieldtype": "Check",
+   "label": "Polling Complete",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error_code",
+   "fieldtype": "Data",
+   "label": "Error Code",
+   "read_only": 1
+  }
+ ],
+ "in_create": 1,
+ "track_changes": 0,
+ "permissions": [
+  {
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "role": "System Manager"
+  }
+ ],
+ "description": "Outbox of messages sent through the OAN Messaging Service. One row per intended message; delivery_id is the Idempotency-Key. Rows are never deleted."
+}
