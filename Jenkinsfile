@@ -1,6 +1,6 @@
 // Build the OAN Messaging service image and publish it to AWS ECR:
 //   379220350808.dkr.ecr.ap-south-1.amazonaws.com/eoan/<repo name>/<service>:<version>
-// <version> = the pyproject version plus the build number (for example 0.1.0-develop.7), the same style as the
+// <version> = init.yaml's version plus -<branch>.<build> (for example 1.0.0-develop.7), the same style as the
 // other eoan/ images; a second tag carries the 12-character commit. Tags in the repository are immutable.
 // Jenkins job: oan-messaging-service (ci/jenkins/jobs/oan-messaging-service.xml), builds the develop branch; develop publishes.
 // Needs the Jenkins credential aws-ecr-creds-new (AWS Credentials with ECR push access).
@@ -24,11 +24,12 @@ pipeline {
             steps {
                 checkout scm
                 script {
-                    def base = sh(returnStdout: true, script: "grep -m1 '^version' pyproject.toml | cut -d'\"' -f2").trim()
-                    def repo = sh(returnStdout: true, script: 'basename -s .git "$(git config --get remote.origin.url)"').trim()
+                    // The version is init.yaml's; the tag and the ECR repository come from image_names.py
+                    // (oan-helm docs/release/naming-standard.md, section 6): nothing is scraped from pyproject.toml.
                     def sha  = sh(returnStdout: true, script: 'git rev-parse --short=12 HEAD').trim()
-                    env.IMAGE_VERSION = "${base}-develop.${env.BUILD_NUMBER}"
-                    env.ECR_REPO      = "eoan/${repo}/${env.SERVICE}"
+                    env.IMAGE_VERSION = sh(returnStdout: true,
+                        script: 'python3 scripts/ci/image_names.py tag "$BRANCH_NAME" "$BUILD_NUMBER"').trim()
+                    env.ECR_REPO      = sh(returnStdout: true, script: 'python3 scripts/ci/image_names.py repository').trim()
                     env.IMAGE         = "${env.IMAGE_REGISTRY}/${env.ECR_REPO}"
                     env.IMAGE_SHA     = sha
                     echo "Image ${env.IMAGE}:${env.IMAGE_VERSION} (commit ${sha})"

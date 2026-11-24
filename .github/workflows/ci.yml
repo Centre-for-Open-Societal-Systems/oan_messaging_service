@@ -22,6 +22,7 @@ jobs:
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - run: uv sync --frozen --extra dev
       - run: uv run ruff check . --extend-exclude docs   # docs/ holds standalone analysis scripts
+      - run: python scripts/ci/tests/test_image_names.py   # the image tag comes from init.yaml
       - run: uv run mypy -p oan_messaging -p oan_bot_services
       - run: uv run python -m oan_messaging.contracts
       - run: PYTHONPATH=.:examples uv run pytest tests -q --ignore=tests/bot_services
