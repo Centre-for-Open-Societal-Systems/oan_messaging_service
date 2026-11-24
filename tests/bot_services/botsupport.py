@@ -8,6 +8,7 @@ test that leaves any. Test data only: phones ``+2519000001xx``, hosts ``*.exampl
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import uuid
 from dataclasses import dataclass, field
@@ -117,6 +118,7 @@ class Upstreams:
     oan_messages: dict[str, dict[str, Any]] = field(default_factory=dict)
     oan_by_key: dict[str, str] = field(default_factory=dict)
     oan_auth: str = "oan-caller-" + secrets.token_hex(8)
+    oan_cancels: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         sensitive(self.token, self.oan_auth, self.otp_code)
@@ -327,12 +329,27 @@ class Upstreams:
     # ---------------------------------------------------------------------- oan
 
     def _oan(self, request: httpx.Request, path: str, body: Any) -> httpx.Response:
+        """OAN Messaging contract 3.4.0: ``reply_markup`` (reply buttons) and
+        the cancel route. A message is ``claimed`` once a worker would have taken
+        it (``claim()``); only an unclaimed ``accepted`` message can be cancelled."""
         if request.method == "POST" and path == "/api/v1/messages/telegram":
             key = request.headers.get("Idempotency-Key")
             if not key:
                 return httpx.Response(422, json={"status": 422, "code": "validation_failed"})
-            if set(body) != {"chat_id", "text", "purpose", "expires_at", "source_reference"}:
+            required = {"chat_id", "text", "purpose", "expires_at", "source_reference"}
+            if not required <= set(body) or set(body) - required - {"reply_markup"}:
                 self.violations.append(f"oan: unexpected fields {sorted(body)}")
+            if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$", body["source_reference"]):
+                self.violations.append("oan: bad source_reference")
+            if body["purpose"] not in ("otp", "transactional", "alert", "broadcast"):
+                self.violations.append("oan: bad purpose")
+            if "reply_markup" in body:
+                problem = reply_markup_problem(body["reply_markup"])
+                if problem:
+                    return httpx.Response(
+                        422, json={"status": 422, "code": "validation_failed",
+                                   "errors": [{"field": "reply_markup", "code": problem}]}
+                    )
             if key in self.oan_by_key:
                 m = self.oan_messages[self.oan_by_key[key]]
                 return httpx.Response(200, json={"id": m["id"], "status": m["status"]})
@@ -343,11 +360,24 @@ class Upstreams:
                 "failure_code": None,
                 "body": body,
                 "key": key,
+                "claimed": False,
             }
             self.oan_by_key[key] = mid
             return httpx.Response(
                 202, json={"id": mid, "status": "accepted", "channel": "telegram"}
             )
+        if request.method == "POST" and path.endswith("/cancel"):
+            mid = path.split("/")[-2]
+            self.oan_cancels.append(mid)
+            m = self.oan_messages.get(mid)
+            if m is None:
+                return httpx.Response(404, json={"status": 404, "code": "not_found"})
+            if m["status"] == "failed" and m["failure_code"] == "cancelled":
+                return httpx.Response(200, json=self._view(m))
+            if m["status"] != "accepted" or m["claimed"]:
+                return httpx.Response(409, json={"status": 409, "code": "not_cancellable"})
+            m["status"], m["failure_code"] = "failed", "cancelled"
+            return httpx.Response(200, json=self._view(m))
         if request.method == "GET" and path.startswith("/api/v1/messages/"):
             mid = path.rsplit("/", 1)[1]
             m = self.oan_messages.get(mid)
@@ -359,12 +389,63 @@ class Upstreams:
             return httpx.Response(200, json=out)
         return httpx.Response(404)
 
+    @staticmethod
+    def _view(m: dict[str, Any]) -> dict[str, Any]:
+        out = {"id": m["id"], "status": m["status"], "channel": "telegram",
+               "final": m["status"] in ("sent", "delivered", "failed", "expired", "unknown")}
+        if m["failure_code"]:
+            out["failure_code"] = m["failure_code"]
+        return out
+
+    def claim(self, chat_id: int | None = None) -> None:
+        """A worker took the waiting messages: they can no longer be cancelled."""
+        for m in self.oan_messages.values():
+            if chat_id is None or m["body"]["chat_id"] == chat_id:
+                m["claimed"] = True
+
+    def replies(self, chat_id: int) -> list[dict[str, Any]]:
+        """Bot replies (purpose transactional) to one chat, in the order submitted."""
+        return [m["body"] for m in self.oan_messages.values()
+                if m["body"]["chat_id"] == chat_id and m["body"]["purpose"] == "transactional"]
+
     def settle(
         self, status: str = "sent", failure_code: str | None = None, chat_id: int | None = None
     ) -> None:
         for m in self.oan_messages.values():
             if chat_id is None or m["body"]["chat_id"] == chat_id:
                 m["status"], m["failure_code"] = status, failure_code
+
+
+def reply_markup_problem(markup: Any) -> str | None:
+    """Contract 3.4.0: ``keyboard`` (1-4 rows, 1-3 buttons, text 1-30 UTF-16 units, no
+    control characters, optional request_contact) with optional one_time and resize, or
+    ``{"remove_keyboard": true}``. Unknown keys refused."""
+    if not isinstance(markup, dict):
+        return "invalid"
+    if "remove_keyboard" in markup:
+        return None if markup == {"remove_keyboard": True} else "invalid"
+    if set(markup) - {"keyboard", "one_time", "resize"} or "keyboard" not in markup:
+        return "unknown_field"
+    for flag in ("one_time", "resize"):
+        if flag in markup and not isinstance(markup[flag], bool):
+            return "invalid"
+    rows = markup["keyboard"]
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 4:
+        return "rows"
+    for row in rows:
+        if not isinstance(row, list) or not 1 <= len(row) <= 3:
+            return "buttons"
+        for b in row:
+            if not isinstance(b, dict) or set(b) - {"text", "request_contact"}:
+                return "unknown_field"
+            text = b.get("text")
+            if not isinstance(text, str) or not 1 <= len(text.encode("utf-16-le")) // 2 <= 30:
+                return "text"
+            if any(ord(c) < 32 or ord(c) == 127 for c in text):
+                return "text"
+            if "request_contact" in b and not isinstance(b["request_contact"], bool):
+                return "invalid"
+    return None
 
 
 def new_contact(telegram_id: int) -> dict[str, Any]:

@@ -24,6 +24,7 @@ def b64(n: int = 32) -> str:
 
 BASE = {
     "database_url": "postgresql+psycopg://u:p@127.0.0.1:5432/bot",
+    "rapidpro_enabled": True,
     "flow_secret": "f" * 32,
     "contact_ref_key": b64(),
     "fingerprint_key": b64(),
