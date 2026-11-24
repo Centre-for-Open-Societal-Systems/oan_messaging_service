@@ -1,0 +1,15 @@
+name: Linters
+
+# The shared checks of the OAN Frappe apps: conventional commit titles, pre-commit
+# (ruff, ruff-format, gitleaks), Semgrep (Frappe rules, Python correctness and the shared
+# OAN rules) and pip-audit.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linters:
+    uses: Centre-for-Open-Societal-Systems/oan_auth_service/.github/workflows/linters.yml@develop

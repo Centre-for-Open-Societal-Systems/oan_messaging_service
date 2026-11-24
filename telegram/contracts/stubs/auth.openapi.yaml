@@ -1,0 +1,104 @@
+openapi: 3.1.0
+info:
+  title: Auth service, farmer-linking OTP routes (stub)
+  version: 0.1.0
+  description: |
+    Channels Specification v2.0 §6.6 (ID-02: these service-client routes do not exist yet).
+    Auth sends the OTP to the registered phone through OAN Messaging as its own OTP caller.
+    The stub does not send anything: it records the code so a test can read it from
+    `/_test/codes`, and it applies the rules below.
+servers:
+  - url: http://stubs:8200/auth
+security:
+  - clientCredentials: []
+paths:
+  /token:
+    post:
+      operationId: token
+      security: []
+      summary: Client-credentials token for every stub (Keycloak stand-in)
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, client_id, client_secret]
+              properties:
+                grant_type: {type: string, const: client_credentials}
+                client_id: {type: string}
+                client_secret: {type: string}
+      responses:
+        '200':
+          description: Token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, expires_in, token_type]
+                properties:
+                  access_token: {type: string}
+                  expires_in: {type: integer}
+                  token_type: {type: string, const: Bearer}
+        '401': {description: Wrong client}
+  /link-otp:
+    post:
+      operationId: issueLinkOtp
+      summary: Send a linking OTP to the registered phone
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [link_request_id, farmer_id, phone]
+              properties:
+                link_request_id: {type: string, format: uuid}
+                farmer_id: {type: string}
+                phone: {type: string, pattern: '^\+251[79][0-9]{8}$', description: 'E.164, as the beneficiary API returns it (test numbers +251900000xxx)'}
+      responses:
+        '200':
+          description: |
+            `sent`, or `rate_limited` (more than 3 issues for one Farmer ID in 15 minutes).
+            Repeating the same `link_request_id` returns the first answer and sends nothing.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result: {type: string, enum: [sent, rate_limited]}
+                  expires_in: {type: integer, maximum: 1800}
+  /link-otp/verify:
+    post:
+      operationId: verifyLinkOtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [link_request_id, code]
+              properties:
+                link_request_id: {type: string, format: uuid}
+                code: {type: string, pattern: '^[0-9]{4,8}$'}
+      responses:
+        '200':
+          description: A valid code works once.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result: {type: string, enum: [valid, invalid, expired]}
+components:
+  securitySchemes:
+    clientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: http://stubs:8200/auth/token
+          scopes: {}

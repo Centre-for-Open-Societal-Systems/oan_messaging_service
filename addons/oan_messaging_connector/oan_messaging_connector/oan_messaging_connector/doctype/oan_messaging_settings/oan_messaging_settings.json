@@ -1,0 +1,104 @@
+{
+ "actions": [],
+ "creation": "2026-11-15 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-16 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "OAN Messaging Connector",
+ "owner": "Administrator",
+ "states": [],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "name": "OAN Messaging Settings",
+ "issingle": 1,
+ "field_order": [
+  "enabled",
+  "base_url",
+  "token",
+  "ca_bundle",
+  "max_attempts",
+  "receipt_wait_days",
+  "content_retention_days",
+  "send_sms_hook_section",
+  "hook_purpose",
+  "hook_expiry_minutes"
+ ],
+ "fields": [
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "description": "Off: queue_sms() does nothing and the jobs are idle."
+  },
+  {
+   "fieldname": "base_url",
+   "fieldtype": "Data",
+   "label": "OAN API Base URL",
+   "description": "Scheme and host only, e.g. https://oan-messaging.dev.example.invalid"
+  },
+  {
+   "fieldname": "token",
+   "fieldtype": "Password",
+   "label": "Caller Token",
+   "description": "Issued by the OAN operator for this caller. site_config oan_messaging_token overrides it."
+  },
+  {
+   "fieldname": "ca_bundle",
+   "fieldtype": "Data",
+   "label": "CA Bundle Path",
+   "description": "Optional PEM path for the OAN API certificate."
+  },
+  {
+   "fieldname": "max_attempts",
+   "fieldtype": "Int",
+   "label": "HTTP Attempts per Dispatch",
+   "default": "3"
+  },
+  {
+   "fieldname": "receipt_wait_days",
+   "fieldtype": "Int",
+   "label": "Stop Polling SMS After (days)",
+   "default": "7"
+  },
+  {
+   "fieldname": "content_retention_days",
+   "fieldtype": "Int",
+   "label": "Clear Message Text After (days)",
+   "default": "7",
+   "description": "Finished rows keep only delivery metadata after this many days: the text is cleared and the recipient masked. site_config oan_messaging_content_retention_days overrides it."
+  },
+  {
+   "fieldname": "send_sms_hook_section",
+   "fieldtype": "Section Break",
+   "label": "Frappe send_sms Hook (only for apps that register it)",
+   "description": "Used only when an app on this site registers send_sms = \"oan_messaging_connector.sms_hook.send_sms\" in its hooks.py. New features should call queue_sms instead."
+  },
+  {
+   "fieldname": "hook_purpose",
+   "fieldtype": "Select",
+   "label": "Hook Message Purpose",
+   "options": "transactional\notp",
+   "default": "transactional",
+   "description": "otp for a site whose Frappe SMS are one-time codes (Auth). site_config oan_messaging_hook_purpose overrides it."
+  },
+  {
+   "fieldname": "hook_expiry_minutes",
+   "fieldtype": "Int",
+   "label": "Hook Message Expiry (minutes)",
+   "default": "30",
+   "description": "OAN drops the SMS if it cannot be sent within this time. At most 30 for otp (set it to the code's lifetime), at most 10080 otherwise. site_config oan_messaging_hook_expiry_minutes overrides it."
+  }
+ ],
+ "permissions": [
+  {
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "role": "System Manager"
+  }
+ ],
+ "description": "Connection to the OAN Messaging Service for this site."
+}
