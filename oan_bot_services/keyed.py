@@ -28,7 +28,7 @@ log = logs.get(__name__)
 async def enqueue(
     deps: Deps,
     ref: str,
-    contact_uuid: uuid.UUID,
+    contact_uuid: uuid.UUID | None,
     text_key: str,
     params: dict[str, str | int] | None = None,
     keyboard: list[str] | None = None,
@@ -58,11 +58,14 @@ async def release_for_contact(deps: Deps, ref: str, *, exclude_active: bool) -> 
             )
         ).mappings().all()
     released = 0
+    rapidpro = deps.rapidpro
+    if rapidpro is None:
+        return 0
     for row in rows:
         params: dict[str, Any] = {"text_key": row["text_key"], "keyboard": row["keyboard"],
                                   **row["params"]}
         try:
-            await deps.rapidpro.start_notify(
+            await rapidpro.start_notify(
                 row["contact_uuid"], params, exclude_active=exclude_active
             )
         except Unavailable:
@@ -83,9 +86,12 @@ async def release_idle(deps: Deps) -> int:
             )
         ).all()
     total = 0
+    rapidpro = deps.rapidpro
+    if rapidpro is None:
+        return 0
     for ref, contact_uuid in pending:
         try:
-            flow = await deps.rapidpro.current_flow(contact_uuid)
+            flow = await rapidpro.current_flow(contact_uuid)
         except Unavailable:
             break
         if flow is False:  # the contact is gone: nothing can be delivered

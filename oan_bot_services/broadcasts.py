@@ -13,6 +13,12 @@ and the jobs that send them through OAN Messaging (``oan-messaging-caller.md``).
   before the call; the chat id is cleared once OAN Messaging has the message.
 * Results are polled at most once every 10 seconds per broadcast. Telegram never reports
   delivery, so ``sent`` is final for Bot Services.
+* A farmer's subscription is checked again (updates on, state active) immediately
+  before each submit; a copy no longer eligible is ``failed`` with ``not_eligible`` (the
+  kit's counts have no ``skipped``). Updates off and Stop ask OAN Messaging to cancel
+  copies it still holds as ``accepted`` (contract 3.4.0): ``cancelled`` becomes ``failed``
+  with ``cancelled``; ``not_cancellable`` means it may still arrive and polling goes on.
+  An ``unknown`` is never resent.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from typing import Any
 
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from oan_bot_services import logs
 from oan_bot_services.areas import kebeles_under
@@ -55,6 +62,8 @@ COUNTED = ("accepted", "sending", "sent", "failed", "expired", "unknown")
 #: OAN Messaging failure codes that mean the chat cannot be reached (TG-09), with the R3
 #: reason. Values are ``FailureCode`` in ``oan_messaging/contracts.py``.
 UNREACHABLE = {"recipient_blocked_bot": "blocked", "chat_not_found": "chat_deleted"}
+NOT_ELIGIBLE = "not_eligible"
+CANCELLED = "cancelled"
 
 
 class Problem(Exception):
@@ -370,6 +379,10 @@ async def submit_pending(deps: Deps) -> int:
             values: dict[str, Any]
             if b["expires_at"] <= now:
                 values = {"status": "expired", "chat_id": None}
+            elif r["contact_ref"] is not None and not await _still_eligible(deps, r):
+                log.info("broadcast copy not eligible broadcast_id=%s n=%d",
+                         b["broadcast_id"], r["n"])
+                values = {"status": "failed", "failure_code": NOT_ELIGIBLE, "chat_id": None}
             else:
                 try:
                     out = await deps.oan.submit(
@@ -399,6 +412,79 @@ async def submit_pending(deps: Deps) -> int:
         if submitted >= deps.settings.batch_size:
             break
     return submitted
+
+
+async def _still_eligible(deps: Deps, r: Any) -> bool:
+    """The farmer's subscription, read immediately before the submit: still this
+    Farmer ID on this chat, updates on, state active."""
+    async with deps.sf() as s:
+        row = (
+            await s.execute(
+                select(subscriptions.c.updates_on, subscriptions.c.state,
+                       subscriptions.c.chat_id, subscriptions.c.farmer_id)
+                .where(subscriptions.c.contact_ref == r["contact_ref"])
+            )
+        ).first()
+    return (
+        row is not None and bool(row.updates_on) and row.state == "active"
+        and row.chat_id == r["chat_id"] and row.farmer_id == r["farmer_id"]
+    )
+
+
+async def withdraw_copies(s: AsyncSession, ref: str, now: datetime) -> None:
+    """Updates off or Stop, in the caller's transaction: copies not yet handed to
+    OAN Messaging are dropped; copies it holds as ``accepted`` are marked for the cancel
+    job (``cancel_pending``)."""
+    await s.execute(
+        update(broadcast_recipients)
+        .where(broadcast_recipients.c.contact_ref == ref,
+               broadcast_recipients.c.status == "pending")
+        .values(status="failed", failure_code=NOT_ELIGIBLE, chat_id=None, updated_at=now)
+    )
+    await s.execute(
+        update(broadcast_recipients)
+        .where(broadcast_recipients.c.contact_ref == ref,
+               broadcast_recipients.c.status == "accepted",
+               broadcast_recipients.c.oan_message_id.is_not(None))
+        .values(cancel_requested=True, updated_at=now)
+    )
+
+
+async def cancel_pending(deps: Deps) -> int:
+    """Ask OAN Messaging to cancel each marked copy (contract 3.4.0). Stops at the first
+    outage (the marks stay, the next tick retries). Returns how many were cancelled."""
+    now = await deps.clock()
+    async with deps.sf() as s:
+        rows = (
+            await s.execute(
+                select(broadcast_recipients.c.broadcast_id, broadcast_recipients.c.n,
+                       broadcast_recipients.c.oan_message_id, broadcast_recipients.c.status)
+                .where(broadcast_recipients.c.cancel_requested.is_(True))
+                .order_by(broadcast_recipients.c.updated_at)
+                .limit(deps.settings.batch_size)
+            )
+        ).all()
+    cancelled = 0
+    for bid, n, message_id, status in rows:
+        if status != "accepted" or message_id is None:
+            await _set(deps, bid, n, cancel_requested=False)
+            continue
+        try:
+            result = await deps.oan.cancel(message_id)
+        except Unavailable:
+            log.warning("broadcast cancel paused broadcast_id=%s", bid)
+            break
+        if result == "cancelled":
+            await _set(deps, bid, n, status="failed", failure_code=CANCELLED,
+                       cancel_requested=False, updated_at=now)
+            cancelled += 1
+        else:
+            # not_cancellable: already claimed or final, it may still arrive; polling
+            # records the real result. not_found: nothing to cancel.
+            log.info("broadcast copy not cancellable broadcast_id=%s n=%d", bid, n)
+            await _set(deps, bid, n, cancel_requested=False)
+        await _finish_if_done(deps, bid, now)
+    return cancelled
 
 
 async def _clear_text(deps: Deps, broadcast_id: uuid.UUID) -> None:
@@ -484,8 +570,9 @@ async def mark_unreachable(deps: Deps, bid: uuid.UUID, n: int) -> bool:
     if r["contact_ref"] is not None:
         async with deps.sf() as s, s.begin():
             await s.execute(
-                update(subscriptions).where(subscriptions.c.contact_ref == r["contact_ref"])
-                .values(state="unreachable")
+                update(subscriptions).where(subscriptions.c.contact_ref == r["contact_ref"],
+                                            subscriptions.c.state == "active")
+                .values(state="unreachable", stopped_at=await deps.clock())
             )
         log.info("subscription unreachable contact_ref=%s", r["contact_ref"])
     elif r["da_ref"] is not None:

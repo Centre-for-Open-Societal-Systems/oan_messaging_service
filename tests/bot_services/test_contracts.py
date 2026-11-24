@@ -12,6 +12,8 @@ from contract import CONTRACTS, spec
 from oan_bot_services import text_keys as tk
 from oan_bot_services.api import models as m
 from oan_bot_services.api.app import create_app
+from oan_bot_services.settings import BotSettings
+from oan_bot_services.texts import load
 
 PACKAGE = Path(__file__).resolve().parents[2] / "oan_bot_services"
 
@@ -21,8 +23,22 @@ def catalogue() -> dict[str, dict]:
     return {k: v for group in raw.values() for k, v in group.items()}
 
 
-def app_routes() -> set[tuple[str, str]]:
-    app = create_app(deps=None)
+def settings(rapidpro: bool) -> BotSettings:
+    import base64
+    import secrets
+
+    def b64() -> str:
+        return base64.b64encode(secrets.token_bytes(32)).decode()
+
+    return BotSettings(
+        database_url="postgresql+psycopg://u:p@127.0.0.1:5432/bot", rapidpro_enabled=rapidpro,
+        flow_secret="f" * 32 if rapidpro else "", telegram_webhook_secret="w" * 32,
+        contact_ref_key=b64(), fingerprint_key=b64(), data_key=b64(),
+    )
+
+
+def app_routes(rapidpro: bool) -> set[tuple[str, str]]:
+    app = create_app(deps=None, settings=settings(rapidpro))
     out = set()
     for route in app.routes:
         for method in getattr(route, "methods", set()) or set():
@@ -32,12 +48,19 @@ def app_routes() -> set[tuple[str, str]]:
 
 
 def test_every_contract_route_exists_and_nothing_else() -> None:
-    expected = set()
-    for name in ("bot", "broadcasts"):
-        for path, item in spec(name)["paths"].items():
-            for method in item:
-                expected.add((method.upper(), path))
-    assert app_routes() == expected
+    """Each runtime mounts exactly the contract paths marked for it (``x-runtime``)."""
+    for rapidpro, runtime in ((True, "rapidpro"), (False, "webhook")):
+        expected = set()
+        for name in ("bot", "broadcasts"):
+            for path, item in spec(name)["paths"].items():
+                if item.get("x-runtime", runtime) != runtime:
+                    continue
+                for method in item:
+                    if not method.startswith("x-"):
+                        expected.add((method.upper(), path))
+        assert app_routes(rapidpro) == expected, runtime
+    assert ("POST", "/telegram/webhook") not in app_routes(True)
+    assert ("POST", "/contacts/stop") not in app_routes(False)
 
 
 def test_request_models_match_the_contract_fields() -> None:
@@ -95,3 +118,15 @@ def test_error_text_keys_are_catalogued() -> None:
 
     cat = catalogue()
     assert invalid_choice().text_key in cat and unavailable().text_key in cat
+
+
+def test_the_catalogue_loads_for_the_reduced_runtime() -> None:
+    """Every key renders in English and Amharic; buttons fit OAN Messaging's 30 units."""
+    cat = load(str(CONTRACTS / "text-keys.yaml"))
+    for key in tk.ALL:
+        params = {p: "x" for p in cat.entries[key].get("params") or ()}
+        for lang in ("en", "am"):
+            assert cat.render(key, lang, params)
+    for key in tk.BUTTONS:
+        for label in cat.labels(key):
+            assert len(label.encode("utf-16-le")) // 2 <= 30, key

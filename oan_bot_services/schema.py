@@ -2,10 +2,15 @@
 
 What is stored where (§2.4, §6.6, §6.8.1):
 
-* ``contacts``: RapidPro contact UUID, ``contact_ref``, chosen kebele and language. No chat id.
+* ``contacts``: ``contact_ref`` (the lookup key), the OAN-owned ``subscriber_id``, chosen
+  kebele and language; the RapidPro contact UUID only in the RapidPro runtime. No chat id.
 * ``farmer_links`` / ``subscriptions``: only for a linked farmer. The subscription row holds
   the chat id (TG-33), needed to send the broadcast copy; never logged.
 * ``broadcast_recipients.chat_id`` is cleared once the message is submitted.
+* Without RapidPro: ``telegram_updates`` holds a received update (sealed) only until
+  the worker handles it; ``seen_updates`` keeps just the ``update_id`` for 7 days;
+  ``conversations`` holds the current step (sealed, 30 minutes); ``outbox`` holds a reply
+  until OAN Messaging has it. RapidPro columns (``contact_uuid``) are nullable.
 """
 
 from __future__ import annotations
@@ -58,12 +63,19 @@ contacts = Table(
     "contacts",
     metadata,
     Column("contact_ref", Text, primary_key=True),
-    Column("contact_uuid", UUID(as_uuid=True), nullable=False, unique=True),
+    #: RapidPro runtime only.
+    Column("contact_uuid", UUID(as_uuid=True), nullable=True, unique=True),
+    #: OAN-owned identity of the chat (no RapidPro id in the reduced runtime).
+    Column("subscriber_id", UUID(as_uuid=True), nullable=False, unique=True,
+           server_default=text("gen_random_uuid()")),
     Column("language", Text, nullable=True),
     Column("kebele_code", Text, nullable=True),
     Column("woreda_code", Text, nullable=True),
     Column("zone_code", Text, nullable=True),
     Column("region_code", Text, nullable=True),
+    #: Stop from a chat with no subscription: the row is deleted after the
+    #: retention period unless the chat comes back.
+    Column("stopped_at", TZ, nullable=True),
     Column("updated_at", TZ, nullable=False),
 )
 
@@ -71,7 +83,7 @@ farmer_links = Table(
     "farmer_links",
     metadata,
     Column("contact_ref", Text, primary_key=True),
-    Column("contact_uuid", UUID(as_uuid=True), nullable=False),
+    Column("contact_uuid", UUID(as_uuid=True), nullable=True),
     Column("farmer_id", Text, nullable=False, unique=True),
     #: The Telegram account's number, sealed (alternate number rule, §6.6). Never logged.
     Column("linked_phone", LargeBinary, nullable=True),
@@ -90,7 +102,7 @@ subscriptions = Table(
     "subscriptions",
     metadata,
     Column("contact_ref", Text, primary_key=True),
-    Column("contact_uuid", UUID(as_uuid=True), nullable=False),
+    Column("contact_uuid", UUID(as_uuid=True), nullable=True),
     Column("farmer_id", Text, nullable=False, unique=True),
     Column("kebele_code", Text, nullable=False),
     Column("woreda_code", Text, nullable=False),
@@ -100,10 +112,13 @@ subscriptions = Table(
     Column("updates_on", Boolean, nullable=False),
     #: TG-33. Never logged, never sent anywhere but OAN Messaging.
     Column("chat_id", BigInteger, nullable=False),
-    #: ``active`` or ``unreachable`` (blocked or deleted, TG-09): broadcasts skip it.
+    #: ``active``; ``unreachable`` (blocked or deleted, TG-09); ``stopped`` (Stop).
+    #: Broadcasts send only to ``active`` with updates on.
     Column("state", Text, nullable=False, server_default=text("'active'")),
+    #: When it became ``stopped`` or ``unreachable`` (deleted 90 days later).
+    Column("stopped_at", TZ, nullable=True),
     Column("last_activity_at", TZ, nullable=False),
-    CheckConstraint("state IN ('active', 'unreachable')", name="state"),
+    CheckConstraint("state IN ('active', 'unreachable', 'stopped')", name="state"),
 )
 Index("ix_subscriptions_woreda_code", subscriptions.c.woreda_code)
 Index("ix_subscriptions_zone_code", subscriptions.c.zone_code)
@@ -153,7 +168,7 @@ staff_links = Table(
     "staff_links",
     metadata,
     Column("contact_ref", Text, primary_key=True),
-    Column("contact_uuid", UUID(as_uuid=True), nullable=False),
+    Column("contact_uuid", UUID(as_uuid=True), nullable=True),
     Column("da_ref", Text, nullable=False),
     Column("role", Text, nullable=False),
     Column("group_added", Boolean, nullable=False, server_default=text("false")),
@@ -166,7 +181,7 @@ keyed_queue = Table(
     metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
     Column("contact_ref", Text, nullable=False),
-    Column("contact_uuid", UUID(as_uuid=True), nullable=False),
+    Column("contact_uuid", UUID(as_uuid=True), nullable=True),
     Column("text_key", Text, nullable=False),
     Column("params", JSONB, nullable=False),
     Column("keyboard", JSONB, nullable=False),
@@ -179,7 +194,7 @@ stop_requests = Table(
     "stop_requests",
     metadata,
     Column("contact_ref", Text, primary_key=True),
-    Column("contact_uuid", UUID(as_uuid=True), nullable=False),
+    Column("contact_uuid", UUID(as_uuid=True), nullable=True),
     #: step -> ``done``, ``skipped:<reason>`` or absent (still to do).
     Column("steps", JSONB, nullable=False),
     Column("state", Text, nullable=False),
@@ -240,9 +255,14 @@ broadcast_recipients = Table(
     Column("idempotency_key", UUID(as_uuid=True), nullable=False),
     Column("oan_message_id", UUID(as_uuid=True), nullable=True),
     #: Bot Services' view, with OAN Messaging's names: pending (not yet submitted),
-    #: accepted, sending, sent, failed, expired, unknown.
+    #: accepted, sending, sent, failed, expired, unknown. A copy not sent because the
+    #: subscription is no longer eligible is ``failed`` with ``not_eligible`` (the kit's
+    #: counts have no ``skipped``); one withdrawn in OAN Messaging is ``failed`` with
+    #: ``cancelled``.
     Column("status", Text, nullable=False),
     Column("failure_code", Text, nullable=True),
+    #: Updates off or Stop asked to cancel this copy in OAN Messaging (worker retries).
+    Column("cancel_requested", Boolean, nullable=False, server_default=text("false")),
     #: TG-09 handled: subscription marked unreachable (farmer) or R3 called (staff).
     Column("unreachable_done", Boolean, nullable=False, server_default=text("false")),
     Column("updated_at", TZ, nullable=False),
@@ -251,6 +271,60 @@ broadcast_recipients = Table(
 )
 Index("ix_broadcast_recipients_status", broadcast_recipients.c.broadcast_id,
       broadcast_recipients.c.status)
+
+# ---------------------------------------------- reduced runtime (RapidPro off)
+
+#: A received webhook update, kept only until the worker handles it.
+#: ``body`` is the minimal fields, sealed (chat id, sender id, text, shared contact).
+telegram_updates = Table(
+    "telegram_updates",
+    metadata,
+    Column("update_id", BigInteger, primary_key=True, autoincrement=False),
+    Column("contact_ref", Text, nullable=False),
+    Column("body", LargeBinary, nullable=False),
+    Column("attempts", Integer, nullable=False, server_default=text("0")),
+    Column("received_at", TZ, nullable=False),
+)
+Index("ix_telegram_updates_contact_ref", telegram_updates.c.contact_ref,
+      telegram_updates.c.update_id)
+
+#: Only the ``update_id``, for repeat detection (7 days).
+seen_updates = Table(
+    "seen_updates",
+    metadata,
+    Column("update_id", BigInteger, primary_key=True, autoincrement=False),
+    Column("seen_at", TZ, nullable=False),
+)
+Index("ix_seen_updates_seen_at", seen_updates.c.seen_at)
+
+#: The chat's current conversation step; ``data`` sealed (Farmer ID, link request id).
+conversations = Table(
+    "conversations",
+    metadata,
+    Column("contact_ref", Text, primary_key=True),
+    Column("step", Text, nullable=False),
+    Column("data", LargeBinary, nullable=True),
+    Column("expires_at", TZ, nullable=False),
+)
+
+#: A bot reply until OAN Messaging has it: text key and params (never free text), the
+#: reply keyboard, and the chat id (cleared with the row). ``source_reference`` is
+#: ``bot:<contact_ref>:<id>``.
+outbox = Table(
+    "outbox",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("contact_ref", Text, nullable=False),
+    Column("chat_id", BigInteger, nullable=False),
+    Column("language", Text, nullable=False),
+    Column("text_key", Text, nullable=False),
+    Column("params", JSONB, nullable=False),
+    Column("reply_markup", JSONB, nullable=True),
+    #: Stored before the call, so a retry reuses it.
+    Column("idempotency_key", UUID(as_uuid=True), nullable=False, unique=True),
+    Column("created_at", TZ, nullable=False),
+    Column("expires_at", TZ, nullable=False),
+)
 
 #: Area lookups (§5.6: cached 24 hours; on failure the last copy is served).
 area_cache = Table(

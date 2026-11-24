@@ -18,7 +18,7 @@ import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
-from botenv import ROOT, TABLES, Bot, _Capture, _libpq, make_settings
+from botenv import ROOT, TABLES, Bot, Tg, _Capture, _libpq, make_reduced_settings, make_settings
 from botsupport import T0, Upstreams
 from sqlalchemy import text
 
@@ -98,6 +98,27 @@ async def bot(bot_db: str) -> AsyncIterator[Bot]:
     try:
         yield Bot(deps, up, api)
         assert not up.violations, up.violations
+    finally:
+        await api.aclose()
+        await deps.aclose()
+        logs.install()
+
+
+@pytest.fixture
+async def tg(bot_db: str) -> AsyncIterator[Tg]:
+    """Broadcast-only Telegram: RapidPro switched off, no RapidPro settings at all."""
+    up = Upstreams()
+    http = httpx.AsyncClient(transport=httpx.MockTransport(up.handle))
+    deps = build(make_reduced_settings(bot_db, up), http=http)
+    deps.clock = fixed_clock(T0)
+    async with deps.engine.begin() as conn:
+        await conn.execute(text(f"TRUNCATE {TABLES} CASCADE"))
+    app = create_app(deps)
+    api = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://bot.test")
+    try:
+        yield Tg(deps, up, api)
+        assert not up.violations, up.violations
+        assert not any(h == "rapidpro.example.invalid" for _, h, _ in up.calls)
     finally:
         await api.aclose()
         await deps.aclose()

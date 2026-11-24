@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from oan_bot_services import logs
+from oan_bot_services import logs, texts
 from oan_bot_services.clients.http import ServiceClient
 from oan_bot_services.clients.oan_messaging import OanMessaging
 from oan_bot_services.clients.rapidpro import RapidPro
@@ -38,7 +38,8 @@ class Deps:
     beneficiary: Beneficiary
     master_data: MasterData
     marketplace: Marketplace
-    rapidpro: RapidPro
+    #: None when ``OAN_BOT_RAPIDPRO_ENABLED`` is false: nothing calls RapidPro.
+    rapidpro: RapidPro | None
     oan: OanMessaging
 
     async def aclose(self) -> None:
@@ -72,7 +73,19 @@ def build(settings: BotSettings, *, http: httpx.AsyncClient | None = None) -> De
     def svc(name: str, url: str) -> ServiceClient:
         return ServiceClient(name, url, client, auth=tokens, timeout=t)
 
-    rapidpro_token = settings.rapidpro_token.get_secret_value()
+    rapidpro: RapidPro | None = None
+    if not settings.rapidpro_enabled:
+        texts.load(settings.text_keys_file)  # every key, both languages: fail at start-up
+    if settings.rapidpro_enabled:
+        rapidpro_token = settings.rapidpro_token.get_secret_value()
+        rapidpro = RapidPro(
+            ServiceClient(
+                "rapidpro", settings.rapidpro_url, client, timeout=t,
+                headers={"Authorization": f"Token {rapidpro_token}"} if rapidpro_token else None,
+            ),
+            settings.rapidpro_notify_flow,
+            settings.rapidpro_staff_group,
+        )
     oan_token = settings.oan_msg_token.get_secret_value()
 
     async def oan_auth() -> str | None:
@@ -90,14 +103,7 @@ def build(settings: BotSettings, *, http: httpx.AsyncClient | None = None) -> De
         beneficiary=Beneficiary(svc("beneficiary", settings.beneficiary_url)),
         master_data=MasterData(svc("master_data", settings.master_data_url)),
         marketplace=Marketplace(svc("marketplace", settings.marketplace_url)),
-        rapidpro=RapidPro(
-            ServiceClient(
-                "rapidpro", settings.rapidpro_url, client, timeout=t,
-                headers={"Authorization": f"Token {rapidpro_token}"} if rapidpro_token else None,
-            ),
-            settings.rapidpro_notify_flow,
-            settings.rapidpro_staff_group,
-        ),
+        rapidpro=rapidpro,
         oan=OanMessaging(ServiceClient("oan_messaging", settings.oan_msg_url, client,
                                        auth=oan_auth, timeout=t)),
     )
