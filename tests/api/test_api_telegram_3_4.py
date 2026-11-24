@@ -1,5 +1,5 @@
 """Contract 3.4.0 over HTTP (real PostgreSQL): the Telegram-only broadcast switch at the
-API, reply buttons on the Telegram endpoint, and the cancel route (INTERFACE §1.1-1.3)."""
+API, reply buttons on the Telegram endpoint, and the cancel route."""
 
 from __future__ import annotations
 

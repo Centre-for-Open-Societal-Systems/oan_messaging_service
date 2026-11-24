@@ -158,7 +158,7 @@ async def test_telegram_reply_is_claimed_before_waiting_broadcasts_even_aged(
     keys: Keys,
     clock: FakeClock,
 ) -> None:
-    """INTERFACE §1.4: a bot reply (transactional) goes before broadcasts that have waited
+    """A bot reply (transactional) goes before broadcasts that have waited
     longer than the SMS-03 ageing time (180 s by default)."""
     ctx = await make_caller(sf, keys)
     broadcasts = [
