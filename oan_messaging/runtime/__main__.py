@@ -51,7 +51,12 @@ from oan_messaging.runtime.ops import (
 )
 from oan_messaging.stats.snapshot import refresh as refresh_stats
 from oan_messaging.stats.snapshot import refresh_forever
-from oan_messaging.storage.config import ServiceSecrets, StorageSettings, load_policy
+from oan_messaging.storage.config import (
+    ServiceSecrets,
+    StorageSettings,
+    broadcast_channels,
+    load_policy,
+)
 from oan_messaging.storage.credentials import (
     issue_credential_with_id,
     list_credentials,
@@ -138,16 +143,20 @@ async def run(
                 assert opts is not None
                 purposes = {Purpose(v) for v in opts.purposes.split(",") if v}
                 stats_reader = bool(getattr(opts, "stats_reader", False))
-                if Purpose.BROADCAST in purposes and not settings.broadcast_enabled:
+                caller_channels = (
+                    set() if stats_reader else {Channel(v) for v in opts.channels.split(",") if v}
+                )
+                # Judged on the caller's channels (contract 3.4.0): every one of them must
+                # allow broadcast, so the Telegram switch never registers an SMS sender.
+                allowed = broadcast_channels(
+                    settings.broadcast_enabled, settings.telegram_broadcast_enabled
+                )
+                if Purpose.BROADCAST in purposes and not caller_channels <= allowed:
                     raise ValueError("broadcast purpose refused: broadcasts disabled for pilot")
                 await upsert_caller(
                     sf,
                     opts.caller,
-                    channels=(
-                        set()
-                        if stats_reader
-                        else {Channel(v) for v in opts.channels.split(",") if v}
-                    ),
+                    channels=caller_channels,
                     purposes=purposes,
                     telegram_bot=opts.bot,
                     enabled=not opts.disable,
@@ -314,6 +323,7 @@ async def run(
                 WorkerConfig(
                     lease=policy.worker_lease,
                     broadcast_enabled=settings.broadcast_enabled,
+                    telegram_broadcast_enabled=settings.telegram_broadcast_enabled,
                     broadcast_max_wait=timedelta(seconds=settings.broadcast_max_wait_seconds),
                     batch_max_recipients=settings.sms_batch_max_recipients,
                 ),

@@ -16,6 +16,8 @@ Environment variables (prefix ``OAN_MSG_``)::
     OAN_MSG_TELEGRAM_RATE_PER_SECOND=20           (optional; 1-30)
     OAN_MSG_TELEGRAM_OTP_RESERVE=0                (optional; below the rate)
     OAN_MSG_TELEGRAM_API_BASE_URL=https://api.telegram.org   (optional; https only)
+    OAN_MSG_BROADCAST_ENABLED=false               (optional; broadcast on every channel)
+    OAN_MSG_TELEGRAM_BROADCAST_ENABLED=false      (optional; broadcast on Telegram only)
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from datetime import timedelta
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from oan_messaging.contracts import HmacFingerprinter, ServicePolicy
+from oan_messaging.contracts import Channel, HmacFingerprinter, ServicePolicy
 from oan_messaging.storage.crypto import ContentCipher, KeyringError, parse_keyring
 
 _POLICY_FIELDS = (
@@ -54,6 +56,8 @@ class StorageSettings(BaseSettings):
     db_max_overflow: int = 10
     max_body_bytes: int = 16 * 1024
     broadcast_enabled: bool = False
+    #: Contract 3.4.0: broadcast on Telegram only. Never opens SMS broadcast.
+    telegram_broadcast_enabled: bool = False
     #: SMS-03: seconds after which a waiting message goes ahead of newer non-OTP traffic.
     broadcast_max_wait_seconds: int = Field(default=180, gt=0)
     #: SMS sent to 8028 per second across all workers (operator capacity 2-5/s), and the
@@ -80,6 +84,22 @@ class StorageSettings(BaseSettings):
     policy_receipt_evidence_retention_seconds: int | None = None
     policy_purge_sweep_interval_seconds: int | None = None
     policy_worker_lease_seconds: int | None = None
+
+
+def broadcast_channels(
+    broadcast_enabled: bool, telegram_broadcast_enabled: bool
+) -> frozenset[Channel]:
+    """Channels on which purpose ``broadcast`` is allowed (contract 3.4.0).
+
+    SMS: only ``OAN_MSG_BROADCAST_ENABLED`` (as before 3.4.0). Telegram: that switch or
+    ``OAN_MSG_TELEGRAM_BROADCAST_ENABLED``. Used by caller registration, the API purpose
+    check and the worker claim, so the three always agree.
+    """
+    if broadcast_enabled:
+        return frozenset(Channel)
+    if telegram_broadcast_enabled:
+        return frozenset({Channel.TELEGRAM})
+    return frozenset()
 
 
 def load_policy(settings: StorageSettings) -> ServicePolicy:

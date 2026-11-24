@@ -134,11 +134,62 @@ def telegram_worker() -> None:
     check(ok.returncode == 0, "https API address renders")
 
 
+def docs_of(r: subprocess.CompletedProcess[str]) -> dict[tuple[str, str], Any]:
+    return {
+        (d["kind"], d["metadata"]["name"]): d for d in yaml.safe_load_all(r.stdout) if d
+    }
+
+
+def telegram_broadcast_switch() -> None:
+    """Contract 3.4.0: workerTelegram.broadcastEnabled (off by default) sets
+    OAN_MSG_TELEGRAM_BROADCAST_ENABLED on the api and worker-telegram pods only; the
+    ConfigMap and the SMS worker render exactly as with the switch off."""
+    var = "OAN_MSG_TELEGRAM_BROADCAST_ENABLED"
+    for name, args in CASES.items():
+        r = helm(*args)
+        check(var not in r.stdout, f"{name}: Telegram broadcast off by default")
+    off = helm("-f", str(TG))
+    on = helm("-f", str(TG), "--set", "workerTelegram.broadcastEnabled=true")
+    check(off.returncode == 0 and on.returncode == 0, "switch renders off and on")
+    if off.returncode != 0 or on.returncode != 0:
+        return
+    check(var not in off.stdout, "05 values: switch off by default")
+    d_off, d_on = docs_of(off), docs_of(on)
+    changed = sorted(k for k in d_on if d_on[k] != d_off.get(k))
+    check(
+        changed == [
+            ("Deployment", "oan-msg-oan-messaging-api"),
+            ("Deployment", "oan-msg-oan-messaging-worker-telegram"),
+        ],
+        f"switch changes only the api and worker-telegram Deployments: {changed}",
+    )
+    sms = ("Deployment", "oan-msg-oan-messaging-worker")
+    cm = ("ConfigMap", "oan-msg-oan-messaging-config")
+    check(d_on.get(sms) == d_off.get(sms), "SMS worker identical with the switch on")
+    check(d_on.get(cm) == d_off.get(cm), "shared ConfigMap identical with the switch on")
+    for dep in ("api", "worker-telegram"):
+        d = d_on.get(("Deployment", f"oan-msg-oan-messaging-{dep}"))
+        envs = {} if d is None else {
+            e["name"]: e.get("value")
+            for c in d["spec"]["template"]["spec"]["containers"] for e in c.get("env", [])
+        }
+        check(envs.get(var) == "true", f"{dep}: {var}=true as an env value")
+    guards = [
+        (("--set", "workerTelegram.broadcastEnabled=true"), "needs workerTelegram.enabled"),
+        (("-f", str(TG), "--set-string", "workerTelegram.broadcastEnabled=yes"),
+         "must be true or false"),
+    ]
+    for extra, needle in guards:
+        err = helm(*extra)
+        check(err.returncode != 0 and needle in err.stderr, f"guard: {needle}")
+
+
 def main() -> int:
     update = "--update" in sys.argv[1:]
     unchanged(update)
     if not update:
         telegram_worker()
+        telegram_broadcast_switch()
     print(f"\n{passed} checks passed, {len(failures)} failed")
     return 1 if failures else 0
 

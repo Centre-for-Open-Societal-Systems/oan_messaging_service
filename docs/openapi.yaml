@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OAN Messaging Service
-  version: 3.3.0
+  version: 3.4.0
   summary: Outbound SMS (8028) and Telegram with durable acceptance and honest outcomes.
   description: |
     Frozen by MSG-01 (contract 3.0.0). Python mirror: `oan_messaging/contracts.py`.
@@ -55,6 +55,15 @@ info:
     and show only a masked recipient. Message content is deleted once no send can happen
     any more (including after `sent`); only keyed fingerprints and metadata are retained.
     `GET` keeps working after content purge and after the idempotency binding is released.
+
+    ## 3.4.0 (additive; SMS unchanged)
+    * Telegram `reply_markup` (optional): a reply keyboard of 1-4 rows of 1-3 buttons, or
+      `{"remove_keyboard": true}`. Stored with the message, purged with the text, part of
+      the idempotency comparison. Without it a message is sent exactly as before.
+    * `POST /api/v1/messages/{id}/cancel`: the calling service cancels its own Telegram
+      message that no worker has taken yet. It ends `failed` with failure code `cancelled`.
+    * Broadcast on Telegram can be turned on alone (`OAN_MSG_TELEGRAM_BROADCAST_ENABLED`);
+      SMS broadcast still follows `OAN_MSG_BROADCAST_ENABLED` only.
 servers:
   - url: http://localhost:8000
     description: Local development (mocks only)
@@ -164,6 +173,10 @@ paths:
         configuration — the request cannot name a bot token or URL. Text is sent without
         `parse_mode` and must not exceed 4096 UTF-16 units. A successful send ends at
         `sent`: the Bot API has no handset delivery receipts.
+
+        3.4.0: optional `reply_markup` (reply keyboard or keyboard removal), allowed with
+        any purpose. Purpose `broadcast` is accepted when `OAN_MSG_BROADCAST_ENABLED` or
+        `OAN_MSG_TELEGRAM_BROADCAST_ENABLED` is on.
       tags: [messages]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -181,6 +194,34 @@ paths:
                   text: Your grievance G-1042 was updated.
                   source_reference: grievance:G-1042:update:3
                   purpose: transactional
+              reply_keyboard:
+                summary: Bot reply with a share-contact button (3.4.0)
+                value:
+                  chat_id: 123456789
+                  text: Share your phone number to link your Farmer ID.
+                  source_reference: bot:c-1f2e:3
+                  purpose: transactional
+                  reply_markup:
+                    keyboard: [[{text: Share my phone number, request_contact: true}]]
+                    one_time: true
+                    resize: true
+              remove_keyboard:
+                summary: Bot reply that removes the keyboard (3.4.0)
+                value:
+                  chat_id: 123456789
+                  text: Thank you. Your Farmer ID is linked.
+                  source_reference: bot:c-1f2e:4
+                  purpose: transactional
+                  reply_markup: {remove_keyboard: true}
+              invalid_keyboard_too_many_rows:
+                summary: Rejected with 422 — more than 4 keyboard rows
+                value:
+                  chat_id: 1
+                  text: hi
+                  source_reference: x9
+                  purpose: transactional
+                  reply_markup:
+                    keyboard: [[{text: a}], [{text: b}], [{text: c}], [{text: d}], [{text: e}]]
               invalid_token_in_request:
                 summary: Rejected with 422 — unknown field (no tokens in requests)
                 value:
@@ -357,6 +398,72 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/messages/{id}/cancel:
+    post:
+      operationId: cancelMessage
+      summary: Cancel a waiting Telegram message (3.4.0)
+      description: |
+        Cancels the calling service's own Telegram message while it is `accepted` and no
+        worker holds it. The cancel and a worker's claim cannot both win: the cancel is one
+        conditional update that only matches an unclaimed `accepted` row. A cancelled
+        message ends `failed` with `failure_code: cancelled` and `final: true`; its
+        content is purged at once. Repeating the cancel answers 200 with the same view.
+        A message a worker holds or has finished answers 409 `not_cancellable`: nothing
+        is recalled once a worker took it. SMS messages cannot be cancelled (422). No
+        request body and no Idempotency-Key: the call is idempotent by itself.
+      tags: [messages]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cancelled now, or already cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageStatusView'
+              examples:
+                cancelled:
+                  summary: Cancelled before any worker took it
+                  value:
+                    id: 5d1e7c0a-2b4f-4a8e-8c61-0e9b7d3f2a11
+                    idempotency_key: b3e8c1d4-2f6a-4b7c-8d9e-0a1b2c3d4e5f
+                    channel: telegram
+                    purpose: broadcast
+                    source_reference: bc:BC-1:7
+                    status: failed
+                    final: true
+                    failure_code: cancelled
+                    recipient_masked: chat:*******89
+                    delivery_receipts_supported: false
+                    attempts: 0
+                    created_at: '2026-09-01T05:12:13Z'
+                    updated_at: '2026-09-01T05:12:20Z'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/NotCancellable'
+        '422':
+          description: The message is not a Telegram message.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                sms_message:
+                  value:
+                    title: Validation failed
+                    status: 422
+                    code: validation_failed
+                    errors: [{field: message_id, code: channel_not_supported}]
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/charts/{chartId}:
     get:
       operationId: getChart
@@ -601,6 +708,21 @@ components:
                 status: 409
                 code: idempotency_conflict
                 errors: [{field: header.Idempotency-Key, code: payload_mismatch}]
+    NotCancellable:
+      description: |
+        The message is no longer waiting: a worker holds it, or it is sending, sent,
+        failed (other than cancelled), expired or unknown. Nothing was changed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not_cancellable:
+              value:
+                title: Not cancellable
+                status: 409
+                code: not_cancellable
+                errors: [{code: not_cancellable}]
     PayloadTooLarge:
       description: Request body exceeds the service limit.
       content:
@@ -711,6 +833,7 @@ components:
         - malformed_response
         - interrupted
         - expired_before_send
+        - cancelled
     SourceReference:
       type: string
       pattern: '^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$'
@@ -775,12 +898,56 @@ components:
           $ref: '#/components/schemas/Purpose'
         expires_at:
           $ref: '#/components/schemas/Timestamp'
+        reply_markup:
+          $ref: '#/components/schemas/TelegramReplyMarkup'
       if:
         properties:
           purpose: {const: otp}
         required: [purpose]
       then:
         required: [expires_at]
+    TelegramReplyMarkup:
+      description: |
+        3.4.0. Sent as the Bot API `reply_markup`: `keyboard` / `one_time_keyboard` /
+        `resize_keyboard`, or `remove_keyboard`. Button text is plain text, 1-30 UTF-16
+        units, no control characters.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [keyboard]
+          properties:
+            keyboard:
+              type: array
+              minItems: 1
+              maxItems: 4
+              items:
+                type: array
+                minItems: 1
+                maxItems: 3
+                items:
+                  $ref: '#/components/schemas/TelegramKeyboardButton'
+            one_time: {type: boolean, default: true}
+            resize: {type: boolean, default: true}
+        - type: object
+          additionalProperties: false
+          required: [remove_keyboard]
+          properties:
+            remove_keyboard: {const: true}
+    TelegramKeyboardButton:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 30
+          pattern: '^[^\x00-\x1f\x7f]*$'
+          description: Plain text, 1-30 UTF-16 units, no control characters.
+        request_contact:
+          type: boolean
+          default: false
+          description: The button asks the user to share their own phone number.
     SubmissionResponse:
       type: object
       additionalProperties: false
@@ -894,6 +1061,7 @@ components:
             - payload_too_large
             - unsupported_media_type
             - service_unavailable
+            - not_cancellable
         errors:
           type: array
           items: {$ref: '#/components/schemas/ErrorItem'}

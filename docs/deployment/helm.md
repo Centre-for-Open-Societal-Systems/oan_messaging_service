@@ -61,6 +61,13 @@ is added next to SMS, never through it:
 - `workerTelegram.apiBaseUrl` (`OAN_MSG_TELEGRAM_API_BASE_URL`): empty uses
   `https://api.telegram.org`; https origins only.
 - Link previews are always off on Telegram sends (`link_preview_options.is_disabled`).
+- Contract 3.4.0: `workerTelegram.broadcastEnabled` (default `false`) sets
+  `OAN_MSG_TELEGRAM_BROADCAST_ENABLED=true` as an env value on the **api** and
+  **worker-telegram** pods only, never in the shared ConfigMap. It allows purpose
+  `broadcast` on Telegram alone; SMS broadcast still follows `config.broadcastEnabled`.
+  Because the ConfigMap does not change, the SMS worker is not restarted and its manifest
+  is byte for byte the same. Rendering fails if it is set without `workerTelegram.enabled`
+  or is not a boolean (`check_unchanged.py` checks all of this).
 - `ci/regression/check_unchanged.py` proves `values.yaml`, `values-pilot.yaml` and
   `ci/0[1-4]-*` render exactly as before (golden files in `ci/regression/golden/`), and
   checks the Telegram worker with `ci/05-telegram-worker-values.yaml`.

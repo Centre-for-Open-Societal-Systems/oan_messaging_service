@@ -350,11 +350,15 @@ PROBLEM_CODES = frozenset({
     "unauthenticated", "forbidden", "not_found", "validation_failed",
     "idempotency_conflict", "payload_too_large", "unsupported_media_type",
     "service_unavailable",
+    # contract 3.4.0: POST /api/v1/messages/{id}/cancel
+    "not_cancellable",
 })
 #: ``ErrorItem.field`` locations the accepted API reports. Anything else becomes ``None``.
 ERROR_FIELDS = frozenset({
     "recipient", "chat_id", "text", "source_reference", "purpose", "expires_at",
     "header.Idempotency-Key",
+    # contract 3.4.0: cancel of an SMS message
+    "message_id",
 })
 #: Value-free ``ErrorItem.code`` values the accepted API emits (oan_messaging.api and
 #: storage expiry codes, plus the pydantic error types it passes through for these
@@ -367,6 +371,8 @@ ERROR_CODES = frozenset({
     "invalid_et_mobile", "too_long_for_single_sms", "too_long_for_sms", "too_long", "blank",
     "control_characters", "invalid_chat_id", "required_for_otp", "invalid",
     "unknown_field", "timezone_required",
+    # contract 3.4.0: POST /api/v1/messages/{id}/cancel
+    "not_cancellable", "channel_not_supported",
     # GET /api/v1/charts (statistics readers)
     "stats_not_permitted", "after_to", "range_too_long",
     # storage expiry checks

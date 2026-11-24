@@ -58,6 +58,7 @@ from oan_messaging.contracts import (
     Purpose,
     SmsSendRequest,
 )
+from oan_messaging.storage.config import broadcast_channels
 from oan_messaging.storage.errors import DispatchNotAuthorized, MessageExpired
 from oan_messaging.storage.repository import PostgresMessageRepository
 from oan_messaging.worker.rate_limit import (
@@ -98,6 +99,9 @@ class WorkerConfig:
     worker_id: str = field(default_factory=lambda: f"worker-{uuid.uuid4().hex[:8]}")
     batch_size: int = 1
     broadcast_enabled: bool = False
+    #: Contract 3.4.0: claim Telegram broadcasts even when ``broadcast_enabled`` is off.
+    #: Never lets an SMS broadcast through.
+    telegram_broadcast_enabled: bool = False
     #: SMS-03 broadcast ageing: a message accepted this long ago is claimed ahead of newer
     #: non-OTP traffic (OTPs still first), so a broadcast cannot be starved. None = off.
     broadcast_max_wait: timedelta | None = timedelta(seconds=180)
@@ -193,7 +197,7 @@ class Worker:
             self._cfg.lease,
             max(self._cfg.batch_size, self._batch_limit()),
             channels=tuple(self._adapters),
-            allow_broadcast=self._cfg.broadcast_enabled,
+            allow_broadcast=self._allow_broadcast(),
             aged_after=self._cfg.broadcast_max_wait,
         )
         stats.claimed = len(claims)
@@ -207,6 +211,18 @@ class Worker:
             else:
                 await self._dispatch(claim, stats)
         return stats
+
+    def _allow_broadcast(self) -> bool | frozenset[Channel]:
+        """``allow_broadcast`` for ``claim_due``: exactly the old boolean unless only the
+        Telegram switch is on, then the channels whose broadcasts may be claimed."""
+        allowed = broadcast_channels(
+            self._cfg.broadcast_enabled, self._cfg.telegram_broadcast_enabled
+        )
+        if allowed == frozenset(Channel):
+            return True
+        if not allowed:
+            return False
+        return allowed
 
     # ----------------------------------------------------------------- batching
 

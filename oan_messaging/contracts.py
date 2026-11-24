@@ -48,7 +48,7 @@ import hmac
 import json
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Literal, Protocol, runtime_checkable
@@ -57,15 +57,20 @@ from pydantic import (
     AwareDatetime,
     BaseModel,
     ConfigDict,
+    Discriminator,
     Field,
     StringConstraints,
+    Tag,
     ValidationInfo,
     field_validator,
     model_validator,
 )
 
 #: 3.3.0 (24 Nov 2026): chart rows carry ``channel`` (fields only added).
-CONTRACT_VERSION = "3.3.0"
+#: 3.4.0 (24 Nov 2026): Telegram ``reply_markup`` (optional), ``POST
+#: /api/v1/messages/{id}/cancel`` (Telegram only) and failure code ``cancelled``. Additive:
+#: SMS requests, responses and behaviour do not change.
+CONTRACT_VERSION = "3.4.0"
 
 # --------------------------------------------------------------------------------------
 # Enumerations
@@ -151,6 +156,15 @@ ALLOWED_TRANSITIONS: Mapping[MessageStatus, frozenset[MessageStatus]] = {
     MessageStatus.EXPIRED: frozenset(),
 }
 
+#: The one transition outside ``ALLOWED_TRANSITIONS`` (contract 3.4.0): a caller cancels
+#: its own Telegram message that no worker holds (``POST /api/v1/messages/{id}/cancel``).
+#: It is legal only with failure code ``cancelled`` and only for Telegram; the database
+#: trigger (migration 0008) enforces both. Worker paths never use it.
+CANCEL_TRANSITION: tuple[MessageStatus, MessageStatus] = (
+    MessageStatus.ACCEPTED,
+    MessageStatus.FAILED,
+)
+
 
 def is_allowed_transition(current: MessageStatus, new: MessageStatus) -> bool:
     return new in ALLOWED_TRANSITIONS[current]
@@ -213,6 +227,9 @@ class FailureCode(StrEnum):
     MALFORMED_RESPONSE = "malformed_response"  # ambiguous
     INTERRUPTED = "interrupted"  # worker crash / lease lost mid-call: ambiguous
     EXPIRED_BEFORE_SEND = "expired_before_send"
+    #: The caller cancelled the message before any worker took it (Telegram only, 3.4.0).
+    #: Nothing reached the provider.
+    CANCELLED = "cancelled"
 
 
 # --------------------------------------------------------------------------------------
@@ -453,6 +470,96 @@ class SmsSubmission(_SubmissionBase):
         return v
 
 
+#: Reply keyboard limits (contract 3.4.0).
+TELEGRAM_KEYBOARD_MAX_ROWS = 4
+TELEGRAM_KEYBOARD_MAX_BUTTONS_PER_ROW = 3
+TELEGRAM_BUTTON_MAX_UTF16_UNITS = 30
+_ANY_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+class TelegramKeyboardButton(_Frozen):
+    """One reply-keyboard button: plain text, 1-30 UTF-16 units, no control characters."""
+
+    text: str
+    request_contact: Annotated[bool, Field(strict=True)] = False
+
+    @field_validator("text")
+    @classmethod
+    def _text(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("button text must not be blank")
+        if _ANY_CONTROL.search(v):
+            raise ValueError("button text contains control characters")
+        if len(v.encode("utf-16-le")) // 2 > TELEGRAM_BUTTON_MAX_UTF16_UNITS:
+            raise ValueError("button text exceeds the button length limit")
+        return v
+
+
+class TelegramReplyKeyboard(_Frozen):
+    """Show a reply keyboard: 1-4 rows of 1-3 buttons."""
+
+    keyboard: Annotated[
+        tuple[
+            Annotated[
+                tuple[TelegramKeyboardButton, ...],
+                Field(min_length=1, max_length=TELEGRAM_KEYBOARD_MAX_BUTTONS_PER_ROW),
+            ],
+            ...,
+        ],
+        Field(min_length=1, max_length=TELEGRAM_KEYBOARD_MAX_ROWS),
+    ]
+    one_time: Annotated[bool, Field(strict=True)] = True
+    resize: Annotated[bool, Field(strict=True)] = True
+
+
+class TelegramRemoveKeyboard(_Frozen):
+    """Remove a reply keyboard shown earlier."""
+
+    remove_keyboard: Literal[True]
+
+
+def _markup_kind(value: Any) -> str:
+    """Pick the reply_markup shape by its keys, so a validation error describes only the
+    shape the caller sent (a body with ``remove_keyboard`` is the removal form)."""
+    if isinstance(value, TelegramRemoveKeyboard) or (
+        isinstance(value, dict) and "remove_keyboard" in value
+    ):
+        return "remove"
+    return "keyboard"
+
+
+TelegramReplyMarkup = Annotated[
+    Annotated[TelegramReplyKeyboard, Tag("keyboard")]
+    | Annotated[TelegramRemoveKeyboard, Tag("remove")],
+    Discriminator(_markup_kind),
+]
+
+
+def telegram_reply_markup(markup: TelegramReplyMarkup) -> dict[str, Any]:
+    """The Bot API ``reply_markup`` object for a contract reply markup."""
+    if isinstance(markup, TelegramRemoveKeyboard):
+        return {"remove_keyboard": True}
+    rows = [
+        [
+            {"text": b.text, **({"request_contact": True} if b.request_contact else {})}
+            for b in row
+        ]
+        for row in markup.keyboard
+    ]
+    return {
+        "keyboard": rows,
+        "one_time_keyboard": markup.one_time,
+        "resize_keyboard": markup.resize,
+    }
+
+
+def parse_reply_markup(data: Any) -> TelegramReplyMarkup:
+    """Rebuild a stored (``model_dump(mode="json")``) reply markup."""
+    if isinstance(data, dict) and "remove_keyboard" in data:
+        return TelegramRemoveKeyboard.model_validate(data)
+    return TelegramReplyKeyboard.model_validate(data)
+
+
 class TelegramSubmission(_SubmissionBase):
     """Body of ``POST /api/v1/messages/telegram``.
 
@@ -463,6 +570,8 @@ class TelegramSubmission(_SubmissionBase):
 
     chat_id: Annotated[int, Field(strict=True)]
     text: str
+    #: Optional reply keyboard (contract 3.4.0). Absent = sent exactly as before.
+    reply_markup: TelegramReplyMarkup | None = None
 
     @field_validator("chat_id")
     @classmethod
@@ -561,6 +670,8 @@ class Problem(_Frozen):
         "payload_too_large",
         "unsupported_media_type",
         "service_unavailable",
+        # 3.4.0: POST /api/v1/messages/{id}/cancel on a message a worker holds or finished.
+        "not_cancellable",
     ]
     errors: tuple[ErrorItem, ...] = ()
 
@@ -645,9 +756,9 @@ def canonical_payload(caller_id: str, submission: Submission) -> bytes:
     """Deterministic bytes for payload equality.
 
     Fields: caller_id, channel, purpose, source_reference, recipient (E.164, after
-    normalization) or chat_id, text (byte-exact; no Unicode normalization) and
-    expires_at (UTC, microseconds). The Idempotency-Key itself is the lookup key and
-    is not part of the payload.
+    normalization) or chat_id, text (byte-exact; no Unicode normalization),
+    expires_at (UTC, microseconds) and, for Telegram, reply_markup when present. The
+    Idempotency-Key itself is the lookup key and is not part of the payload.
     """
     body: dict[str, Any] = {
         "v": CANONICAL_PAYLOAD_VERSION,
@@ -662,6 +773,10 @@ def canonical_payload(caller_id: str, submission: Submission) -> bytes:
         body["recipient"] = submission.recipient
     else:
         body["chat_id"] = submission.chat_id
+        # 3.4.0: only when present (defaults filled in), so the fingerprint of every
+        # message without buttons -- every binding stored before 3.4.0 -- is unchanged.
+        if submission.reply_markup is not None:
+            body["reply_markup"] = submission.reply_markup.model_dump(mode="json")
     return json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 
 
@@ -812,6 +927,8 @@ class TelegramSendRequest(_Frozen):
     chat_id: int = Field(repr=False)
     text: str = Field(repr=False)
     expires_at: AwareDatetime | None = None
+    #: Contract 3.4.0; None = no ``reply_markup`` in the Bot API call (as before).
+    reply_markup: TelegramReplyMarkup | None = Field(default=None, repr=False)
 
 
 SendRequest = SmsSendRequest | TelegramSendRequest
@@ -1108,14 +1225,20 @@ class MessageRepository(Protocol):
 
     async def claim_due(
         self, worker_id: str, now: datetime, lease: timedelta, limit: int,
-        *, channels: tuple[Channel, ...] | None = None, allow_broadcast: bool = True,
+        *, channels: tuple[Channel, ...] | None = None,
+        allow_broadcast: bool | Collection[Channel] = True,
         aged_after: timedelta | None = None,
     ) -> list[Claim]:
         """Lease up to ``limit`` ACCEPTED, due messages by (priority, created_at).
 
-        With ``aged_after`` (SMS-03 broadcast ageing): OTPs first, then every other
-        message accepted at least that long ago, oldest first, then the rest by
-        (priority, created_at). A waiting broadcast is never starved by newer traffic.
+        ``allow_broadcast``: True, False, or (3.4.0) the channels whose broadcasts may be
+        claimed.
+
+        With ``aged_after`` (SMS-03 broadcast ageing): OTPs first, then every other SMS
+        accepted at least that long ago, oldest first, then the rest by
+        (priority, created_at). A waiting SMS broadcast is never starved by newer traffic.
+        Telegram (3.4.0) goes strictly by (priority, created_at): a bot reply
+        (transactional) is always claimed before waiting broadcasts.
 
         Must use row locks that let concurrent workers proceed (SKIP LOCKED).
         Expired messages are moved to EXPIRED (and purged) instead of being claimed.
@@ -1223,6 +1346,30 @@ EXAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
             "purpose": "transactional",
         },
     ),
+    "telegram_reply_keyboard_submission": (
+        TelegramSubmission,
+        {
+            "chat_id": 123456789,
+            "text": "Share your phone number to link your Farmer ID.",
+            "source_reference": "bot:c-1f2e:3",
+            "purpose": "transactional",
+            "reply_markup": {
+                "keyboard": [[{"text": "Share my phone number", "request_contact": True}]],
+                "one_time": True,
+                "resize": True,
+            },
+        },
+    ),
+    "telegram_remove_keyboard_submission": (
+        TelegramSubmission,
+        {
+            "chat_id": 123456789,
+            "text": "Thank you. Your Farmer ID is linked.",
+            "source_reference": "bot:c-1f2e:4",
+            "purpose": "transactional",
+            "reply_markup": {"remove_keyboard": True},
+        },
+    ),
     "accepted_response": (
         SubmissionResponse,
         {
@@ -1252,6 +1399,9 @@ _TG_VIEW: dict[str, Any] = {
 }
 EXAMPLES.update(
     {
+        "status_cancelled": (MessageStatusView, {
+            **_TG_VIEW, "status": "failed", "final": True, "failure_code": "cancelled",
+            "attempts": 0, "updated_at": "2026-09-01T05:12:20Z"}),
         "status_accepted": (MessageStatusView, {
             **_SMS_VIEW, "status": "accepted", "final": False, "attempts": 0,
             "updated_at": "2026-09-01T05:12:13Z"}),
@@ -1342,6 +1492,41 @@ INVALID_EXAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
         TelegramSubmission,
         {"chat_id": "123", "text": "hi", "source_reference": "x8", "purpose": "alert"},
     ),
+    "telegram_keyboard_five_rows": (
+        TelegramSubmission,
+        {"chat_id": 1, "text": "hi", "source_reference": "x9", "purpose": "transactional",
+         "reply_markup": {"keyboard": [[{"text": "a"}]] * 5}},
+    ),
+    "telegram_keyboard_four_buttons": (
+        TelegramSubmission,
+        {"chat_id": 1, "text": "hi", "source_reference": "x9", "purpose": "transactional",
+         "reply_markup": {"keyboard": [[{"text": "a"}] * 4]}},
+    ),
+    "telegram_keyboard_empty": (
+        TelegramSubmission,
+        {"chat_id": 1, "text": "hi", "source_reference": "x9", "purpose": "transactional",
+         "reply_markup": {"keyboard": []}},
+    ),
+    "telegram_button_text_too_long": (
+        TelegramSubmission,
+        {"chat_id": 1, "text": "hi", "source_reference": "x9", "purpose": "transactional",
+         "reply_markup": {"keyboard": [[{"text": "a" * 31}]]}},
+    ),
+    "telegram_button_unknown_key": (
+        TelegramSubmission,
+        {"chat_id": 1, "text": "hi", "source_reference": "x9", "purpose": "transactional",
+         "reply_markup": {"keyboard": [[{"text": "a", "url": "https://example.invalid"}]]}},
+    ),
+    "telegram_markup_both_forms": (
+        TelegramSubmission,
+        {"chat_id": 1, "text": "hi", "source_reference": "x9", "purpose": "transactional",
+         "reply_markup": {"keyboard": [[{"text": "a"}]], "remove_keyboard": True}},
+    ),
+    "telegram_remove_keyboard_false": (
+        TelegramSubmission,
+        {"chat_id": 1, "text": "hi", "source_reference": "x9", "purpose": "transactional",
+         "reply_markup": {"remove_keyboard": False}},
+    ),
     "sent_without_provider_id": (
         ProviderResult,
         {"outcome": "sent", "provider": "sms8028", "provider_status": "http_200",
@@ -1395,6 +1580,13 @@ SCHEMA_ENFORCED_INVALID: frozenset[str] = frozenset(
         "idempotency_key_in_body",
         "telegram_token_field",
         "telegram_string_chat_id",
+        "telegram_keyboard_five_rows",
+        "telegram_keyboard_four_buttons",
+        "telegram_keyboard_empty",
+        "telegram_button_text_too_long",
+        "telegram_button_unknown_key",
+        "telegram_markup_both_forms",
+        "telegram_remove_keyboard_false",
         "telegram_delivered_flag_true",
         "telegram_delivered_flag_false",
         "telegram_sent_flag_true",
@@ -1675,6 +1867,31 @@ def _self_check(openapi_path: str | None = None) -> list[str]:
                f"receipt target {mapped_status} not reachable from sent")
     _check(failures, PURPOSE_PRIORITY[Purpose.OTP] < PURPOSE_PRIORITY[Purpose.BROADCAST],
            "otp must outrank broadcast")
+    _check(failures, PURPOSE_PRIORITY[Purpose.TRANSACTIONAL] < PURPOSE_PRIORITY[Purpose.BROADCAST],
+           "transactional (bot replies) must be claimed before broadcast")
+    _check(failures, CANCEL_TRANSITION[1] not in ALLOWED_TRANSITIONS[CANCEL_TRANSITION[0]],
+           "cancel stays outside the worker transitions")
+
+    # 3.4.0: a Telegram message without reply_markup has the same canonical payload (and
+    # so the same fingerprint) as before; buttons change it; defaults are normalized.
+    tg = TelegramSubmission.model_validate(EXAMPLES["telegram_submission"][1])
+    _check(failures, canonical_payload("c", tg) == (
+        b'{"caller_id":"c","channel":"telegram","chat_id":123456789,"expires_at":null,'
+        b'"purpose":"transactional","source_reference":"grievance:G-1042:update:3",'
+        b'"text":"Your grievance G-1042 was updated.","v":1}'), "telegram payload unchanged")
+    kb = TelegramSubmission.model_validate(
+        EXAMPLES["telegram_reply_keyboard_submission"][1])
+    kb_default = TelegramSubmission.model_validate({
+        **EXAMPLES["telegram_reply_keyboard_submission"][1],
+        "reply_markup": {"keyboard": [[{"text": "Share my phone number",
+                                        "request_contact": True}]]}})
+    _check(failures, canonical_payload("c", kb) == canonical_payload("c", kb_default),
+           "reply_markup defaults normalized in the payload")
+    _check(failures, canonical_payload("c", kb) != canonical_payload(
+        "c", kb.model_copy(update={"reply_markup": None})), "reply_markup is fingerprinted")
+    _check(failures, telegram_reply_markup(kb.reply_markup) == {  # type: ignore[arg-type]
+        "keyboard": [[{"text": "Share my phone number", "request_contact": True}]],
+        "one_time_keyboard": True, "resize_keyboard": True}, "bot api reply_markup")
 
     # Expiry rule with a fixed clock (new acceptances).
     for purpose, exp, ok in [
@@ -1817,9 +2034,12 @@ def _check_openapi(path: str) -> list[str]:
         if schema_accepts({"$ref": f"#/components/schemas/{model_to_schema[model]}"}, data):
             failures.append(f"openapi schema accepts invalid example {name}")
 
-    # Idempotency-Key header: required on every POST, same pattern as the contract.
+    # Idempotency-Key header: required on every POST that submits a message (has a
+    # body), same pattern as the contract. The 3.4.0 cancel has no body and no key.
     params = spec["components"]["parameters"]
     for op_path, op in post_ops:
+        if "requestBody" not in op:
+            continue
         names = [params[p["$ref"].rsplit("/", 1)[-1]] if "$ref" in p else p
                  for p in op.get("parameters", [])]
         hdr = [p for p in names if p["in"] == "header" and p["name"] == "Idempotency-Key"]

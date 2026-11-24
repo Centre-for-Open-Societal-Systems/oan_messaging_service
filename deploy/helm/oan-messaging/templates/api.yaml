@@ -53,6 +53,12 @@ spec:
             {{- include "oan.envFromConfig" . | nindent 12 }}
           env:
             {{- include "oan.storageEnv" (dict "root" . "pool" .Values.api.pool) | nindent 12 }}
+            {{- if .Values.workerTelegram.broadcastEnabled }}
+            # Contract 3.4.0: broadcast on Telegram only (never SMS). Not in the shared
+            # ConfigMap, so turning it on does not restart the SMS worker.
+            - name: OAN_MSG_TELEGRAM_BROADCAST_ENABLED
+              value: "true"
+            {{- end }}
             {{- with .Values.api.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
