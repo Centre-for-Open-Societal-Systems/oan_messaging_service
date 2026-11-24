@@ -26,8 +26,10 @@ License, the same as other OAN services (see `LICENSE`).
 | `integrations/kits/` | Integration kits: one tested patch per module (Credit, Consent Manager, Auth, Grievance, DA) and a Java OTP sender for eSignet, each with its README |
 | `trial/` | Local integration trial with a fake 8028 gateway (`trial/README.md`) |
 
-The Frappe app that other OAN Frappe modules install is in the separate
-`oan_messaging_connector` repository.
+The Frappe app that other OAN Frappe modules install is an addon of this repository:
+`addons/oan_messaging_connector/` (see `addons/README.md`). It was imported from
+`oan_messaging_connector` `develop` with its history. Only Frappe callers need it; the
+Consent Manager, eSignet and other non-Frappe callers use the HTTP API through their kits.
 
 ## Develop and test
 
