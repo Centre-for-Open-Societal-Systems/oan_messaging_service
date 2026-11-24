@@ -1,0 +1,7 @@
+# Generated secrets and local artefacts of the stack: never committed.
+.env
+*.crt
+*.key
+*.pem
+# Machine-specific settings (for example a proxy CA for image builds).
+compose.override.yaml
