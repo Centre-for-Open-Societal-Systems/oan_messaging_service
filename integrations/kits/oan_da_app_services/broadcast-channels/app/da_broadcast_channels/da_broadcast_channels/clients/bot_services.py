@@ -70,7 +70,8 @@ class HttpBotServicesClient:
 		)
 
 	def telegram_recipients(self, broadcast_id: str) -> set[str]:
-		"""Farmer IDs whose Telegram copy is ``sent``: the SMS copy skips exactly these."""
+		"""Farmer IDs whose Telegram copy is ``sent``. Kept for reports; the dispatch no longer
+		uses it, since SMS and Telegram are sent independently (no SMS copy is dropped)."""
 		up, ids, cursor = upstream("bot_services"), set(), None
 		path = f"/broadcasts/{quote(broadcast_id, safe='')}/telegram-recipients"
 		while True:

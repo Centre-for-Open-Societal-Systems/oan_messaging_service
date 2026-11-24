@@ -1,4 +1,4 @@
-From e749d547fa7fc2d06dcbacf4101594ce1aa1e5f7 Mon Sep 17 00:00:00 2001
+From dcace84dd795ecaf4bbb6ec9175bac2f5d3d5456 Mon Sep 17 00:00:00 2001
 From: dineshriyer <249892547+dineshriyer@users.noreply.github.com>
 Date: Fri, 20 Nov 2026 10:13:15 +0530
 Subject: [PATCH] feat(broadcast): send on SMS and Telegram; All farmers for
@@ -10,8 +10,8 @@ gives farmer broadcasts to the Communications Officer.
 
 - SMS and Telegram boxes are live. In-app only to agents still goes to
   POST /notifications/broadcast, unchanged; any SMS or Telegram goes to
-  POST /broadcasts (da_broadcast_channels): Telegram first, then the SMS
-  copy to everyone not reached on Telegram.
+  POST /broadcasts (da_broadcast_channels). SMS and Telegram are sent
+  independently; someone on both may get both.
 - All farmers is offered to the Communications Officer and the Admin only,
   for a whole Region, Zone or Woreda.
 - SMS part count follows OAN Messaging (70 characters per part with any
@@ -32,7 +32,7 @@ gives farmer broadcasts to the Communications Officer.
  create mode 100644 src/features/communication/smsParts.ts
 
 diff --git a/src/app/(dashboard)/broadcast/components/BroadcastWorkspace.tsx b/src/app/(dashboard)/broadcast/components/BroadcastWorkspace.tsx
-index dee434d..2580af6 100644
+index dee434d..129e881 100644
 --- a/src/app/(dashboard)/broadcast/components/BroadcastWorkspace.tsx
 +++ b/src/app/(dashboard)/broadcast/components/BroadcastWorkspace.tsx
 @@ -1,6 +1,6 @@
@@ -76,7 +76,7 @@ index dee434d..2580af6 100644
 -// In-app (POST /notifications/broadcast → the DAs' bell) is the only live channel; SMS/Telegram are
 -// shown but disabled until a gateway is wired.
 +// In-app only to DAs goes to POST /notifications/broadcast (the DAs' bell), as before. Any SMS or Telegram goes to
-+// POST /broadcasts (da_broadcast_channels add-on): Telegram first, then the SMS copy to everyone not reached on Telegram.
++// POST /broadcasts (da_broadcast_channels add-on): SMS and Telegram are sent independently; someone on both may get both.
 +// All farmers: Communications Officer / Admin only, a whole Region, Zone or Woreda (FSD).
  export function BroadcastWorkspace() {
    const role = useAuthStore((s) => s.role);
@@ -170,9 +170,9 @@ index dee434d..2580af6 100644
 +        const res = await sendChannelBroadcast({ ...input, recipients: toDAs ? "das" : "farmers", scope, scopeValue, channels });
 +        const how = [
 +          res.inApp ? `in the bell of ${res.inApp.recipients} Development Agent${res.inApp.recipients === 1 ? "" : "s"}` : null,
-+          telegram ? "on Telegram first" : null,
-+          sms ? `by SMS (${parts} part${parts > 1 ? "s" : ""} each)${telegram ? " to those not reached on Telegram" : ""}` : null,
-+        ].filter(Boolean).join(", then ");
++          telegram ? "on Telegram to those linked in the bot" : null,
++          sms ? `by SMS (${parts} part${parts > 1 ? "s" : ""} each)` : null,
++        ].filter(Boolean).join(", ");
 +        setNotice(
 +          res.duplicate
 +            ? `Already sent to ${area} — no duplicate created.`
@@ -283,7 +283,7 @@ index dee434d..2580af6 100644
                </div>
                <p className="mt-1.5 text-[12px] text-muted">
 -                In-app delivers directly to the Development Agents&apos; notification bell (live). SMS & Telegram are coming soon.
-+                In-app goes to the Development Agents&apos; notification bell. Telegram reaches those linked in the bot; with both ticked, Telegram goes first and the SMS copy reaches everyone not reached on Telegram.
++                In-app goes to the Development Agents&apos; notification bell. Telegram reaches those linked in the bot. SMS and Telegram are sent independently: with both ticked, someone on both may get both.
                </p>
              </fieldset>
  
@@ -446,7 +446,7 @@ index 679644c..2314edf 100644
 +  });
  });
 diff --git a/src/features/notifications/api.ts b/src/features/notifications/api.ts
-index b7e4401..e80090a 100644
+index b7e4401..1033087 100644
 --- a/src/features/notifications/api.ts
 +++ b/src/features/notifications/api.ts
 @@ -114,3 +114,61 @@ export function broadcastToWoreda(input: BroadcastInput & { woredaCode: string }
@@ -481,7 +481,7 @@ index b7e4401..e80090a 100644
 +
 +/**
 + * POST /da-services/broadcasts — the broadcast with its SMS and Telegram copies (da_broadcast_channels add-on).
-+ * The send continues in the background: Telegram first, then the SMS copy to everyone not reached on Telegram.
++ * The send continues in the background: SMS and Telegram independently, neither waits for the other.
 + * The same clientOpId returns the first result (duplicate=true); a different message under it is a 409.
 + */
 +export async function sendChannelBroadcast(input: ChannelBroadcastInput): Promise<ChannelBroadcastResult> {
@@ -512,5 +512,5 @@ index b7e4401..e80090a 100644
 +  return { broadcastId: d.broadcast_id, duplicate: d.duplicate, state: d.state, inApp: d.in_app, sms: d.sms, telegram: d.telegram };
 +}
 -- 
-2.43.0
+2.54.0 (Apple Git-157)
 

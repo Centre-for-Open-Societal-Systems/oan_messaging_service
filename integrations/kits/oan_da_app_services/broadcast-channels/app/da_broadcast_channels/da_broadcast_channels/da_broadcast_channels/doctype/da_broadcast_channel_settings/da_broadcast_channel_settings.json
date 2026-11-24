@@ -5,7 +5,7 @@
  "engine": "InnoDB",
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-11-20 12:00:00.000000",
+ "modified": "2026-11-24 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "DA Broadcast Channels",
  "name": "DA Broadcast Channel Settings",
@@ -27,7 +27,6 @@
   "bot_client_secret",
   "bot_ca_bundle",
   "sec_run",
-  "sms_fallback_wait_minutes",
   "page_size",
   "http_timeout_seconds",
   "sms_retry_attempts",
@@ -102,13 +101,6 @@
    "fieldname": "sec_run",
    "fieldtype": "Section Break",
    "label": "Sending"
-  },
-  {
-   "fieldname": "sms_fallback_wait_minutes",
-   "fieldtype": "Int",
-   "label": "SMS Fallback Wait (minutes)",
-   "default": "15",
-   "description": "The SMS copy starts when Telegram has finished or after this wait, whichever is first"
   },
   {
    "fieldname": "page_size",
