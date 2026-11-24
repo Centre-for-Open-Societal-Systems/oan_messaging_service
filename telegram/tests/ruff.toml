@@ -1,0 +1,7 @@
+# End-to-end tests of the local stack: they drive Docker (subprocess with fixed arguments),
+# read the stack database through psql with bound variables, pick random test chat ids,
+# and call the stack's loopback ports, whose certificates come from its throwaway test CA.
+extend = "../../pyproject.toml"
+
+[lint]
+extend-ignore = ["S603", "S607", "S608", "S311", "S501"]
