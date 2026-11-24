@@ -1,23 +1,28 @@
 """SMS and Telegram delivery of a DA broadcast (Channels Specification §6.8).
 
-create()  records the broadcast and its DA Broadcast Dispatch in the request and queues
-          run() after commit. In-app to Development Agents is the DA backend's own
-          services.notifications.broadcast(), called unchanged.
-run()     resumable background job, re-entered by the one-minute scheduler until Done:
-          1. Telegram first: POST /broadcasts to Bot Services (once; Idempotency-Key).
-          2. Waits until Telegram has finished or ``sms_fallback_wait_minutes`` passed,
-             counted from when the dispatch started. The wait is checked first, and a
-             Telegram failure never stops the SMS copy: it then goes to everyone.
-          3. SMS copy through oan_messaging_connector.queue_sms, one page of recipients
-             per transaction (the page's OAN Message rows and the saved cursor commit
-             together, so a restart never queues a page twice): farmers from the
-             beneficiary API minus the Farmer IDs reached on Telegram; agents not on
-             Telegram (or every agent when Telegram is not ticked).
-          4. Retry list: a recipient whose SMS could not be queued is kept on the dispatch
-             (Farmer ID or DA ID, language, row number; never the phone). After the pass
-             each is tried again with a fresh phone lookup, waiting longer each time, up
-             to ``sms_retry_attempts`` tries. Done only when the list is empty or spent.
-          After an upstream error the scheduler waits before the next try (backoff).
+SMS and Telegram are sent independently (since 24 November 2026; this replaces the
+Telegram-first rule of §6.8.3). Neither channel waits for the other, and a farmer or agent on
+both may get both copies.
+
+create()  records the broadcast and its DA Broadcast Dispatch in the request and queues one
+          background job per ticked channel after commit. In-app to Development Agents is the
+          DA backend's own services.notifications.broadcast(), called unchanged.
+run()     resumable background job for one channel (``part``), re-entered by the one-minute
+          scheduler until that channel is finished:
+          sms       SMS copy through oan_messaging_connector.queue_sms, at once, one page of
+                    recipients per transaction (the page's OAN Message rows and the saved
+                    cursor commit together, so a restart never queues a page twice): every
+                    farmer of the area from the beneficiary API, or every agent of the area
+                    minus the sender. Then the retry list: a recipient whose SMS could not be
+                    queued is kept on the dispatch (Farmer ID or DA ID, language, row number;
+                    never the phone) and tried again with a fresh phone lookup, waiting longer
+                    each time, up to ``sms_retry_attempts`` tries.
+          telegram  POST /broadcasts to Bot Services (once; Idempotency-Key), then its progress.
+                    With SMS ticked, a Telegram failure is recorded on the dispatch
+                    (``telegram_error``; ``telegram_failed`` on a definite refusal) and retried
+                    on its own backoff; it never touches the SMS copy.
+          The dispatch is Done when every ticked channel is finished. After an upstream error
+          the scheduler waits before the next try (backoff).
 status()  what GET /broadcasts/<id> returns: per-channel counts.
 """
 
@@ -99,8 +104,6 @@ def create(who: rules.Sender, data: dict) -> dict:
 			"sms_purpose": req.sms_purpose if "sms" in req.channels else None,
 			"sms_parts": _parts(req) if "sms" in req.channels else 0,
 			"expires_at": req.expires_at,
-			# The SMS fallback clock starts with the dispatch, even if Telegram never answers.
-			"telegram_started_at": now_datetime() if "telegram" in req.channels else None,
 			"sent_by": who.user,
 			"sender_role": _sender_role(who),
 			"client_op_id": req.client_op_id,
@@ -121,7 +124,8 @@ def create(who: rules.Sender, data: dict) -> dict:
 		},
 		user=who.user,
 	)
-	enqueue(doc.name)
+	for part in _open_parts(doc):
+		enqueue(doc.name, part)
 	return status(doc.name) | {"duplicate": False}
 
 
@@ -202,25 +206,66 @@ def _fail_conflict():
 # ---------------------------------------------------------------------------
 
 
-def enqueue(name: str) -> None:
+def enqueue(name: str, part: str) -> None:
+	"""One job per channel, so neither channel ever waits for the other."""
 	frappe.enqueue(
 		"da_broadcast_channels.dispatch.run",
 		name=name,
+		part=part,
 		queue="long",
-		job_id=f"da_broadcast_dispatch:{name}",
+		job_id=f"da_broadcast_dispatch:{name}:{part}",
 		deduplicate=True,
 		enqueue_after_commit=True,
 	)
 
 
+def _sms_done(doc) -> bool:
+	return not doc.send_sms or (doc.sms_cursor == "end" and not json.loads(doc.sms_retry or "[]"))
+
+
+def _telegram_done(doc) -> bool:
+	return not doc.send_telegram or bool(doc.telegram_finished or doc.telegram_failed)
+
+
+def _open_parts(doc) -> list[str]:
+	"""The ticked channels not finished yet, SMS first."""
+	return [p for p, done in (("sms", _sms_done(doc)), ("telegram", _telegram_done(doc))) if not done]
+
+
+def _due(row, part: str, now: datetime) -> bool:
+	"""SMS (and Telegram alone) wait on ``next_run_at``; Telegram next to SMS on its own
+	``telegram_next_run_at``, so a Telegram outage never holds the SMS back."""
+	at = row.telegram_next_run_at if part == "telegram" and row.send_sms else row.next_run_at
+	return not at or get_datetime(at) <= now
+
+
 def resume_open() -> None:
-	"""Scheduler (every minute): re-enter every unfinished dispatch that is due. A dispatch
-	that hit an upstream error, or waits for SMS retries, is due again at ``next_run_at``."""
+	"""Scheduler (every minute): re-enter every unfinished channel of every open dispatch
+	that is due (after an upstream error, or while SMS retries wait, at its next run time)."""
 	now = now_datetime()
-	rows = frappe.get_all(DOCTYPE, filters={"state": ("in", OPEN_STATES)}, fields=["name", "next_run_at"])
+	rows = frappe.get_all(
+		DOCTYPE,
+		filters={"state": ("in", OPEN_STATES)},
+		fields=[
+			"name",
+			"send_sms",
+			"send_telegram",
+			"sms_cursor",
+			"sms_retry",
+			"next_run_at",
+			"telegram_finished",
+			"telegram_failed",
+			"telegram_next_run_at",
+		],
+	)
 	for row in rows:
-		if not row.next_run_at or get_datetime(row.next_run_at) <= now:
-			enqueue(row.name)
+		parts = _open_parts(row)
+		if not parts:  # every channel finished, the dispatch not yet closed
+			enqueue(row.name, "sms" if row.send_sms else "telegram")
+			continue
+		for part in parts:
+			if _due(row, part, now):
+				enqueue(row.name, part)
 
 
 def _commit() -> None:
@@ -246,85 +291,90 @@ def _permanent(exc: UpstreamError) -> bool:
 	return exc.status is not None and 400 <= exc.status < 500 and exc.status not in (408, 429)
 
 
-def run(name: str) -> None:
-	doc = frappe.get_doc(DOCTYPE, name)
-	if doc.state not in OPEN_STATES:
-		return
-	try:
-		if doc.send_telegram and not _telegram_step(doc):
-			return  # waiting for Telegram; the scheduler comes back
-		if doc.send_sms:
-			_sms_step(doc)
-			if not _retry_step(doc):
-				return  # SMS retries still waiting; the scheduler comes back
-		_finish(doc, "Done")
-	except UpstreamError as exc:
-		_rollback()
-		tries = int(frappe.db.get_value(DOCTYPE, name, "retry_count") or 0) + 1
-		frappe.db.set_value(
-			DOCTYPE,
-			name,
-			{
-				"error": exc.code[:140],
-				"retry_count": tries,
-				"next_run_at": add_to_date(now_datetime(), minutes=backoff_minutes(tries)),
-			},
-		)
-		frappe.log_error(f"Broadcast dispatch {name}: {exc}", "DA Broadcast Channels")
-		if _permanent(exc):
-			_finish(frappe.get_doc(DOCTYPE, name), "Failed")
-		_commit()
+def run(name: str, part: str | None = None) -> None:
+	"""Run one channel (``part``: ``sms`` or ``telegram``), or every ticked channel when no
+	part is given (jobs queued by an earlier version; direct calls). SMS goes first, so a
+	slow Telegram never delays it."""
+	for channel in (part,) if part else ("sms", "telegram"):
+		doc = frappe.get_doc(DOCTYPE, name)
+		if doc.state not in OPEN_STATES:
+			return
+		try:
+			if channel == "sms" and not _sms_done(doc):
+				_sms_step(doc)
+				_retry_step(doc)
+			elif channel == "telegram" and not _telegram_done(doc):
+				_telegram_step(doc)
+		except UpstreamError as exc:
+			_upstream_failed(name, exc)
+	_finish_if_done(name)
 
 
-def _telegram_step(doc) -> bool:
-	"""True when the SMS copy may start (or Telegram is all there is and it is finished).
+def _upstream_failed(name: str, exc: UpstreamError) -> None:
+	"""An SMS upstream error (or Telegram when it is the only channel): recorded and tried
+	again after the backoff; a definite refusal fails the dispatch."""
+	_rollback()
+	tries = int(frappe.db.get_value(DOCTYPE, name, "retry_count") or 0) + 1
+	frappe.db.set_value(
+		DOCTYPE,
+		name,
+		{
+			"error": exc.code[:140],
+			"retry_count": tries,
+			"next_run_at": add_to_date(now_datetime(), minutes=backoff_minutes(tries)),
+		},
+	)
+	frappe.log_error(f"Broadcast dispatch {name}: {exc}", "DA Broadcast Channels")
+	if _permanent(exc):
+		_finish_if_open(name, "Failed")
+	_commit()
 
-	The fallback wait is checked first and counts from the start of the dispatch. With SMS
-	ticked, a Telegram failure never stops the SMS copy: a definite refusal marks Telegram
-	failed and the SMS goes now; any other failure is tried again next run, and the SMS
-	goes anyway once the wait has passed. Telegram alone keeps the dispatch's own error
-	handling (retried, or Failed on a definite refusal)."""
-	if doc.telegram_failed:
-		return True
-	if not doc.telegram_started_at:  # dispatches created before this version
-		doc.db_set("telegram_started_at", now_datetime())
-		_commit()
-	wait = int(_settings().sms_fallback_wait_minutes or 15)
-	waited = now_datetime() >= add_to_date(get_datetime(doc.telegram_started_at), minutes=wait)
+
+def _telegram_step(doc) -> None:
+	"""POST /broadcasts once, then read its progress. Telegram alone keeps the dispatch's own
+	error handling (retried, or Failed on a definite refusal). Next to SMS, a failure is
+	recorded on the Telegram fields and retried on Telegram's own backoff; a definite
+	refusal, or an expired broadcast, marks Telegram failed. The SMS copy is never touched."""
 	try:
 		bot = bot_services.get_client()
 		if not doc.telegram_broadcast_id:
 			created = bot.create(_idempotency_key(doc), _telegram_body(doc))
-			doc.db_set(
-				{
-					"state": "Telegram sending",
-					"telegram_broadcast_id": created.broadcast_id,
-					"telegram_recipients": created.recipients,
-					"not_on_telegram": json.dumps(created.not_on_telegram),
-					"error": None,
-					"telegram_error": None,
-				}
-			)
+			values = {
+				"telegram_broadcast_id": created.broadcast_id,
+				"telegram_recipients": created.recipients,
+				"not_on_telegram": json.dumps(created.not_on_telegram),
+				"telegram_started_at": now_datetime(),
+				"telegram_error": None,
+				"telegram_next_run_at": None,
+			}
+			if not doc.send_sms:  # the SMS job owns the state while it runs
+				values |= {"state": "Telegram sending", "error": None}
+			doc.db_set(values)
 			_commit()
 		progress = bot.progress(doc.telegram_broadcast_id)
 	except UpstreamError as exc:
 		if not doc.send_sms:
 			raise
 		_rollback()
-		doc.db_set("telegram_error", exc.code[:140])
-		if _permanent(exc):
-			doc.db_set("telegram_failed", 1)
-			_commit()
-			return True
+		tries = int(doc.telegram_retry_count or 0) + 1
+		values = {"telegram_error": exc.code[:140], "telegram_retry_count": tries}
+		if _permanent(exc) or rules.expired(doc.expires_at):
+			values |= {"telegram_failed": 1, "telegram_next_run_at": None}
+		else:
+			values["telegram_next_run_at"] = add_to_date(now_datetime(), minutes=backoff_minutes(tries))
+		doc.db_set(values)
+		frappe.log_error(f"Broadcast dispatch {doc.name} (Telegram): {exc}", "DA Broadcast Channels")
 		_commit()
-		return waited
-	doc.db_set({"telegram_counts": json.dumps(progress.counts), "telegram_finished": int(progress.finished)})
+		return
+	doc.db_set(
+		{
+			"telegram_counts": json.dumps(progress.counts),
+			"telegram_finished": int(progress.finished),
+			"telegram_error": None,
+			"telegram_next_run_at": None,
+		}
+	)
 	_commit()
-	if progress.finished:
-		return True
-	if not doc.send_sms:
-		return False
-	return waited
 
 
 def _idempotency_key(doc) -> str:
@@ -361,27 +411,7 @@ def _sms_step(doc) -> None:
 		_sms_agents(doc, text, expires)
 
 
-def _reached_on_telegram(doc) -> set[str]:
-	"""Farmer IDs Telegram reached. Empty when Telegram failed or never started; if the
-	list cannot be read, the SMS waits for it until the fallback wait has passed, then
-	goes to everyone (a farmer may get both copies, never neither)."""
-	if not doc.send_telegram or doc.telegram_failed or not doc.telegram_broadcast_id:
-		return set()
-	try:
-		return bot_services.get_client().telegram_recipients(doc.telegram_broadcast_id)
-	except UpstreamError as exc:
-		wait = int(_settings().sms_fallback_wait_minutes or 15)
-		started = get_datetime(doc.telegram_started_at) if doc.telegram_started_at else now_datetime()
-		if now_datetime() < add_to_date(started, minutes=wait):
-			raise
-		doc.db_set("telegram_error", exc.code[:140])
-		return set()
-
-
 def _sms_farmers(doc, text: str, expires: datetime | None) -> None:
-	if (doc.sms_cursor or None) == "end":
-		return
-	skip = _reached_on_telegram(doc)
 	page_size = int(_settings().page_size or 500)
 	client = beneficiary.get_client()
 	cursor = doc.sms_cursor or None
@@ -389,11 +419,10 @@ def _sms_farmers(doc, text: str, expires: datetime | None) -> None:
 		return
 	for page in beneficiary.iter_pages(client, doc.scope, doc.scope_value, cursor, page_size):
 		if rules.expired(doc.expires_at):
-			doc.db_set("error", "expired")
+			doc.db_set({"error": "expired", "sms_cursor": "end"})  # the SMS pass is over
 			_commit()
 			return
-		counts = {"sms_targeted": 0, "sms_queued": 0, "sms_skipped_on_telegram": 0, "sms_no_phone": 0}
-		counts["sms_not_queued"] = 0
+		counts = {"sms_targeted": 0, "sms_queued": 0, "sms_no_phone": 0, "sms_not_queued": 0}
 		retry = _retry_list(doc)
 		# Row number of each farmer in this broadcast: the rows read before this page plus
 		# its place in the page. The page and the counts commit together, so it is the
@@ -402,9 +431,7 @@ def _sms_farmers(doc, text: str, expires: datetime | None) -> None:
 		for farmer in page.farmers:
 			row += 1
 			counts["sms_targeted"] += 1
-			if farmer.farmer_id in skip:
-				counts["sms_skipped_on_telegram"] += 1
-			elif not farmer.phone:
+			if not farmer.phone:
 				counts["sms_no_phone"] += 1
 			else:
 				_queue_one(
@@ -414,26 +441,17 @@ def _sms_farmers(doc, text: str, expires: datetime | None) -> None:
 
 
 def _sms_agents(doc, text: str, expires: datetime | None) -> None:
-	"""Agents of the area minus the sender; with Telegram ticked, only those not on it."""
+	"""Every agent of the area minus the sender, whether or not they are on Telegram."""
 	if doc.sms_cursor == "end":
 		return
 	from da_services.integrations.da_registry.client import get_client as registry
 
-	# With Telegram ticked and sent, only the agents not on it; if Telegram failed or never
-	# started, every agent.
-	telegram_sent = doc.send_telegram and doc.telegram_broadcast_id and not doc.telegram_failed
-	only = set(json.loads(doc.not_on_telegram or "[]")) if telegram_sent else None
 	da_ids = _agent_ids(doc)
-	counts = dict.fromkeys(
-		("sms_targeted", "sms_queued", "sms_skipped_on_telegram", "sms_no_phone", "sms_not_queued"), 0
-	)
+	counts = dict.fromkeys(("sms_targeted", "sms_queued", "sms_no_phone", "sms_not_queued"), 0)
 	client = registry("service")
 	retry = _retry_list(doc)
 	for row, da_id in enumerate(da_ids, start=1):
 		counts["sms_targeted"] += 1
-		if only is not None and da_id not in only:
-			counts["sms_skipped_on_telegram"] += 1
-			continue
 		ref = client.get_da(da_id)
 		phone = getattr(ref, "phone", None) if ref else None
 		if not phone:
@@ -569,6 +587,26 @@ def _retry_step(doc) -> bool:
 	return not keep
 
 
+def _finish_if_done(name: str) -> None:
+	"""Close the dispatch once every ticked channel is finished. The SMS and Telegram jobs
+	may end at the same time: the row lock lets exactly one of them close it."""
+	_commit()
+	if frappe.db.get_value(DOCTYPE, name, "state", for_update=True) not in OPEN_STATES:
+		return
+	doc = frappe.get_doc(DOCTYPE, name)
+	parts = _open_parts(doc)
+	if not parts:
+		_finish(doc, "Done")
+	elif doc.send_sms and parts == ["telegram"] and doc.state != "Telegram sending":
+		doc.db_set("state", "Telegram sending")  # the SMS is over; Telegram still going
+	_commit()
+
+
+def _finish_if_open(name: str, state: str) -> None:
+	if frappe.db.get_value(DOCTYPE, name, "state", for_update=True) in OPEN_STATES:
+		_finish(frappe.get_doc(DOCTYPE, name), state)
+
+
 def _finish(doc, state: str) -> None:
 	doc.db_set({"state": state, "finished_at": now_datetime(), "next_run_at": None})
 	if doc.recipients == "farmers":
@@ -613,6 +651,7 @@ def status(name: str) -> dict:
 			"not_on_telegram": len(json.loads(doc.not_on_telegram or "[]")),
 			"finished": bool(doc.telegram_finished),
 			"failed": bool(doc.telegram_failed),
+			"error": doc.telegram_error,
 			**json.loads(doc.telegram_counts or "{}"),
 		}
 	if doc.send_sms:
@@ -621,6 +660,7 @@ def status(name: str) -> dict:
 			"parts": int(doc.sms_parts or 0),
 			"read": int(doc.sms_targeted or 0),
 			"queued": int(doc.sms_queued or 0),
+			# Kept for the read contract; always 0 since SMS and Telegram are independent.
 			"skipped_on_telegram": int(doc.sms_skipped_on_telegram or 0),
 			"no_phone": int(doc.sms_no_phone or 0),
 			"not_queued": int(doc.sms_not_queued or 0),

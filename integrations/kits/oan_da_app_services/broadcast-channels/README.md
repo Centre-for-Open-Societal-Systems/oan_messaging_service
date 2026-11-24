@@ -29,25 +29,31 @@ broadcasts are for the Communications Officer and the Admin.
 - **In-app only to agents** still goes to `POST /notifications/broadcast`, untouched.
 - **Anything with SMS or Telegram** goes to the add-on's `POST /api/v1/da-services/broadcasts`.
   It records the broadcast in `DA Broadcast` (same history and `client_op_id` rule) and its
-  delivery in `DA Broadcast Dispatch`, then sends in the background:
-  1. **Telegram first:** `POST /broadcasts` to Bot Services, with the `client_op_id` as
-     `Idempotency-Key`.
-  2. **SMS copy** when Telegram has finished, or after `sms_fallback_wait_minutes` (15)
-     counted from the start of the dispatch, whichever is first. A Telegram failure never
-     stops the SMS copy: a definite refusal sends it at once, to everyone; any other failure
-     is retried, and the SMS goes once the wait has passed.
-     - **Farmers:** the area's farmers come from the beneficiary API, page by page, minus the
-       Farmer IDs Bot Services reached on Telegram. A farmer whose Telegram copy failed or is
-       still pending gets the SMS.
-     - **Agents:** the agents not on Telegram (all agents when Telegram is not ticked), minus
-       the sender, with phones from the DA Registry.
-     - Each SMS goes through `oan_messaging_connector.queue_sms`, with purpose by source
-       (SMS-06): `Emergency` and `Weather` as `alert`, `Knowledge` and `Informational` as
-       `broadcast`. `source_reference` is `da_broadcast:<DA Broadcast>:<row>`, where `row` is
-       the recipient's row number in the broadcast (no personal data; the same after a
-       restart or a retry).
-     - Each page's SMS rows and the saved cursor commit together, so a restart never sends a
-       page twice.
+  delivery in `DA Broadcast Dispatch`, then sends in the background.
+  **SMS and Telegram are sent independently** (since 24 November 2026; this replaces the
+  Telegram-first rule of spec §6.8.3). Each ticked channel has its own background job.
+  Neither waits for the other, and a farmer or agent on both channels may get both copies.
+  - **SMS** starts at once:
+    - **Farmers:** every farmer of the area, from the beneficiary API, page by page.
+    - **Agents:** every agent of the area, minus the sender, with phones from the DA
+      Registry, whether or not they are on Telegram.
+    - Each SMS goes through `oan_messaging_connector.queue_sms`, with purpose by source
+      (SMS-06): `Emergency` and `Weather` as `alert`, `Knowledge` and `Informational` as
+      `broadcast`. `source_reference` is `da_broadcast:<DA Broadcast>:<row>`, where `row` is
+      the recipient's row number in the broadcast (no personal data; the same after a
+      restart or a retry).
+    - Each page's SMS rows and the saved cursor commit together, so a restart never sends a
+      page twice.
+  - **Telegram:** `POST /broadcasts` to Bot Services, with the `client_op_id` as
+    `Idempotency-Key`, then its progress until Bot Services says it has finished.
+    - With SMS also ticked, a Telegram failure never delays or blocks the SMS. It is recorded
+      on the dispatch (`telegram_error`, `telegram_retry_count`) and retried on Telegram's own
+      backoff (`telegram_next_run_at`). A definite refusal (4xx), or a broadcast that expired
+      before Bot Services took it, marks Telegram **failed** (`telegram_failed`).
+    - Telegram alone keeps the dispatch's own handling: retried after a timeout or 5xx,
+      Failed on a 4xx.
+  - The broadcast is **Done** when every ticked channel is finished: the SMS pass and its
+    retry list are over, and Telegram has finished or failed.
 - **SMS not queued:** when `queue_sms` queues nothing, the recipient goes on the dispatch's
   retry list (Farmer ID or DA ID, language, row number; never the phone). After the pass the
   list is tried again with a fresh phone lookup, waiting longer each time
@@ -56,15 +62,18 @@ broadcasts are for the Communications Officer and the Admin.
   empty or spent.
 - **Restarts and retries:** a one-minute scheduler job re-enters unfinished broadcasts.
   - A timeout or 5xx from an upstream is recorded and retried, with the same backoff
-    (`next_run_at` on the dispatch).
-  - A 4xx refusal marks the broadcast Failed (Telegram: only when Telegram is the only
-    channel).
+    (`next_run_at` on the dispatch; Telegram next to SMS uses `telegram_next_run_at`).
+  - A 4xx refusal from the beneficiary API, or from Bot Services when Telegram is the only
+    channel, marks the broadcast Failed. Next to SMS, a Telegram 4xx marks only Telegram
+    failed.
   - `expires_at` (optional, at most 7 days) stops the SMS pass.
 - **`GET /api/v1/da-services/broadcasts/<client_op_id>`** returns per-channel counts:
   - in-app recipients;
-  - Telegram sent, failed and so on;
-  - SMS read, queued, skipped as reached on Telegram, no phone, retrying, not sent, and the
-    OAN status of each queued SMS.
+  - Telegram copies by OAN Messaging status: accepted, sending, **sent**, failed, expired,
+    unknown. Telegram ends at **sent**: there is no "delivered" or "read" for Telegram. Also
+    `finished` and `error` (the last Telegram error code, or null);
+  - SMS read, queued, no phone, retrying, not sent, and the OAN status of each queued SMS.
+    `skipped_on_telegram` stays in the answer for compatibility and is always 0 now.
 - **SMS length:** up to **3 parts** (OAN Messaging contract 3.1.0, SMS-09). One part is 160
   characters, or 70 with any Amharic letter; beyond that 153 / 67 per part. The screen warns
   when the SMS turns multi-part and blocks Send beyond 3 parts. The API refuses it too.
@@ -82,8 +91,16 @@ broadcasts are for the Communications Officer and the Admin.
    `da_broadcast_channels.{beneficiary_api|bot_services}.{base_url, token_url, client_id, client_secret, ca_bundle}`):
    - both base URLs;
    - Keycloak client-credentials for each;
-   - `sms_fallback_wait_minutes` (15);
    - `page_size` (500).
+
+   `sms_fallback_wait_minutes` is retired: SMS no longer waits for Telegram. It is removed
+   from the Settings form; on a site that had it, the old value stays unused in the
+   database and nothing reads it.
+
+   **Upgrading a site that already runs the add-on:** `bench --site <site> migrate` adds
+   `telegram_retry_count` and `telegram_next_run_at` to DA Broadcast Dispatch. A broadcast
+   that was waiting for Telegram when you upgrade sends its SMS to everyone at the next
+   scheduler minute, as a new one would.
 
    Until the real upstreams exist, run `python3 stubs/stub_server.py --fixture <file>` and
    point both base URLs at it.
@@ -99,6 +116,17 @@ broadcasts are for the Communications Officer and the Admin.
    - `api.py` to `api/v1/`;
    - the two DocTypes and the clients alongside.
 
+## Evidence (24 November 2026: SMS and Telegram independent)
+
+| Check | Result |
+|---|---|
+| Add-on tests (`bench run-tests --module da_broadcast_channels.tests.test_broadcast_channels`) on a Frappe 16 bench with `oan_auth_service` `develop` `fb31c01`, `da_services` `656985b`, `oan_messaging_connector` `96fc5d1` | **31 passed**, 0 failed (the unchanged kit: 26 passed on the same bench) |
+| New tests | One job per ticked channel; SMS queued at once with both ticked (no wait, no farmer dropped); the SMS job never calls Bot Services; Bot Services down (503): SMS goes, Telegram error recorded and retried on its own backoff, then Done; Telegram progress error backs off alone; Telegram expired before Bot Services took it is marked failed; Telegram only (no SMS; counts say sent, never delivered or read); SMS only (Bot Services never called); duplicate submit sends no second SMS or Telegram broadcast; every agent gets the SMS with Telegram ticked |
+| End to end (`e2e/e2e_broadcast.py <site> --no-oan`) against `stubs/stub_server.py` on the same bench | **16 of 16 passed**: SMS for all 5 farmers with a phone queued before Bot Services was called; Telegram 1 sent, 1 copy failed; Bot Services down: SMS still queued at once, Telegram error `unavailable` recorded, then sent once it came back; replay sent nothing. With `--no-oan` the SMS stop at the connector outbox: delivery through OAN Messaging and the fake 8028 was **not** rerun (the trial stack's TLS certificate has expired) |
+| UI patch on `oan_da_app_ui` `develop` `b99685e` | `git apply --check` clean. `npm run typecheck` clean, `eslint .` clean. `vitest run`: 427 passed, 11 failed, all 11 in `grievances/evidence.test.ts` (`localStorage` missing under Node 26 on this machine); the same 11 fail on `b99685e` without the patch. Broadcast and notification tests: 57 passed |
+| Lint (ruff, house settings) | Clean |
+| Not run | The full DA suite; the screen in a browser; delivery through OAN Messaging (see above) |
+
 ## Evidence (23 November 2026, rebased on `656985b`)
 
 | Check | Result |
@@ -112,12 +140,13 @@ broadcasts are for the Communications Officer and the Admin.
 Earlier evidence (20 November 2026, on `2ae3d13`): full DA suite with the add-on 856
 integration + 139 unit tests, 0 failures; connector 44 passed; end to end 10 of 10.
 
-End to end, a Communications Officer sent a 2-part Weather warning to all farmers of a
-woreda on SMS and Telegram. The woreda had 6 farmers: 2 on Telegram (1 of them failing
-there) and 1 without a phone.
+End to end (20 November 2026, before SMS and Telegram became independent), a
+Communications Officer sent a 2-part Weather warning to all farmers of a woreda on SMS and
+Telegram. The woreda had 6 farmers: 2 on Telegram (1 of them failing there) and 1 without
+a phone.
 - Telegram went first: 1 sent, 1 failed.
 - The SMS copy read 6 farmers, skipped the 1 reached on Telegram, counted 1 without a phone
-  and queued 4 SMS.
+  and queued 4 SMS. (Since 24 November it skips no one: 5 SMS.)
 - The fake 8028 delivered all 4 (purpose `alert`).
 - An Informational SMS went to OAN as `broadcast` and was delivered (broadcasts enabled, SMS-03 ageing).
 - A replay of the `client_op_id` returned the original and sent nothing.
@@ -130,14 +159,15 @@ there) and 1 without a phone.
 | BC-02 | Communications Officer picks a region only, All farmers, SMS | Sent to the whole region; `scope: region` |
 | BC-03 | Message of 161 English characters with SMS ticked | Warning: "2 parts"; Send allowed |
 | BC-04 | Amharic message of 202 characters with SMS ticked | Send disabled: "Too long for SMS: 4 parts" |
-| BC-05 | All farmers on SMS and Telegram | Telegram first; SMS only to farmers not reached on Telegram |
-| BC-06 | Telegram still sending after 15 minutes | SMS copy starts anyway |
+| BC-05 | All farmers on SMS and Telegram | SMS starts at once to every farmer with a phone; Telegram goes on its own; a farmer on both gets both |
+| BC-06 | SMS and Telegram, Bot Services down or answering 503 | SMS goes at once, unchanged; Telegram error shown on the dispatch and retried; broadcast Done once Telegram is sent |
 | BC-07 | Same `client_op_id` sent twice | "Already sent", one dispatch, no extra SMS |
 | BC-08 | Same `client_op_id`, different text | 409 conflict |
 | BC-09 | Agents of a kebele (DA sender) on SMS | Every other agent of the kebele gets it; the sender does not |
 | BC-10 | In-app only to agents | Exactly as before (`/notifications/broadcast`) |
 | BC-11 | Bot Services refuses (4xx), Telegram only | Broadcast Failed, error code shown, nothing sent |
-| BC-11a | Bot Services refuses (4xx), SMS and Telegram | Telegram marked failed; the SMS copy goes to everyone; broadcast Done |
+| BC-11a | Bot Services refuses (4xx), SMS and Telegram | Telegram marked failed; the SMS goes as usual; broadcast Done |
+| BC-17 | Telegram counts on the status | Shows sent (and accepted, sending, failed, expired, unknown); never "delivered" or "read" |
 | BC-12 | Upstream timeout | Retried by the one-minute job after the backoff; error code recorded |
 | BC-15 | Send clicked twice, or again after an error | One broadcast: the form keeps one `client_op_id` until it is sent or cleared |
 | BC-16 | An SMS that cannot be queued | Kept on the retry list (no phone stored), tried again with backoff, then counted as not sent |

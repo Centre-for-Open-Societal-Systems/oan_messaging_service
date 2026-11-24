@@ -77,7 +77,7 @@ paths:
   /broadcasts/{broadcast_id}/telegram-recipients:
     get:
       operationId: getTelegramRecipients
-      description: Farmer IDs whose Telegram copy is `sent`. The SMS copy skips exactly these.
+      description: Farmer IDs whose Telegram copy is `sent`. Stays available; since 24 November 2026 the DA add-on no longer uses it to drop SMS copies (SMS and Telegram are sent independently).
       parameters:
         - {name: broadcast_id, in: path, required: true, schema: {type: string}}
         - {name: cursor, in: query, schema: {type: string}}

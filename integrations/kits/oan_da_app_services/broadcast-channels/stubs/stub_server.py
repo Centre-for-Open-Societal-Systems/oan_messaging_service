@@ -12,6 +12,8 @@ Serves, exactly as the kit's OpenAPI files describe:
     GET  /broadcasts/{id}
     GET  /broadcasts/{id}/telegram-recipients?cursor=
 * POST /token  a client-credentials token endpoint that accepts anything
+* POST /_stub/bot-services/down and /_stub/bot-services/up  (test switch, not an upstream
+  route): while "down", every Bot Services route answers 503, as an outage would
 
 The fixture lists farmers (with ``telegram: true`` when they are linked in the bot) and
 agents (``da_id``, area codes, ``telegram``). A broadcast "finishes" ``--finish-after``
@@ -41,6 +43,7 @@ class State:
 		self.finish_after = finish_after
 		self.broadcasts: dict[str, dict] = {}
 		self.keys: dict[str, tuple[str, str]] = {}  # Idempotency-Key -> (body digest, id)
+		self.bot_down = False
 		self.lock = threading.Lock()
 
 
@@ -83,6 +86,8 @@ class Handler(BaseHTTPRequestHandler):
 			return self._farmers(q)
 		if parts[:3] == ["api", "v1", "farmers"] and len(parts) == 4:
 			return self._farmer(parts[3])
+		if parts[0] == "broadcasts" and self.state.bot_down:
+			return self._problem(503, "unavailable")
 		if parts[0] == "broadcasts" and len(parts) == 2:
 			return self._broadcast(parts[1])
 		if parts[0] == "broadcasts" and len(parts) == 3 and parts[2] == "telegram-recipients":
@@ -97,6 +102,11 @@ class Handler(BaseHTTPRequestHandler):
 			return self._send(
 				200, {"access_token": uuid.uuid4().hex, "token_type": "Bearer", "expires_in": 300}
 			)
+		if url.path in ("/_stub/bot-services/down", "/_stub/bot-services/up"):
+			self.state.bot_down = url.path.endswith("/down")
+			return self._send(200, {"bot_services": "down" if self.state.bot_down else "up"})
+		if url.path == "/broadcasts" and self.state.bot_down:
+			return self._problem(503, "unavailable")
 		if url.path == "/broadcasts":
 			return self._create(raw)
 		self._problem(404, "not_found")

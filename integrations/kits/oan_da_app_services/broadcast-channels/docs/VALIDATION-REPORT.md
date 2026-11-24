@@ -1,6 +1,7 @@
 # DA broadcast: validation against the Channels Specification
 
-**Checked:** 20 November 2026; rebased and checked again 23 November 2026
+**Checked:** 20 November 2026; rebased and checked again 23 November 2026; SMS and Telegram
+made independent 24 November 2026
 **Code:** `oan_da_app_services` `develop` `656985b` and `oan_da_app_ui` `develop` `b99685e`
 (first checked on `2ae3d13` and `4e9dd4d`)
 **Against:** Channels Specification v2.0 §6.8 (area broadcasts) and §8.4 (ID-03, ID-09), and
@@ -49,19 +50,19 @@ on install. The add-on now uses the DA backend's permission code the way the bac
 - The add-on keeps one rule of its own: farmer broadcasts are for the Communications Officer
   and the Admin (OAN Administrator, System Manager, Administrator).
 
-What changed for senders (the DA backend's decision, accepted by the owner on 23 November).
+What changed for senders (the DA backend's decision, accepted on 23 November).
 Each level is checked on its own DocType, and User Permissions are created only at the
 levels a grant names, so a grant limits that level and the levels below it:
 
 | Sender | Before (`2ae3d13`) | Now (`656985b`) |
 |---|---|---|
-| Communications Officer, Region-scoped (F-23) | Only inside their Region | Their Region, and the Zones in it. A Woreda or Kebele is checked on its own DocType, which links only to its Zone or Woreda, so the Region grant does not restrict it |
+| Communications Officer, Region-scoped | Only inside their Region | Their Region, and the Zones in it. A Woreda or Kebele is checked on its own DocType, which links only to its Zone or Woreda, so the Region grant does not restrict it |
 | Communications Officer, Zone- or Woreda-scoped | Only inside their area | Their area; a Region (and, for a Zone grant, a Kebele) is not restricted by it |
 | Development Agent | Own Kebele only | Own Kebele; a Woreda, Zone or Region limited only by the User Permissions their grant gives (none: not limited) |
 | Supervisor or Executive | Own Woreda only | Only with a role that has DA Broadcast `create` |
 | An area code that does not exist | Refused | Passes the area check; the add-on refuses it (not in Master Data) |
 
-F-23 rechecked: a Region-scoped Communications Officer can send to their Region and to a
+Rechecked: a Region-scoped Communications Officer can send to their Region and to a
 Woreda inside it, and is refused for another Region (test
 `test_region_scoped_comms_under_the_da_backend_rules`). Wider reach across levels follows
 the backend's rule above.
@@ -75,13 +76,46 @@ Fixed in this round:
   (`next_run_at`: 1, 2, 4 … minutes, at most 60).
 - `source_reference` held the Farmer ID. It now holds the recipient's row number in the
   broadcast (spec 03-sms-service.md: no personal data), the same after a restart or retry.
-- F-18 (Telegram): the fallback wait was checked after `progress()`, so any error there
+- Telegram: the fallback wait was checked after `progress()`, so any error there
   skipped it; a failed `create()` left the dispatch Queued for good; and a Telegram 4xx
   failed the whole dispatch, so no SMS went out. Now the wait is checked first and counts
   from the start of the dispatch, and a Telegram failure never stops the SMS copy.
 - Double send: the screen never passed `client_op_id`, so each click made a new one. The UI
   patch now creates one per form, reuses it on every Send of that form, and ignores a second
   click while a send is in progress.
+
+## SMS and Telegram independent (24 November 2026)
+
+From this release SMS and Telegram are sent independently. This replaces
+the Telegram-first rule of spec §6.8.3 (Telegram, then SMS after 15 minutes to those not
+reached on Telegram).
+
+| What | Before | Now |
+|---|---|---|
+| Order | Telegram first; SMS waited for it, up to `sms_fallback_wait_minutes` (15) | One background job per ticked channel. SMS starts at once; neither waits for the other |
+| Who gets the SMS | Farmers minus those Bot Services reached on Telegram; agents not on Telegram | Every farmer of the area with a phone; every agent of the area minus the sender. Someone on both channels may get both copies |
+| `telegram-recipients` | Read to drop SMS copies | Not used by the add-on (still served by Bot Services and the stub) |
+| Telegram down or 503, SMS ticked | SMS waited for the fallback wait | SMS goes at once. `telegram_error` and `telegram_retry_count` recorded, retried on `telegram_next_run_at` (1, 2, 4 … minutes, at most 60) |
+| Telegram 4xx, SMS ticked | Telegram failed; SMS at once to everyone | Telegram failed; SMS as usual |
+| Telegram not taken before `expires_at` | (not handled) | Telegram marked failed, so the broadcast can close |
+| Done | When the SMS pass ended | When every ticked channel is finished (SMS pass and retries over; Telegram finished or failed). A row lock lets exactly one job close it |
+| `sms_fallback_wait_minutes` | Setting, 15 | Retired and removed from the form; nothing reads it |
+| Status | `telegram.failed` flag, counts | Same, plus `telegram.error`. `sms.skipped_on_telegram` stays, always 0 |
+
+Unchanged: roles and area rules (region allowed for the Communications Officer and the OAN
+Administrator), `client_op_id` idempotency and the Bot Services `Idempotency-Key`, the
+beneficiary API contract, SMS-03/SMS-06/SMS-09 rules, the retry list, `POST /broadcasts`
+and `GET /broadcasts/<id>` (one key added).
+
+Telegram status words: the Telegram counts are OAN Messaging's statuses (accepted, sending,
+sent, failed, expired, unknown). Telegram ends at **sent**; nothing says "delivered" or
+"read" for Telegram. The UI patch's Telegram-first wording is replaced (see README).
+
+Found while testing, not changed (as built): in `GET /broadcasts/<id>` the Telegram block's
+`failed` key is first the channel flag and is then overwritten by Bot Services' `failed`
+count of copies. With counts present, `failed` is the count. The flag is on the dispatch
+(`telegram_failed`) and in `telegram.error`. Changing the key would change the read
+contract, so it is left for the DA team to decide.
 
 ## Dependencies outside the DA team
 

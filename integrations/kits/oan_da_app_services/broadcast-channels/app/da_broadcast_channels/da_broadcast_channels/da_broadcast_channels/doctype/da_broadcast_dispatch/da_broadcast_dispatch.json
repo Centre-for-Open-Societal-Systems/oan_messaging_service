@@ -5,7 +5,7 @@
  "engine": "InnoDB",
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-11-20 12:00:00.000000",
+ "modified": "2026-11-24 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "DA Broadcast Channels",
  "name": "DA Broadcast Dispatch",
@@ -41,6 +41,8 @@
   "not_on_telegram",
   "telegram_failed",
   "telegram_error",
+  "telegram_retry_count",
+  "telegram_next_run_at",
   "sec_sms",
   "sms_started_at",
   "sms_cursor",
@@ -217,27 +219,43 @@
    "fieldname": "telegram_started_at",
    "fieldtype": "Datetime",
    "label": "Telegram Started At",
-   "read_only": 1
+   "read_only": 1,
+   "description": "When Bot Services accepted the Telegram broadcast"
   },
   {
    "fieldname": "not_on_telegram",
    "fieldtype": "JSON",
    "label": "Agents Not on Telegram",
    "read_only": 1,
-   "description": "DA refs returned by Bot Services; they get the SMS copy"
+   "description": "DA refs returned by Bot Services (agents not linked in the bot). Every agent still gets the SMS copy when SMS is ticked"
   },
   {
    "fieldname": "telegram_failed",
    "fieldtype": "Check",
    "label": "Telegram failed",
-   "description": "Telegram could not be sent; the SMS copy went to everyone instead",
+   "description": "Telegram could not be sent: a definite refusal, or the broadcast expired before Bot Services took it. The SMS copy is sent on its own and is not affected",
    "read_only": 1
   },
   {
    "fieldname": "telegram_error",
    "fieldtype": "Data",
    "label": "Telegram error",
-   "read_only": 1
+   "read_only": 1,
+   "description": "The last Telegram error code; cleared once Bot Services answers again"
+  },
+  {
+   "fieldname": "telegram_retry_count",
+   "fieldtype": "Int",
+   "label": "Telegram retries after an error",
+   "read_only": 1,
+   "description": "With SMS ticked, Telegram is retried on its own; this counts the tries"
+  },
+  {
+   "fieldname": "telegram_next_run_at",
+   "fieldtype": "Datetime",
+   "label": "Telegram next run",
+   "read_only": 1,
+   "description": "With SMS ticked, the scheduler re-enters Telegram only from this time (backoff). SMS never waits for it"
   },
   {
    "fieldname": "sec_sms",
@@ -272,8 +290,9 @@
   {
    "fieldname": "sms_skipped_on_telegram",
    "fieldtype": "Int",
-   "label": "Skipped (Reached on Telegram)",
-   "read_only": 1
+   "label": "Skipped (Reached on Telegram, retired)",
+   "read_only": 1,
+   "description": "Retired: SMS and Telegram are sent independently, so no SMS is skipped. Kept for broadcasts sent before"
   },
   {
    "fieldname": "sms_no_phone",

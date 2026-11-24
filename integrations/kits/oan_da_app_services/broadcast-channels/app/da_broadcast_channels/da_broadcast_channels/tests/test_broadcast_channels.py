@@ -91,20 +91,24 @@ class FakeBot:
 	not_on_telegram: ClassVar[list[str]] = []
 	fail: UpstreamError | None = None
 	progress_fail: UpstreamError | None = None
+	calls: ClassVar[list[str]] = []  # every call, in order
 
 	def create(self, key, body):
+		FakeBot.calls.append("create")
 		if FakeBot.fail:
 			raise FakeBot.fail
 		FakeBot.created.append((key, body))
 		return bot_services.Created("BOT-1", 3, list(FakeBot.not_on_telegram))
 
 	def progress(self, broadcast_id):
+		FakeBot.calls.append("progress")
 		if FakeBot.progress_fail:
 			raise FakeBot.progress_fail
 		counts = dict.fromkeys(bot_services.STATUSES, 0) | {"sent": len(FakeBot.sent)}
 		return bot_services.Progress(broadcast_id, FakeBot.finished, counts)
 
 	def telegram_recipients(self, broadcast_id):
+		FakeBot.calls.append("telegram_recipients")
 		return set(FakeBot.sent)
 
 
@@ -148,11 +152,11 @@ class TestBroadcastChannels(IntegrationTestCase):
 		FakeBeneficiary.calls = []
 		FakeBot.created, FakeBot.finished, FakeBot.sent, FakeBot.not_on_telegram = [], False, set(), []
 		FakeBot.fail = FakeBot.progress_fail = None
+		FakeBot.calls = []
 		FakeRegistry.phones = {DA_ID: "0900000951", DA_OTHER_ID: "0900000952"}
 		settings = frappe.get_single("DA Broadcast Channel Settings")
 		settings.update(
 			{
-				"sms_fallback_wait_minutes": 15,
 				"page_size": 2,
 				"sms_retry_attempts": 3,
 				"retry_backoff_minutes": 1,
@@ -168,7 +172,7 @@ class TestBroadcastChannels(IntegrationTestCase):
 			),
 			mock.patch.object(dispatch, "_commit", lambda: None),
 			mock.patch.object(dispatch, "_rollback", lambda: None),
-			mock.patch.object(dispatch, "enqueue", lambda name: None),
+			mock.patch.object(dispatch, "enqueue", lambda name, part: None),
 			mock.patch("oan_messaging_connector.api.enabled", lambda: True),
 		]
 		for p in patches:
@@ -229,7 +233,7 @@ class TestBroadcastChannels(IntegrationTestCase):
 			self.send(COMMS_W, scope_value=self.geo["foreign_woreda"])
 
 	def test_region_scoped_comms_under_the_da_backend_rules(self):
-		"""F-23, rechecked on DA backend 656985b: the area rule is the backend's own (read on the
+		"""Rechecked on DA backend 656985b: the area rule is the backend's own (read on the
 		area's DocType under the sender's User Permissions), unchanged by this add-on."""
 		comms_r = "bcc-comms-r@da.local"
 		frappe.db.delete("DA RBAC Assignment", {"user": comms_r})
@@ -310,35 +314,129 @@ class TestBroadcastChannels(IntegrationTestCase):
 		)
 		self.assertEqual(frappe.db.get_value(dispatch.DOCTYPE, name, "sms_queued"), 5)
 
-	# -- Telegram first ----------------------------------------------------------
+	# -- SMS and Telegram independent (§6.8.3 Telegram-first replaced) -----------------
 
-	def test_telegram_first_then_sms_skips_farmers_reached(self):
+	def test_create_queues_one_job_per_ticked_channel(self):
+		queued = []
+		with mock.patch.object(dispatch, "enqueue", lambda name, part: queued.append(part)):
+			self.send(COMMS, channels=["sms", "telegram"])
+			self.send(COMMS, channels=["sms"])
+			self.send(COMMS, channels=["telegram"])
+		self.assertEqual(queued, ["sms", "telegram", "sms", "telegram"])
+
+	def test_both_ticked_sends_the_sms_at_once_without_waiting_for_telegram(self):
 		name = self.dispatch_of(self.send(COMMS, channels=["sms", "telegram"], expires_at=None))
-		dispatch.run(name)
+		dispatch.run(name)  # Telegram still sending (FakeBot.finished is False)
 		doc = frappe.get_doc(dispatch.DOCTYPE, name)
-		self.assertEqual((doc.state, doc.telegram_broadcast_id), ("Telegram sending", "BOT-1"))
+		self.assertEqual((doc.sms_queued, doc.sms_no_phone, doc.sms_skipped_on_telegram), (5, 1, 0))
+		self.assertEqual(doc.telegram_broadcast_id, "BOT-1")
 		key, body = FakeBot.created[0]
 		self.assertEqual((body["recipients"], body["scope"]["code"]), ("farmers", self.geo["woreda"]))
 		self.assertEqual(key, doc.client_op_id)
-		self.assertEqual(self.sms_rows(name), [])  # waits for Telegram
+		self.assertNotIn("telegram_recipients", FakeBot.calls)  # no SMS is dropped for Telegram
+		self.assertEqual(doc.state, "Telegram sending")  # SMS over; open until Telegram finishes
 
 		FakeBot.finished, FakeBot.sent = True, {"FR-BCC-0001", "FR-BCC-0003"}
 		dispatch.run(name)
 		doc.reload()
-		self.assertEqual((doc.state, doc.sms_skipped_on_telegram, doc.sms_queued), ("Done", 2, 3))
-		self.assertEqual(len(FakeBot.created), 1)  # never created twice
+		# Farmers reached on Telegram still got the SMS copy; nothing is sent twice.
+		self.assertEqual((doc.state, doc.sms_queued, doc.telegram_finished), ("Done", 5, 1))
+		self.assertEqual(len(self.sms_rows(name)), 5)
+		self.assertEqual(len(FakeBot.created), 1)
 
-	def test_sms_starts_after_the_wait_even_if_telegram_is_still_sending(self):
+	def test_the_sms_job_alone_never_calls_bot_services(self):
+		name = self.dispatch_of(self.send(COMMS, channels=["sms", "telegram"]))
+		dispatch.run(name, "sms")
+		self.assertEqual(frappe.db.get_value(dispatch.DOCTYPE, name, "sms_queued"), 5)
+		self.assertEqual(FakeBot.calls, [])
+		dispatch.run(name, "telegram")
+		self.assertEqual(len(self.sms_rows(name)), 5)  # the Telegram job queues no SMS
+		self.assertEqual(FakeBot.calls, ["create", "progress"])
+
+	def test_telegram_down_never_delays_or_blocks_the_sms(self):
+		FakeBot.fail = UpstreamError("bot_services", "http_503", 503)
 		name = self.dispatch_of(self.send(COMMS, channels=["sms", "telegram"]))
 		dispatch.run(name)
-		frappe.db.set_value(
-			dispatch.DOCTYPE, name, "telegram_started_at", add_to_date(now_datetime(), minutes=-16)
-		)
-		FakeBot.sent = {"FR-BCC-0002"}
-		dispatch.run(name)
-		self.assertEqual(frappe.db.get_value(dispatch.DOCTYPE, name, "sms_queued"), 4)
+		doc = frappe.get_doc(dispatch.DOCTYPE, name)
+		self.assertEqual((doc.sms_queued, doc.sms_cursor), (5, "end"))
+		# Recorded honestly: the error, a try, a later retry; not failed, not finished.
+		self.assertEqual((doc.telegram_error, doc.telegram_retry_count), ("http_503", 1))
+		self.assertEqual((doc.telegram_failed, doc.telegram_finished, doc.error), (0, 0, None))
+		self.assertGreater(doc.telegram_next_run_at, now_datetime())
+		self.assertIsNone(doc.next_run_at)  # the SMS side has no backoff
+		self.assertEqual(dispatch.status(name)["telegram"]["error"], "http_503")
+		self.assertNotEqual(doc.state, "Done")
 
-	def test_agents_not_on_telegram_get_the_sms_copy(self):
+		FakeBot.fail = None  # Bot Services is back
+		FakeBot.finished = True
+		dispatch.run(name, "telegram")
+		doc.reload()
+		self.assertEqual((doc.state, doc.telegram_error, doc.sms_queued), ("Done", None, 5))
+		self.assertEqual(len(self.sms_rows(name)), 5)
+
+	def test_telegram_progress_error_backs_off_on_its_own(self):
+		name = self.dispatch_of(self.send(COMMS, channels=["sms", "telegram"]))
+		dispatch.run(name)  # SMS done, Telegram created and still sending
+		FakeBot.progress_fail = UpstreamError("bot_services", "timeout")
+		dispatch.run(name, "telegram")
+		doc = frappe.get_doc(dispatch.DOCTYPE, name)
+		self.assertEqual((doc.telegram_error, doc.telegram_failed, doc.sms_queued), ("timeout", 0, 5))
+		queued = []
+		with mock.patch.object(dispatch, "enqueue", lambda n, part: queued.append((n, part))):
+			dispatch.resume_open()
+			self.assertNotIn((name, "telegram"), queued)  # waits for its backoff
+			self.assertNotIn((name, "sms"), queued)  # the SMS is finished
+			frappe.db.set_value(
+				dispatch.DOCTYPE, name, "telegram_next_run_at", add_to_date(now_datetime(), minutes=-1)
+			)
+			dispatch.resume_open()
+			self.assertIn((name, "telegram"), queued)
+
+	def test_telegram_not_taken_before_expiry_is_marked_failed(self):
+		FakeBot.fail = UpstreamError("bot_services", "timeout")
+		soon = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+		name = self.dispatch_of(self.send(COMMS, channels=["sms", "telegram"], expires_at=soon))
+		dispatch.run(name, "sms")
+		frappe.db.set_value(dispatch.DOCTYPE, name, "expires_at", "2020-01-01T00:00:00+00:00")
+		dispatch.run(name, "telegram")
+		doc = frappe.get_doc(dispatch.DOCTYPE, name)
+		self.assertEqual((doc.state, doc.telegram_failed, doc.telegram_error), ("Done", 1, "timeout"))
+		self.assertEqual(doc.sms_queued, 5)
+
+	def test_telegram_only_sends_no_sms_and_shows_sent_not_delivered(self):
+		name = self.dispatch_of(self.send(COMMS, channels=["telegram"]))
+		dispatch.run(name)
+		self.assertEqual(frappe.db.get_value(dispatch.DOCTYPE, name, "state"), "Telegram sending")
+		FakeBot.finished, FakeBot.sent = True, {"FR-BCC-0001"}
+		dispatch.run(name)
+		out = dispatch.status(name)
+		self.assertEqual((out["state"], out["telegram"]["sent"]), ("Done", 1))
+		self.assertNotIn("sms", out)
+		self.assertEqual(self.sms_rows(name), [])
+		self.assertFalse({"delivered", "read"} & set(out["telegram"]))
+
+	def test_sms_only_never_calls_bot_services(self):
+		name = self.dispatch_of(self.send(COMMS, channels=["sms"]))
+		dispatch.run(name)
+		self.assertEqual(frappe.db.get_value(dispatch.DOCTYPE, name, ["state", "sms_queued"]), ("Done", 5))
+		self.assertEqual(FakeBot.calls, [])
+		self.assertNotIn("telegram", dispatch.status(name))
+
+	def test_duplicate_submit_sends_no_second_sms_or_telegram_broadcast(self):
+		op = str(uuid.uuid4())
+		first = self.send(COMMS, channels=["sms", "telegram"], client_op_id=op)
+		name = self.dispatch_of(first)
+		again = self.send(COMMS, channels=["sms", "telegram"], client_op_id=op)  # before the job ran
+		self.assertTrue(again["duplicate"])
+		FakeBot.finished = True
+		dispatch.run(name)
+		self.assertTrue(self.send(COMMS, channels=["sms", "telegram"], client_op_id=op)["duplicate"])
+		dispatch.run(name)  # Done: a second run sends nothing
+		self.assertEqual(frappe.db.count(dispatch.DOCTYPE, {"client_op_id": op}), 1)
+		self.assertEqual(len(self.sms_rows(name)), 5)
+		self.assertEqual([k for k, _ in FakeBot.created], [op])
+
+	def test_every_agent_gets_the_sms_copy_with_telegram_ticked(self):
 		FakeBot.not_on_telegram, FakeBot.finished = [DA_OTHER_ID], True
 		out = self.send(COMMS, recipients="das", scope="woreda", channels=["in_app", "sms", "telegram"])
 		# The DA backend's own bell broadcast (the site may hold other agents of the woreda).
@@ -347,7 +445,9 @@ class TestBroadcastChannels(IntegrationTestCase):
 		name = self.dispatch_of(out)
 		dispatch.run(name)
 		rows = self.sms_rows(name)
-		self.assertEqual([r.recipient for r in rows], ["0900000952"])
+		# DA_USER is on Telegram and still gets the SMS: the channels are independent.
+		self.assertEqual(sorted(r.recipient for r in rows), ["0900000951", "0900000952"])
+		self.assertEqual(dispatch.status(name)["telegram"]["not_on_telegram"], 1)
 
 	def test_agent_broadcast_skips_the_sender(self):
 		name = self.dispatch_of(
@@ -450,7 +550,7 @@ class TestBroadcastChannels(IntegrationTestCase):
 	def test_resume_open_waits_for_the_backoff(self):
 		name = self.dispatch_of(self.send(COMMS, channels=["telegram"]))
 		queued = []
-		with mock.patch.object(dispatch, "enqueue", queued.append):
+		with mock.patch.object(dispatch, "enqueue", lambda n, part: queued.append(n)):
 			frappe.db.set_value(dispatch.DOCTYPE, name, "next_run_at", add_to_date(now_datetime(), minutes=5))
 			dispatch.resume_open()
 			self.assertNotIn(name, queued)
@@ -468,31 +568,7 @@ class TestBroadcastChannels(IntegrationTestCase):
 		self.assertEqual(first[0], 1)
 		self.assertGreater(first[1], now_datetime())
 
-	# -- Telegram does not hold the SMS back (F-18) ------------------------------
-
-	def test_the_fallback_wait_is_checked_first_when_telegram_progress_fails(self):
-		name = self.dispatch_of(self.send(COMMS, channels=["sms", "telegram"]))
-		dispatch.run(name)  # Telegram created, still sending
-		frappe.db.set_value(
-			dispatch.DOCTYPE, name, "telegram_started_at", add_to_date(now_datetime(), minutes=-16)
-		)
-		FakeBot.progress_fail = UpstreamError("bot_services", "timeout")
-		dispatch.run(name)
-		doc = frappe.get_doc(dispatch.DOCTYPE, name)
-		self.assertEqual((doc.state, doc.sms_queued), ("Done", 5))
-
-	def test_the_fallback_clock_starts_with_the_dispatch_even_if_telegram_never_answers(self):
-		FakeBot.fail = UpstreamError("bot_services", "timeout")
-		name = self.dispatch_of(self.send(COMMS, channels=["sms", "telegram"]))
-		self.assertIsNotNone(frappe.db.get_value(dispatch.DOCTYPE, name, "telegram_started_at"))
-		dispatch.run(name)
-		self.assertEqual(frappe.db.get_value(dispatch.DOCTYPE, name, "sms_queued"), 0)  # still waiting
-		frappe.db.set_value(
-			dispatch.DOCTYPE, name, "telegram_started_at", add_to_date(now_datetime(), minutes=-16)
-		)
-		dispatch.run(name)
-		doc = frappe.get_doc(dispatch.DOCTYPE, name)
-		self.assertEqual((doc.state, doc.sms_queued, doc.telegram_error), ("Done", 5, "timeout"))
+	# -- a Telegram failure never stops the SMS copy ---------------------------------
 
 	def test_a_definite_telegram_refusal_never_stops_the_sms_copy(self):
 		FakeBot.fail = UpstreamError("bot_services", "validation_failed", 422)
