@@ -33,7 +33,7 @@ def problem(
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     body = Problem(
-        title=_TITLES.get(status, "Error"),
+        title="Not cancellable" if code == "not_cancellable" else _TITLES.get(status, "Error"),
         status=status,
         code=code,
         errors=tuple(errors or ()),

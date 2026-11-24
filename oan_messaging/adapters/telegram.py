@@ -59,6 +59,7 @@ from oan_messaging.contracts import (
     ProviderResult,
     SendRequest,
     TelegramSendRequest,
+    telegram_reply_markup,
 )
 
 __all__ = [
@@ -286,6 +287,9 @@ class TelegramAdapter:
             "text": text,
             "link_preview_options": LINK_PREVIEW_OFF,
         }
+        if request.reply_markup is not None:
+            # Contract 3.4.0; a message without buttons sends exactly the payload above.
+            payload["reply_markup"] = telegram_reply_markup(request.reply_markup)
         try:
             # Enforced per request, whatever the injected client's default: a redirect
             # must never forward the token-bearing URL or the message to another origin.

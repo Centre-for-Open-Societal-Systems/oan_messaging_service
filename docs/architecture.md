@@ -20,6 +20,7 @@ Frozen interfaces: [`oan_messaging/contracts.py`](../oan_messaging/contracts.py)
 | Version | Change |
 |---|---|
 | 3.1.0 | SMS of up to 3 parts (SMS-09); an OTP stays one part (`too_long_for_sms`, `too_long_for_single_sms`). Broadcast ageing (SMS-03, migration `0004`). 8028 paced at 4 SMS/s with one OTP slot (SMS-10); a 500 from 8028 is retried (SMS-11); receipts read `status` only (SMS-07) |
+| 3.4.0 | **Broadcast-only Telegram** (decided 24 November 2026, D1/D7): optional Telegram `reply_markup` (reply keyboard of 1-4 rows of 1-3 buttons, or keyboard removal), stored in the encrypted content and purged with the text, part of the idempotency fingerprint (only when present, so older fingerprints are unchanged); `POST /api/v1/messages/{id}/cancel` for the caller's own waiting Telegram message (one conditional update that a claim cannot race), failure code `cancelled`; `OAN_MSG_TELEGRAM_BROADCAST_ENABLED` allows broadcast on Telegram only (caller registration, API and worker claim). On Telegram a bot reply (`transactional`) is always claimed before waiting broadcasts; the SMS-03 ageing pass covers SMS rows only. Migration `0008`: trigger function and `failure_code` check. Fields and routes only added; SMS unchanged |
 | 3.3.0 | **Charts labelled by channel** (decided 23 November 2026): every counting row carries `channel` (`sms` or `telegram`); one row per key and channel; `msgKpis` and `msgTrend` keep the overall row (`channel: all`) and add `by_channel`. Migration `0007`: `stats_campaigns.channel`. Telegram pace (`OAN_MSG_TELEGRAM_RATE_PER_SECOND`, default 20) and API address from configuration, link previews off, optional `worker-telegram` Deployment (SMS-02 revised). Fields only added |
 | 3.2.0 | **Statistics:** `GET /api/v1/charts/{chartId}` and `GET /api/v1/charts?charts=`, the dashboard service contract of the OAN dashboards, for statistics readers only (see [Statistics](#statistics-get-apiv1charts)). Migration `0005`: snapshot tables, `callers.can_read_stats`, `ix_messages_created_at` |
 
@@ -65,9 +66,13 @@ Added after 3.0.0. None of it changes the HTTP contract.
 | Redaction | Applied at the handler level, so loggers and handlers added later are covered; uvicorn access lines keep their (redacted) arguments. Direct stream writes and third-party exporters are not covered. | `redaction.py` |
 | Packaging | One image (non-root uid 10001, hash-pinned dependencies) runs `api`, `worker`, `receipts` and `cleanup`; Helm chart with a pre-install/pre-upgrade migration hook and `values-pilot.yaml`. | `Dockerfile`, `deploy/helm/oan-messaging`, [Helm guide](deployment/helm.md) |
 
-**Broadcast:** off unless `OAN_MSG_BROADCAST_ENABLED=true`. Broadcast ageing (SMS-03) keeps
-it from starving under higher-priority load (see [Priority and rate limits](#priority-and-rate-limits)). Telegram is implemented, but Phase 1 has no
-Telegram caller: the OAN Telegram bot runs on RapidPro and sends to Telegram itself.
+**Broadcast:** off unless `OAN_MSG_BROADCAST_ENABLED=true` (every channel) or, from 3.4.0,
+`OAN_MSG_TELEGRAM_BROADCAST_ENABLED=true` (Telegram only; it never opens SMS broadcast).
+Broadcast ageing (SMS-03) keeps an SMS broadcast from starving under higher-priority load
+(see [Priority and rate limits](#priority-and-rate-limits)). On Telegram, ageing does not
+apply: bot replies always go first, and the bot-wide pace (20/s) and Telegram's
+`retry_after` cover both. The Telegram caller is OAN Bot Services (broadcast copies and bot
+replies); it can cancel a copy that no worker has taken yet.
 
 ## Statistics (GET /api/v1/charts)
 

@@ -42,6 +42,13 @@ incoherent values. */ -}}
 {{- end -}}
 {{- end -}}
 
+{{- if not (kindIs "bool" (default false $v.workerTelegram.broadcastEnabled)) -}}
+{{- fail "workerTelegram.broadcastEnabled must be true or false" -}}
+{{- end -}}
+{{- if and $v.workerTelegram.broadcastEnabled (not $v.workerTelegram.enabled) -}}
+{{- fail "workerTelegram.broadcastEnabled needs workerTelegram.enabled (nothing would send the broadcasts)" -}}
+{{- end -}}
+
 {{- if $v.workerTelegram.enabled -}}
 {{- $wt := $v.workerTelegram -}}
 {{- $lease := int (default 120 $v.config.policy.workerLease) -}}

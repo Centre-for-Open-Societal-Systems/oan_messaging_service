@@ -3,6 +3,10 @@
 Request handlers never call a provider: they authenticate, validate, authorize, persist
 (committed before 202) and return. Delivery happens in MSG-05 workers.
 
+Cancel (contract 3.4.0, ``POST /api/v1/messages/{id}/cancel``, no body): credential (401)
+-> id and ownership (404) -> channel (422 for SMS) -> one conditional update (200, or 409
+when a worker holds or finished the message).
+
 Order of checks for POST: credential (401) -> channel permission (403) -> media type
 (415) -> size (413) -> Idempotency-Key header (422) -> body (422) -> purpose / bot
 permission (403) -> idempotent persist (202 / 200 / 409 / 422 expiry). Any failure
@@ -46,6 +50,7 @@ from oan_messaging.contracts import (
     TelegramSubmission,
     to_status_view,
 )
+from oan_messaging.storage.config import broadcast_channels
 from oan_messaging.storage.errors import BindingIntegrityError, ExpiryRejected
 
 log = logging.getLogger("oan_messaging.api")
@@ -68,6 +73,14 @@ class AcceptanceStore(Protocol):
     ) -> StoredMessage | None: ...
 
 
+class CancelStore(Protocol):
+    """Contract 3.4.0 cancel (``PostgresMessageRepository.cancel_for_caller``)."""
+
+    async def cancel_for_caller(
+        self, caller_id: str, message_id: uuid.UUID, now: datetime
+    ) -> tuple[Any, StoredMessage | None]: ...
+
+
 @dataclass
 class ApiDependencies:
     repository: AcceptanceStore
@@ -75,6 +88,8 @@ class ApiDependencies:
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     max_body_bytes: int = 16 * 1024
     broadcast_enabled: bool = True  # injected harnesses may exercise future coverage
+    #: Contract 3.4.0: broadcast on Telegram even when ``broadcast_enabled`` is off.
+    telegram_broadcast_enabled: bool = False
     #: GET /api/v1/charts (statistics for the OAN dashboards); None = not available.
     stats: Any = None
 
@@ -126,7 +141,9 @@ def create_app(deps: ApiDependencies | None = None) -> FastAPI:
 
         app.state.deps = ApiDependencies(
             repository=repo, authenticate=auth, max_body_bytes=settings.max_body_bytes,
-            broadcast_enabled=settings.broadcast_enabled, stats=StatsService(sf),
+            broadcast_enabled=settings.broadcast_enabled,
+            telegram_broadcast_enabled=settings.telegram_broadcast_enabled,
+            stats=StatsService(sf),
         )
         try:
             yield
@@ -257,7 +274,8 @@ def create_app(deps: ApiDependencies | None = None) -> FastAPI:
             return problem(422, "validation_failed", validation_items(exc))
 
         if submission.purpose not in caller.allowed_purposes or (
-            submission.purpose.value == "broadcast" and not request.app.state.deps.broadcast_enabled
+            submission.purpose.value == "broadcast"
+            and channel not in broadcast_channels(d.broadcast_enabled, d.telegram_broadcast_enabled)
         ):
             return problem(
                 403, "forbidden", [ErrorItem(field="purpose", code="purpose_not_permitted")]
@@ -300,6 +318,35 @@ def create_app(deps: ApiDependencies | None = None) -> FastAPI:
     @app.get("/api/v1/messages/{message_id}")
     async def get_message(request: Request, message_id: str) -> Response:
         return await guarded(status_of(request, message_id))
+
+    @app.post("/api/v1/messages/{message_id}/cancel")
+    async def cancel_message(request: Request, message_id: str) -> Response:
+        return await guarded(cancel(request, message_id))
+
+    async def cancel(request: Request, message_id: str) -> Response:
+        caller = await caller_of(request)
+        if caller is None:
+            return unauthenticated()
+        try:
+            mid = uuid.UUID(message_id)
+        except ValueError:
+            return problem(404, "not_found")
+        d: ApiDependencies = request.app.state.deps
+        store: CancelStore = d.repository  # type: ignore[assignment]
+        outcome, stored = await store.cancel_for_caller(caller.caller_id, mid, d.clock())
+        if outcome == "not_found":
+            return problem(404, "not_found")
+        if outcome == "not_telegram":
+            return problem(
+                422,
+                "validation_failed",
+                [ErrorItem(field="message_id", code="channel_not_supported")],
+            )
+        if outcome != "cancelled" or stored is None:
+            return problem(409, "not_cancellable", [ErrorItem(code="not_cancellable")])
+        log.info("message cancelled caller=%s message_id=%s", caller.caller_id, mid)
+        view: MessageStatusView = to_status_view(stored)
+        return JSONResponse(content=view.model_dump(mode="json", exclude_none=True))
 
     async def status_of(request: Request, message_id: str) -> Response:
         caller = await caller_of(request)

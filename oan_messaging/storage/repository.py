@@ -25,9 +25,10 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import Any
 
 from pydantic import ValidationError
@@ -89,6 +90,7 @@ from oan_messaging.contracts import (
     classify_idempotent_request,
     mask_chat_id,
     mask_recipient,
+    parse_reply_markup,
     recipient_match_deadline,
     sms_parts,
     submission_channel,
@@ -225,6 +227,28 @@ def row_to_message(row: Mapping[str, Any]) -> StoredMessage:
         raise BindingIntegrityError("stored message violates the contract") from None
 
 
+def _broadcast_filter(allow: bool | Collection[Channel]) -> Any:
+    """Claim filter for purpose ``broadcast``. A boolean gives exactly the pre-3.4.0
+    statement; a channel collection allows broadcast on those channels only."""
+    if allow is True:
+        return true()
+    if allow is False:
+        return messages.c.purpose != "broadcast"
+    allowed = sorted(Channel(c).value for c in allow)
+    if not allowed:
+        return messages.c.purpose != "broadcast"
+    return or_(messages.c.purpose != "broadcast", messages.c.channel.in_(allowed))
+
+
+class CancelOutcome(StrEnum):
+    """Result of ``cancel_for_caller`` (contract 3.4.0)."""
+
+    CANCELLED = "cancelled"  # cancelled now, or already cancelled: 200
+    NOT_FOUND = "not_found"  # no such message for this caller: 404
+    NOT_TELEGRAM = "not_telegram"  # an SMS message: 422
+    NOT_CANCELLABLE = "not_cancellable"  # claimed, sending or finished: 409
+
+
 class PostgresMessageRepository:
     """``MessageRepository`` on PostgreSQL. Also exposes key-retirement helpers."""
 
@@ -324,6 +348,10 @@ class PostgresMessageRepository:
                 recipient_fp = None
                 masked = mask_chat_id(submission.chat_id)
                 content = {"text": submission.text, "chat_id": submission.chat_id}
+                # Contract 3.4.0: the buttons live in the encrypted content, so every path
+                # that purges the text purges them in the same statement.
+                if submission.reply_markup is not None:
+                    content["reply_markup"] = submission.reply_markup.model_dump(mode="json")
 
             inserted = await s.execute(
                 pg_insert(messages)
@@ -435,6 +463,69 @@ class PostgresMessageRepository:
             row = res.mappings().first()
         return None if row is None else row_to_message(dict(row))
 
+    async def cancel_for_caller(
+        self, caller_id: str, message_id: uuid.UUID, now: datetime
+    ) -> tuple[CancelOutcome, StoredMessage | None]:
+        """Cancel the caller's own waiting Telegram message (contract 3.4.0).
+
+        One conditional UPDATE: it matches only an ``accepted`` Telegram row of this
+        caller that no worker holds (no lease, or the lease ran out, exactly as
+        ``claim_due`` sees it) and that has not reached ``expires_at``. A claim locks the
+        row and sets the lease in its own transaction, so whichever commits first wins:
+        the loser's WHERE no longer matches (row lock, then re-check under READ
+        COMMITTED). The content (text, chat id, buttons) is deleted in the same
+        transaction. Nothing ever reached the provider.
+        """
+        async with self._sf() as s, s.begin():
+            cancelled = (
+                await s.execute(
+                    update(messages)
+                    .where(
+                        messages.c.id == message_id,
+                        messages.c.caller_id == caller_id,
+                        messages.c.channel == Channel.TELEGRAM.value,
+                        messages.c.status == MessageStatus.ACCEPTED.value,
+                        or_(
+                            messages.c.lease_expires_at.is_(None),
+                            messages.c.lease_expires_at <= now,
+                        ),
+                        or_(messages.c.expires_at.is_(None), messages.c.expires_at > now),
+                    )
+                    .values(
+                        status=MessageStatus.FAILED.value,
+                        failure_code=FailureCode.CANCELLED.value,
+                        content_purged_at=now,
+                        updated_at=now,
+                        not_before=None,
+                        lease_token=None,
+                        lease_owner=None,
+                        lease_expires_at=None,
+                    )
+                    .returning(messages.c.id)
+                )
+            ).scalar_one_or_none()
+            if cancelled is not None:
+                await self._purge_content(s, message_id, now)
+            row = (
+                (
+                    await s.execute(
+                        select(messages).where(
+                            messages.c.id == message_id, messages.c.caller_id == caller_id
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return CancelOutcome.NOT_FOUND, None
+        stored = row_to_message(dict(row))
+        if stored.channel is not Channel.TELEGRAM:
+            return CancelOutcome.NOT_TELEGRAM, None
+        if stored.status is MessageStatus.FAILED and stored.failure_code is FailureCode.CANCELLED:
+            return CancelOutcome.CANCELLED, stored
+        return CancelOutcome.NOT_CANCELLABLE, None
+
     # ------------------------------------------------------------- worker side
 
     async def _expire_due_accepted(self, s: AsyncSession, now: datetime, limit: int) -> int:
@@ -485,10 +576,11 @@ class PostgresMessageRepository:
         """Lock up to ``limit`` claimable rows in claim order (SKIP LOCKED).
 
         Without ageing: ``priority, created_at``. With ageing (SMS-03), in three passes
-        that each follow an index: OTPs; then every other message accepted at least
+        that each follow an index: OTPs; then every other SMS accepted at least
         ``aged_after`` ago, oldest first, whatever its purpose, so an aged broadcast goes
         ahead of newer transactional and alert traffic but never ahead of older; then the
-        rest by ``priority, created_at``.
+        rest by ``priority, created_at``. Telegram rows are never in the aged pass: they go
+        strictly by ``priority, created_at``, so bot replies beat waiting broadcasts.
         """
 
         async def take(q: Select[Any], n: int, skip: list[uuid.UUID]) -> list[dict[str, Any]]:
@@ -503,8 +595,12 @@ class PostgresMessageRepository:
         otp = PURPOSE_PRIORITY[Purpose.OTP]
         rows = await take(base.where(messages.c.priority == otp).order_by(*by_priority), limit, [])
         if len(rows) < limit:
+            # SMS rows only (contract 3.4.0): on Telegram a bot reply (transactional) is
+            # always claimed before waiting broadcasts, however long they have waited.
             aged = base.where(
-                messages.c.priority > otp, messages.c.created_at <= now - aged_after
+                messages.c.priority > otp,
+                messages.c.created_at <= now - aged_after,
+                messages.c.channel == Channel.SMS.value,
             ).order_by(messages.c.created_at, messages.c.id)
             rows += await take(aged, limit - len(rows), [r["id"] for r in rows])
         if len(rows) < limit:
@@ -520,9 +616,11 @@ class PostgresMessageRepository:
         limit: int,
         *,
         channels: tuple[Channel, ...] | None = None,
-        allow_broadcast: bool = True,
+        allow_broadcast: bool | Collection[Channel] = True,
         aged_after: timedelta | None = None,
     ) -> list[Claim]:
+        """``allow_broadcast``: True (every channel), False (none) or, contract 3.4.0, the
+        channels whose broadcasts may be claimed (Telegram-only switch)."""
         if lease <= timedelta(0) or limit <= 0:
             raise ValueError("lease and limit must be positive")
         if aged_after is not None and aged_after <= timedelta(0):
@@ -557,7 +655,7 @@ class PostgresMessageRepository:
                         ),
                     )
                     .exists(),
-                    messages.c.purpose != "broadcast" if not allow_broadcast else true(),
+                    _broadcast_filter(allow_broadcast),
                     messages.c.channel.in_([c.value for c in channels])
                     if channels is not None
                     else true(),
@@ -608,6 +706,11 @@ class PostgresMessageRepository:
                         chat_id=content["chat_id"],
                         text=content["text"],
                         expires_at=row["expires_at"],
+                        reply_markup=(
+                            parse_reply_markup(content["reply_markup"])
+                            if content.get("reply_markup") is not None
+                            else None
+                        ),
                     )
                 claims.append(
                     Claim(
