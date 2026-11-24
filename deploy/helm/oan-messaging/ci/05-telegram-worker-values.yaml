@@ -1,0 +1,21 @@
+# TEMPLATE CHECK ONLY. The SMS worker stays [sms]; the Telegram worker (SMS-02 revised)
+# sends Telegram with the bot token and no 8028 secret.
+worker:
+  enabled: true
+  command: [python, -m, oan_messaging.runtime, worker]
+  channels: [sms]
+workerTelegram:
+  enabled: true
+  command: [python, -m, oan_messaging.runtime, worker]
+secrets:
+  telegram:
+    existingSecret: oan-messaging-telegram
+    bots: {oan: oan-bot-token}
+networkPolicy:
+  egress:
+    enabled: true
+    postgres: {cidrs: [10.0.20.0/24]}
+    sms8028: {cidrs: [203.0.113.20/32]}
+    telegram: {cidrs: [149.154.160.0/20, 91.108.4.0/22]}
+migration:
+  network: {mode: hook}

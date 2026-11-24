@@ -1,0 +1,104 @@
+# Text keys for Phase A (TG-02, spec §5.5).
+#
+# Every farmer- and staff-facing string is keyed by these ids. With RapidPro (the old
+# runtime) they are flow translations and Bot Services returns keys and params. Without
+# RapidPro (broadcast-only Telegram) Bot Services itself renders the reply from this
+# file (`en` or `am`, by the chat's chosen language) and sends it through OAN Messaging;
+# nothing else is ever sent as a reply. A contract test fails if Bot Services can emit a
+# key that is not in this file.
+#
+# `en` is draft wording for tests. `am` is a placeholder ("[am] ...") until the OAN Telegram
+# Bot copy and translation sheet is translated and reviewed by a native Amharic speaker
+# (§5.5). Buttons (`btn.*`) stay at most 30 characters.
+#
+# params: names listed must be supplied; they are never a phone number, chat id or token.
+
+common:
+  common.invalid_choice: {en: "Please choose one of the options below.", am: "[am] common.invalid_choice"}
+  common.unavailable: {en: "This information is not available right now. Please try again later.", am: "[am] common.unavailable"}
+  common.main_menu: {en: "Main menu", am: "[am] common.main_menu"}
+  common.session_expired: {en: "We have returned you to the Main menu.", am: "[am] common.session_expired"}
+  common.not_read: {en: "Messages here are not read or answered. Please use the buttons below.", am: "[am] common.not_read"}
+
+onboarding:
+  onboarding.choose_language: {en: "Welcome to OpenAgriNet. Please choose your language.", am: "[am] onboarding.choose_language"}
+  onboarding.privacy_notice:
+    en: "Before we start: what the bot keeps and for how long. (Full text from the approved privacy notice, §5.4; states the configured retention of {retention_days} days and webhook log retention of {log_days} days.)"
+    am: "[am] onboarding.privacy_notice"
+    params: [retention_days, log_days]
+  onboarding.link_offer: {en: "Link your Farmer ID to receive official updates for your area.", am: "[am] onboarding.link_offer"}
+  onboarding.kebele_confirm: {en: "Is your kebele {kebele_name}?", am: "[am] onboarding.kebele_confirm", params: [kebele_name]}
+  onboarding.choose_region: {en: "Choose your region.", am: "[am] onboarding.choose_region"}
+  onboarding.choose_zone: {en: "Choose your zone.", am: "[am] onboarding.choose_zone"}
+  onboarding.choose_woreda: {en: "Choose your woreda.", am: "[am] onboarding.choose_woreda"}
+  onboarding.choose_kebele: {en: "Choose your kebele.", am: "[am] onboarding.choose_kebele"}
+  onboarding.kebele_saved: {en: "Your kebele is {kebele_name}.", am: "[am] onboarding.kebele_saved", params: [kebele_name]}
+
+menu:
+  menu.main: {en: "What would you like to do?", am: "[am] menu.main"}
+
+link:
+  link.ask_farmer_id: {en: "Please type your Farmer ID.", am: "[am] link.ask_farmer_id"}
+  link.ask_contact: {en: "Please tap Share my phone number.", am: "[am] link.ask_contact"}
+  link.code_sent: {en: "We sent a code by SMS to your registered phone ending in {masked_phone}. Please type it here.", am: "[am] link.code_sent", params: [masked_phone]}
+  link.not_found: {en: "We could not link this Farmer ID. Please visit your kebele office.", am: "[am] link.not_found"}
+  link.not_own_contact: {en: "Please share your own phone number using the button.", am: "[am] link.not_own_contact"}
+  link.rate_limited: {en: "Too many codes were requested. Please try again later.", am: "[am] link.rate_limited"}
+  link.code_invalid: {en: "That code is not correct. Please try again.", am: "[am] link.code_invalid"}
+  link.code_expired: {en: "That code has expired. Please start again.", am: "[am] link.code_expired"}
+  link.locked: {en: "Linking is paused for one hour after too many wrong codes.", am: "[am] link.locked"}
+  link.done: {en: "Your Farmer ID is linked. You will receive official updates for your area.", am: "[am] link.done"}
+  link.ask_registry_kebele: {en: "Your registered kebele is {kebele_name}. Send your questions there?", am: "[am] link.ask_registry_kebele", params: [kebele_name]}
+  link.removed: {en: "Your Farmer ID is no longer linked.", am: "[am] link.removed"}
+  link.none: {en: "No Farmer ID is linked to this account.", am: "[am] link.none"}
+  link.invite: {en: "Link your Farmer ID to turn on updates.", am: "[am] link.invite"}
+
+updates:
+  updates.on: {en: "Updates are on.", am: "[am] updates.on"}
+  updates.off: {en: "Updates are off. You can turn them on again in the Main menu.", am: "[am] updates.off"}
+
+stop:
+  stop.confirm: {en: "This stops the bot and deletes your data. Are you sure?", am: "[am] stop.confirm"}
+  stop.done: {en: "Your data has been deleted. Send /start to begin again.", am: "[am] stop.done"}
+  stop.updates_stopped:
+    en: "You will get no more updates here. If you do not turn updates on again, your link and data are deleted after {retention_days} days. Send /start to come back."
+    am: "[am] stop.updates_stopped"
+    params: [retention_days]
+  stop.staff: {en: "Your work messages stay on. Your supervisor or the DA app can unlink this account.", am: "[am] stop.staff"}
+
+staff:
+  staff.ask_code: {en: "Please type the 8-character code from the DA app.", am: "[am] staff.ask_code"}
+  staff.linked: {en: "You are linked as {role_name}.", am: "[am] staff.linked", params: [role_name]}
+  staff.code_invalid: {en: "That code is not correct.", am: "[am] staff.code_invalid"}
+  staff.code_expired: {en: "That code has expired. Please get a new one in the DA app.", am: "[am] staff.code_expired"}
+  staff.locked: {en: "Linking is paused for one hour after too many wrong codes.", am: "[am] staff.locked"}
+  staff.menu: {en: "Staff menu.", am: "[am] staff.menu"}
+
+buttons:
+  btn.lang_en: {en: "English", am: "English"}
+  btn.lang_am: {en: "አማርኛ", am: "አማርኛ"}
+  btn.agree: {en: "I understand", am: "[am] btn.agree"}
+  btn.link_now: {en: "Link now", am: "[am] btn.link_now"}
+  btn.later: {en: "Later", am: "[am] btn.later"}
+  btn.yes: {en: "Yes", am: "[am] btn.yes"}
+  btn.choose_other_kebele: {en: "Choose another kebele", am: "[am] btn.choose_other_kebele"}
+  btn.next_page: {en: "Next page", am: "[am] btn.next_page"}
+  btn.back: {en: "Back", am: "[am] btn.back"}
+  btn.main_menu: {en: "Main menu", am: "[am] btn.main_menu"}
+  btn.share_phone: {en: "Share my phone number", am: "[am] btn.share_phone"}
+  btn.prices: {en: "Market prices", am: "[am] btn.prices"}
+  btn.official_updates: {en: "Official updates", am: "[am] btn.official_updates"}
+  btn.updates_toggle: {en: "Updates on/off", am: "[am] btn.updates_toggle"}
+  btn.link_farmer_id: {en: "Link my Farmer ID", am: "[am] btn.link_farmer_id"}
+  btn.unlink: {en: "Unlink", am: "[am] btn.unlink"}
+  btn.change_language: {en: "Change language", am: "[am] btn.change_language"}
+  btn.stop: {en: "Stop and delete my data", am: "[am] btn.stop"}
+  btn.confirm_stop: {en: "Yes, delete", am: "[am] btn.confirm_stop"}
+  btn.cancel: {en: "Cancel", am: "[am] btn.cancel"}
+  btn.staff: {en: "I am OAN staff", am: "[am] btn.staff"}
+  btn.stop_updates: {en: "Stop", am: "[am] btn.stop_updates"}
+
+roles:
+  role.development_agent: {en: "Development Agent", am: "[am] role.development_agent"}
+  role.supervisor: {en: "Woreda Supervisor", am: "[am] role.supervisor"}
+  role.executive: {en: "Executive", am: "[am] role.executive"}

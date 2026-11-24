@@ -1,0 +1,66 @@
+openapi: 3.1.0
+info:
+  title: Master Data administrative areas (stub)
+  version: 0.1.0
+  description: |
+    Channels Specification v2.0 §5.6. Field names are the spec's placeholders, to confirm
+    with the Master Data team. The stub serves a small fixed tree: 2 regions, 2 zones each,
+    2 woredas each, 3 kebeles each, with English and Amharic names. Codes look like
+    real ones (ET01010805) but are made up.
+servers:
+  - url: http://stubs:8200/master-data
+security:
+  - clientCredentials: []
+paths:
+  /areas:
+    get:
+      operationId: listChildAreas
+      parameters:
+        - {name: level, in: query, required: true, schema: {type: string, enum: [region, zone, woreda, kebele]}}
+        - {name: parent_code, in: query, required: false, schema: {type: string}, description: Not sent for regions}
+      responses:
+        '200':
+          description: Child areas, ordered by English name
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Area'}}
+  /areas/{area_code}:
+    get:
+      operationId: getArea
+      parameters:
+        - {name: area_code, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: The area and its parent chain up to the region
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Area'}
+                  - type: object
+                    required: [parents]
+                    properties:
+                      parents: {type: array, items: {$ref: '#/components/schemas/Area'}}
+        '404': {description: Unknown area}
+components:
+  securitySchemes:
+    clientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: http://stubs:8200/auth/token
+          scopes: {}
+  schemas:
+    Area:
+      type: object
+      required: [area_code, name_am, name_en, level]
+      properties:
+        area_code: {type: string}
+        name_am: {type: string}
+        name_en: {type: string}
+        level: {type: string, enum: [region, zone, woreda, kebele]}
+        parent_code: {type: [string, 'null']}

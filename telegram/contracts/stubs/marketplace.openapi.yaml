@@ -1,0 +1,96 @@
+openapi: 3.1.0
+info:
+  title: Marketplace prices (stub)
+  version: 0.1.0
+  description: |
+    Channels Specification v2.0 §6.2 (OQ-09: the Marketplace team publishes the real API).
+    No personal data is sent. The stub serves 10 commodities, 2 markets per stub woreda, and
+    prices dated by the fake clock; one market has a price older than the agreed age, so the
+    "no recent price" path can be tested. `/_test/down` makes every call fail with 503.
+servers:
+  - url: http://stubs:8200/marketplace
+security:
+  - clientCredentials: []
+paths:
+  /commodities:
+    get:
+      operationId: listCommodities
+      responses:
+        '200':
+          description: Most requested first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [commodity_id, name_am, name_en, unit]
+                      properties:
+                        commodity_id: {type: string}
+                        name_am: {type: string}
+                        name_en: {type: string}
+                        unit: {type: string}
+  /markets:
+    get:
+      operationId: listMarkets
+      parameters:
+        - {name: woreda_code, in: query, required: false, schema: {type: string}}
+        - {name: lat, in: query, required: false, schema: {type: number}}
+        - {name: lon, in: query, required: false, schema: {type: number}}
+      responses:
+        '200':
+          description: Markets in the woreda first, then neighbours; or by distance when lat/lon given
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [market_id, name_am, name_en, woreda_code]
+                      properties:
+                        market_id: {type: string}
+                        name_am: {type: string}
+                        name_en: {type: string}
+                        woreda_code: {type: string}
+  /prices/latest:
+    get:
+      operationId: latestPrices
+      parameters:
+        - {name: commodity_id, in: query, required: true, schema: {type: string}}
+        - {name: market_id, in: query, required: true, style: form, explode: true, schema: {type: array, maxItems: 5, items: {type: string}}}
+      responses:
+        '200':
+          description: One row per market that has a price
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [market_id, price_etb, unit, price_date, source]
+                      properties:
+                        market_id: {type: string}
+                        price_etb: {type: number}
+                        unit: {type: string}
+                        price_date: {type: string, format: date}
+                        source: {type: string, const: NMIS}
+components:
+  securitySchemes:
+    clientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: http://stubs:8200/auth/token
+          scopes: {}
