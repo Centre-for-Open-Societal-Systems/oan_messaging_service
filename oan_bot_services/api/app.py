@@ -1,7 +1,12 @@
 """OAN Bot Services HTTP API.
 
-* Flow routes (``bot-services.openapi.yaml``): ``X-OAN-Flow-Secret`` compared in constant
-  time; errors ``{error, text_key}``; a repeat ``request_id`` returns the first answer.
+* Flow routes (``bot-services.openapi.yaml``), RapidPro runtime only: ``X-OAN-Flow-Secret``
+  compared in constant time; errors ``{error, text_key}``; a repeat ``request_id`` returns
+  the first answer.
+* ``POST /telegram/webhook``, only when RapidPro is off: the
+  ``X-Telegram-Bot-Api-Secret-Token`` header compared in constant time before the body is
+  read (wrong or missing: 401, nothing stored); body at most 64 KB; the update stored
+  before the 200 answer.
 * Broadcast routes (the DA kit's OpenAPI): DA backend bearer token; errors
   ``application/problem+json`` with OAN Messaging's value-free codes; submitted values
   are never echoed.
@@ -25,7 +30,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from oan_bot_services import broadcasts, flows, logs
+from oan_bot_services import broadcasts, flows, logs, telegram
 from oan_bot_services import text_keys as tk
 from oan_bot_services.api import models as m
 from oan_bot_services.deps import Deps, build
@@ -71,12 +76,20 @@ def _validation_items(exc: ValidationError | RequestValidationError) -> list[dic
     return items
 
 
-def create_app(deps: Deps | None = None) -> FastAPI:
+def create_app(deps: Deps | None = None, settings: BotSettings | None = None) -> FastAPI:
+    """``settings`` (or ``deps.settings``) chooses the routes; with neither, the settings
+    are read from the environment here (the uvicorn factory)."""
+    if deps is not None:
+        settings = deps.settings
+    elif settings is None:
+        settings = BotSettings()
+    chosen = settings
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         if deps is None:
             logs.install_process()
-            app.state.deps = build(BotSettings())
+            app.state.deps = build(chosen)
         yield
         if deps is None:
             await app.state.deps.aclose()
@@ -158,7 +171,7 @@ def create_app(deps: Deps | None = None) -> FastAPI:
         ("POST", "/farmer-link/verify", m.FarmerLinkVerifyIn, flows.farmer_link_verify, True),
         ("DELETE", "/farmer-link", m.UnlinkIn, flows.farmer_unlink, True),
     ]
-    for method, path, model, handler, replay in routes:
+    for method, path, model, handler, replay in routes if chosen.rapidpro_enabled else []:
 
         def endpoint(
             model: type[BaseModel] = model, path: str = path, handler: Handler = handler,
@@ -170,6 +183,36 @@ def create_app(deps: Deps | None = None) -> FastAPI:
             return call
 
         app.add_api_route(path, endpoint(), methods=[method], include_in_schema=False)
+
+    # ---------------------------------------------------------- Telegram webhook
+
+    async def webhook(request: Request) -> JSONResponse:
+        given = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if not same_secret(given, d().settings.telegram_webhook_secret):
+            return JSONResponse({"ok": False}, status_code=401)
+        declared = request.headers.get("content-length")
+        if declared is not None and (not declared.isdigit() or int(declared) > MAX_BODY_BYTES):
+            return JSONResponse({"ok": False}, status_code=413)
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw += chunk
+            if len(raw) > MAX_BODY_BYTES:
+                return JSONResponse({"ok": False}, status_code=413)
+        try:
+            update = json.loads(raw)
+        except ValueError:
+            return JSONResponse({"ok": False}, status_code=400)
+        try:
+            outcome = await telegram.receive(d(), update)
+        except Exception as exc:  # not stored: Telegram retries a non-2xx answer
+            log.error("webhook store failed error_type=%s", type(exc).__name__)
+            return JSONResponse({"ok": False}, status_code=503)
+        if outcome == "invalid":
+            return JSONResponse({"ok": False}, status_code=400)
+        return JSONResponse({"ok": True})
+
+    if not chosen.rapidpro_enabled:
+        app.add_api_route("/telegram/webhook", webhook, methods=["POST"], include_in_schema=False)
 
     # -------------------------------------------------------- broadcast routes
 

@@ -1,8 +1,11 @@
-"""Stop and delete my data (§5.4). Steps, in order, each recorded in ``stop_requests`` so a
+"""Stop and delete my data (§5.4), RapidPro runtime only. Without RapidPro, Stop turns
+updates off instead (``conversation.py``) and the data goes under the storage policy.
+Steps, in order, each recorded in ``stop_requests`` so a
 repeat (the flow again, or the worker) finishes the rest:
 
 1. ``link``: link, subscription, queued keyed messages, link requests and lockouts, staff
-   link, the contact row; broadcast copies not yet handed to OAN Messaging are dropped.
+   link, the contact row; broadcast copies not yet handed to OAN Messaging are dropped,
+   and copies it still holds as ``accepted`` are marked for cancelling.
 2. ``questions``: open questions closed "farmer stopped". Wave 1 has no question store,
    so the step records ``done:none``.
 3. ``staff_copies``: only if RV-01 shows RapidPro can delete them; until then recorded as
@@ -23,6 +26,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from oan_bot_services import logs
+from oan_bot_services.broadcasts import withdraw_copies
 from oan_bot_services.clients.http import Unavailable
 from oan_bot_services.deps import Deps
 from oan_bot_services.schema import (
@@ -42,7 +46,9 @@ log = logs.get(__name__)
 STEPS = ("link", "questions", "staff_copies", "media", "rapidpro_contact")
 
 
-async def run_stop(deps: Deps, ref: str, contact_uuid: uuid.UUID, *, new: bool = True) -> bool:
+async def run_stop(
+    deps: Deps, ref: str, contact_uuid: uuid.UUID | None, *, new: bool = True
+) -> bool:
     """Runs the steps not yet done. True when every step is done or skipped.
 
     ``new``: a Stop from the flow. After an earlier Stop that finished, the chat may have
@@ -99,7 +105,7 @@ async def run_stop(deps: Deps, ref: str, contact_uuid: uuid.UUID, *, new: bool =
     return done
 
 
-async def _step(deps: Deps, step: str, ref: str, contact_uuid: uuid.UUID) -> str | None:
+async def _step(deps: Deps, step: str, ref: str, contact_uuid: uuid.UUID | None) -> str | None:
     if step == "link":
         async with deps.sf() as s, s.begin():
             for table in (farmer_links, subscriptions, keyed_queue, link_requests,
@@ -107,13 +113,15 @@ async def _step(deps: Deps, step: str, ref: str, contact_uuid: uuid.UUID) -> str
                 await s.execute(delete(table).where(table.c.contact_ref == ref))
             for table in (link_failures, link_locks):
                 await s.execute(delete(table).where(table.c.contact_ref == ref))
+            now = await deps.clock()
             await s.execute(
                 update(broadcast_recipients)
                 .where(broadcast_recipients.c.contact_ref == ref,
                        broadcast_recipients.c.status == "pending")
                 .values(status="failed", failure_code="farmer_stopped", chat_id=None,
-                        updated_at=await deps.clock())
+                        updated_at=now)
             )
+            await withdraw_copies(s, ref, now)
         return "done"
     if step == "questions":
         return "done:none"
@@ -121,6 +129,8 @@ async def _step(deps: Deps, step: str, ref: str, contact_uuid: uuid.UUID) -> str
         return "skipped:rv01_pending"
     if step == "media":
         return "skipped:not_configured"
+    if deps.rapidpro is None or contact_uuid is None:
+        return "skipped:rapidpro_off"
     try:
         await deps.rapidpro.delete_contact(contact_uuid)
     except Unavailable:

@@ -1,8 +1,11 @@
 # Text keys for Phase A (TG-02, spec §5.5).
 #
-# Every farmer- and staff-facing string is a RapidPro flow translation keyed by these ids.
-# Bot Services returns keys and params, never sentences. A contract test fails if Bot
-# Services can emit a key that is not in this file, or that the exported flows lack.
+# Every farmer- and staff-facing string is keyed by these ids. With RapidPro (the old
+# runtime) they are flow translations and Bot Services returns keys and params. Without
+# RapidPro (broadcast-only Telegram) Bot Services itself renders the reply from this
+# file (`en` or `am`, by the chat's chosen language) and sends it through OAN Messaging;
+# nothing else is ever sent as a reply. A contract test fails if Bot Services can emit a
+# key that is not in this file.
 #
 # `en` is draft wording for tests. `am` is a placeholder ("[am] ...") until the OAN Telegram
 # Bot copy and translation sheet is translated and reviewed by a native Amharic speaker
@@ -15,6 +18,7 @@ common:
   common.unavailable: {en: "This information is not available right now. Please try again later.", am: "[am] common.unavailable"}
   common.main_menu: {en: "Main menu", am: "[am] common.main_menu"}
   common.session_expired: {en: "We have returned you to the Main menu.", am: "[am] common.session_expired"}
+  common.not_read: {en: "Messages here are not read or answered. Please use the buttons below.", am: "[am] common.not_read"}
 
 onboarding:
   onboarding.choose_language: {en: "Welcome to OpenAgriNet. Please choose your language.", am: "[am] onboarding.choose_language"}
@@ -56,6 +60,11 @@ updates:
 stop:
   stop.confirm: {en: "This stops the bot and deletes your data. Are you sure?", am: "[am] stop.confirm"}
   stop.done: {en: "Your data has been deleted. Send /start to begin again.", am: "[am] stop.done"}
+  stop.updates_stopped:
+    en: "You will get no more updates here. If you do not turn updates on again, your link and data are deleted after {retention_days} days. Send /start to come back."
+    am: "[am] stop.updates_stopped"
+    params: [retention_days]
+  stop.staff: {en: "Your work messages stay on. Your supervisor or the DA app can unlink this account.", am: "[am] stop.staff"}
 
 staff:
   staff.ask_code: {en: "Please type the 8-character code from the DA app.", am: "[am] staff.ask_code"}
@@ -86,6 +95,8 @@ buttons:
   btn.stop: {en: "Stop and delete my data", am: "[am] btn.stop"}
   btn.confirm_stop: {en: "Yes, delete", am: "[am] btn.confirm_stop"}
   btn.cancel: {en: "Cancel", am: "[am] btn.cancel"}
+  btn.staff: {en: "I am OAN staff", am: "[am] btn.staff"}
+  btn.stop_updates: {en: "Stop", am: "[am] btn.stop_updates"}
 
 roles:
   role.development_agent: {en: "Development Agent", am: "[am] role.development_agent"}
