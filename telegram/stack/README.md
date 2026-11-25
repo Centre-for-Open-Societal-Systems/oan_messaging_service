@@ -75,6 +75,13 @@ service names.
 The fake also enforces Telegram's limits: 30 messages a second for the bot, 1 a second per
 chat, 4096 UTF-16 units.
 
+## Live check with a test bot
+
+`tools/live_relay.py` connects the stack to a real, throwaway Telegram bot: it polls the
+bot's updates and posts them to the webhook gateway, and sends on whatever OAN Messaging
+sends to the fake Telegram for those chats. The usage, including how to store the token
+without it appearing on screen, is at the top of the file. Delete the bot afterwards.
+
 ## What the tests do not prove
 
 * Real Telegram: the fake follows the Bot API as documented, not as observed.
