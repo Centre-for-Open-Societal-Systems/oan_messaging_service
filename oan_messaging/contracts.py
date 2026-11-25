@@ -690,6 +690,9 @@ class CallerContext(_Frozen):
     telegram_bot: str | None = None
     #: May read GET /api/v1/charts (statistics). Readers have no channels or purposes.
     can_read_stats: bool = False
+    #: May read GET /api/v1/messages (every caller's messages, masked, with their
+    #: callbacks). Readers have no channels or purposes.
+    can_list_messages: bool = False
 
 
 # --------------------------------------------------------------------------------------
@@ -2101,6 +2104,52 @@ def _rewrite_refs(node: Any) -> Any:
     return node
 
 
+# --------------------------------------------------------------------------------------
+# Read-only message listing (staff console; callers created with --messages-reader)
+# --------------------------------------------------------------------------------------
+
+
+class ReceiptView(_Frozen):
+    """One provider callback (8028 delivery receipt) recorded for a message."""
+
+    id: uuid.UUID
+    provider: str
+    #: The provider's own status word, e.g. ``Delivered`` or ``Expired``.
+    raw_status: str
+    #: What the service did with it (``ReceiptDisposition``).
+    disposition: str
+    event_time: AwareDatetime
+    received_at: AwareDatetime
+
+
+class AttemptView(_Frozen):
+    """One provider call made for a message (no content, no provider response body)."""
+
+    attempt_no: Annotated[int, Field(ge=1)]
+    started_at: AwareDatetime
+    finished_at: AwareDatetime | None = None
+    outcome: str | None = None
+    provider_status: str | None = None
+    failure_code: str | None = None
+    units: Annotated[int, Field(ge=1)] = 1
+
+
+class MessageListItem(MessageStatusView):
+    """A message as the staff console lists it: the status view plus its sender and the
+    callbacks and attempts recorded for it. Never contains message text or a full
+    recipient."""
+
+    caller_id: str
+    callbacks: list[ReceiptView] = Field(default_factory=list)
+    attempt_log: list[AttemptView] = Field(default_factory=list)
+
+
+class MessageListPage(_Frozen):
+    items: list[MessageListItem]
+    #: Pass as ``cursor`` for the next (older) page; absent on the last page.
+    next_cursor: str | None = None
+
+
 if __name__ == "__main__":  # pragma: no cover
     import pathlib
     import sys
@@ -2116,3 +2165,4 @@ if __name__ == "__main__":  # pragma: no cover
         f"failures={len(problems)}"
     )
     sys.exit(1 if problems else 0)
+

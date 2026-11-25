@@ -70,6 +70,7 @@ callers = Table(
     #: A statistics reader (Reports Central, the OAN dashboards): may read /api/v1/charts.
     #: Readers are created with no channels and no purposes, so they can never send.
     Column("can_read_stats", Boolean, nullable=False, server_default=text("false")),
+    Column("can_list_messages", Boolean, nullable=False, server_default=text("false")),
     CheckConstraint("char_length(caller_id) BETWEEN 1 AND 64", name="caller_id_length"),
 )
 

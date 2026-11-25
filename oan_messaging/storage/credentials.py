@@ -45,13 +45,14 @@ async def upsert_caller(
     telegram_bot: str | None = None,
     enabled: bool = True,
     can_read_stats: bool = False,
+    can_list_messages: bool = False,
 ) -> None:
     if telegram_bot is not None and not BOT_KEY_RE.fullmatch(telegram_bot):
         raise ValueError("invalid telegram bot key")
     channels, purposes = list(channels), list(purposes)
-    if can_read_stats and (channels or purposes):
-        # A statistics token is read-only: it must never be able to send.
-        raise ValueError("a statistics reader has no channels and no purposes")
+    if (can_read_stats or can_list_messages) and (channels or purposes):
+        # A reader token is read-only: it must never be able to send.
+        raise ValueError("a reader has no channels and no purposes")
     values = {
         "caller_id": caller_id,
         "allowed_channels": sorted(c.value for c in channels),
@@ -59,6 +60,7 @@ async def upsert_caller(
         "telegram_bot": telegram_bot,
         "enabled": enabled,
         "can_read_stats": can_read_stats,
+        "can_list_messages": can_list_messages,
     }
     async with sf() as s, s.begin():
         await s.execute(
@@ -183,4 +185,5 @@ async def authenticate(
         allowed_purposes=frozenset(Purpose(p) for p in row["allowed_purposes"]),
         telegram_bot=row["telegram_bot"],
         can_read_stats=bool(row["can_read_stats"]),
+        can_list_messages=bool(row["can_list_messages"]),
     )

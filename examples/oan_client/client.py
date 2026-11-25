@@ -375,6 +375,8 @@ ERROR_CODES = frozenset({
     "not_cancellable", "channel_not_supported",
     # GET /api/v1/charts (statistics readers)
     "stats_not_permitted", "after_to", "range_too_long",
+    # GET /api/v1/messages (message readers: the staff console)
+    "listing_not_permitted", "out_of_range",
     # storage expiry checks
     "not_in_future", "beyond_ceiling",
     # pydantic error types passed through unchanged

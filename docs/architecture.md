@@ -85,6 +85,18 @@ Grievance), so Reports Central reads it as one more upstream:
 * **Access:** a **statistics reader** only: a caller created with `caller --stats-reader`
   (no channels, no purposes, `can_read_stats`), whose token is issued as any caller's. A
   sending caller gets `403 stats_not_permitted`; a reader cannot send.
+
+### Message listing (staff console)
+
+`GET /api/v1/messages` lists every caller's messages, newest first, for the staff console
+(`oan_messaging_ui`). It is read-only and metadata-only: status, masked recipient, sender,
+the provider callbacks (8028 delivery receipts) matched to the message and the provider
+attempts made for it; never text, a full recipient, a fingerprint or a provider response
+body. Filters: `channel`, `status`, `caller`, `purpose`, `source_reference` (prefix),
+`limit` (1-100, default 50) and `cursor` (the previous page's `next_cursor`). Access: a
+**message reader** only, a caller created with `caller --messages-reader` (migration 0009,
+`can_list_messages`, no channels, no purposes). Any other caller gets
+`403 listing_not_permitted`. The UI's server holds the reader token; browsers never see it.
 * **Data:** counts only, never a recipient, text or reference. The cleanup component
   rebuilds a snapshot (`stats_daily`, `stats_failures`, `stats_campaigns`, `stats_state`)
   every `OAN_MSG_STATS_REFRESH_SECONDS` (900) under an advisory lock, rebuilding the last
