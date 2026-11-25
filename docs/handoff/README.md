@@ -47,7 +47,7 @@ eSignet or DA visits):**
 | **DA Services** | Frappe | Frappe connector | Visit planned and rescheduled, to the farmer when the agent ticks the box | **Kit built and tested** (`code/kits/`) | [13](13-da-services.md) |
 | **Auth** | Frappe | OTP sender | Password-reset OTP | **Kit built and tested** (`code/kits/`); end to end | [14](14-auth.md) |
 | **eSignet** | eSignet (Java) | OTP sender | Login OTP for Farmer ID | **Sender built and tested** (`code/kits/esignet/`); eSignet team wires it in | [15](15-esignet.md) |
-| Telegram (OAN endpoint) | none in Phase 1 | Direct API (Telegram) | Not used in Phase 1 | **Closed:** the Telegram bot runs on RapidPro and is not an OAN caller | [16](16-telegram.md) |
+| Telegram (OAN endpoint) | OAN Bot Services | Direct API (Telegram) | Bot replies and area broadcast copies | **Built and tested against stubs** (contract 3.4.0); end to end with a fake Telegram to run | [16](16-telegram.md) |
 | Farmer registry API, VeriFayda | no code yet | OTP sender / notices | e-voucher notices; verification OTPs (expected) | Repositories empty | [11 §7](11-dpi-consent.md#7-farmer-registry-api-and-verifayda) |
 
 ## 3. The three patterns

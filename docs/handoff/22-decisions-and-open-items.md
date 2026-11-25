@@ -31,5 +31,5 @@ and only when a module opts in from its own `hooks.py` ([03](03-frappe-connector
 | Connector and client published as repositories | ATI, OAN | Today they ship as files in the developer package (`code/`). The Credit, Grievance and DA kits fetch the connector in CI from the repository variable `OAN_MESSAGING_CONNECTOR_REPO` until then. The team is creating the shared repository; set the variable to its URL when it exists |
 | A2C pre-existing test failures (7 at `f6bb735`: `test_farmer_b2c` and loan-product checks) | A2C | Unrelated to messaging; identical with and without the Credit kit |
 | Controlled live acceptance with real 8028 and Telegram | QA, DevOps | After the dev environment |
-| Telegram notices from modules to linked farmers | Product, Telegram bot team | Not in Phase 1. Route to decide when needed: through the bot (RapidPro API) or OAN's Telegram endpoint ([16](16-telegram.md)) |
+| Telegram notices from modules to linked farmers | Product, Telegram bot team | Not in Phase 1. When needed, through OAN Bot Services, which owns the chat links; a second caller must not use the same bot without the bot owners' agreement ([16](16-telegram.md)) |
 | Telegram linking OTP routes in Auth | Auth | Issue and verify routes for the Telegram bot's farmer linking; same OTP sender pattern ([14](14-auth.md) §7) |

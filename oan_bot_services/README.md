@@ -6,7 +6,7 @@ kit's `bot-services-broadcasts.openapi.yaml`.
 
 Two runtimes, chosen by `OAN_BOT_RAPIDPRO_ENABLED`:
 
-* **false (default): broadcast-only Telegram without RapidPro.** Telegram calls
+* **false (default): Telegram broadcasts plus sign-up, without RapidPro.** Telegram calls
   `POST /telegram/webhook`; Bot Services stores each update (sealed) before answering,
   and its worker runs a short conversation: `/start` → language (English, Amharic) →
   privacy notice and main menu (Link my Farmer ID, I am OAN staff, Updates on/off, Stop);

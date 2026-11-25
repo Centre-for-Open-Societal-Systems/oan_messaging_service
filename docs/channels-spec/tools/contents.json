@@ -13,30 +13,30 @@
  ],
  [
   "3 SMS channel: the OAN Messaging Service",
-  "10"
+  "9"
  ],
  [
   "4 SMS channel: callers and the Frappe connector",
-  "14"
+  "13"
  ],
  [
   "5 Telegram channel: platform, security and shared rules",
-  "19"
+  "18"
  ],
  [
   "6 Telegram channel: modules",
-  "26"
+  "23"
  ],
  [
   "7 Deployment, operations and testing",
-  "41"
+  "38"
  ],
  [
   "8 Build order and decisions",
-  "44"
+  "41"
  ],
  [
   "Appendix A: v1.0 custom router (fallback)",
-  "52"
+  "50"
  ]
 ]

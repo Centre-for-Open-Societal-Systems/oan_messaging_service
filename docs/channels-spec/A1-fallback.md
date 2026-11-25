@@ -1,9 +1,9 @@
 # Appendix A: v1.0 custom router (fallback)
 
-RP-D1, RP-D2, RP-D4 and RP-D6 were accepted on 19 November 2026 (§8.2). If RapidPro is
-later rejected, the bot is built as a custom service
-instead of on RapidPro. Every rule in chapters 5.4 to 5.7 and chapter 6 still applies.
-Only the platform changes.
+**Not needed in this release** (TG-36, 24 November 2026). RapidPro was dropped, and OAN
+Bot Services now receives the webhook and runs the button conversation itself (§5.1),
+sending through OAN Messaging. This appendix is kept only as the earlier v1.0 design for
+reference; it is not built.
 
 | Area | Custom router (v1.0) |
 |---|---|

@@ -2,7 +2,7 @@
 #
 # Every farmer- and staff-facing string is keyed by these ids. With RapidPro (the old
 # runtime) they are flow translations and Bot Services returns keys and params. Without
-# RapidPro (broadcast-only Telegram) Bot Services itself renders the reply from this
+# RapidPro (Telegram broadcasts plus sign-up) Bot Services itself renders the reply from this
 # file (`en` or `am`, by the chat's chosen language) and sends it through OAN Messaging;
 # nothing else is ever sent as a reply. A contract test fails if Bot Services can emit a
 # key that is not in this file.

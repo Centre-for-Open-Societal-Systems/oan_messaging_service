@@ -62,4 +62,4 @@ effective expiry ceilings.
 | OAN worker | 8028 gateway | 8028's port, mTLS |
 | 8028 | OAN receipt ingress (registered callback host) | 443 (mTLS with 8028's callback CA, plus callback secret) |
 
-Callers never talk to 8028 or Telegram directly. (The Telegram bot is not an OAN caller: RapidPro talks to Telegram itself.)
+Callers never talk to 8028 or Telegram directly. The Telegram bot is an OAN caller (`bot-services`); only OAN Messaging holds the bot token and talks to Telegram.
