@@ -5,10 +5,18 @@ Run it next to a running stack (telegram/stack/up.sh) on the same machine.
 
 Inbound: polls the real Bot API (getUpdates) and posts each private-chat update, unchanged,
 to the stack's webhook gateway with the secret header, so OAN Bot Services handles it as
-it would a webhook call. When you share your contact while linking, it prints the code
-the stand-in Auth service "sent", for you to type in Telegram.
+it would a webhook call. An update is confirmed to Telegram (the offset moves past it)
+only after the gateway accepted it. When you share your contact while linking, it prints
+the code the stand-in Auth service "sent", for you to type in Telegram.
 Outbound: whatever OAN Messaging sends to the fake Telegram for your chat (text and reply
 buttons) is sent on to your real chat.
+
+Rules it keeps:
+  * One loop, one Telegram request in flight at any time.
+  * It never changes the bot: it checks that no webhook is set and stops if one is.
+  * On the first "too many requests" (429) it stops and prints how long to wait. It also
+    stops on any other refusal or a connection error. It never retries Telegram.
+  * The token is read from a file and never printed. Message text is never printed.
 
 Usage (from telegram/stack; the token never appears on screen or in shell history):
     read -rs TOK && printf %s "$TOK" > ~/.oan-relay-token && chmod 600 ~/.oan-relay-token
@@ -16,9 +24,6 @@ Usage (from telegram/stack; the token never appears on screen or in shell histor
     python3 -m venv /tmp/oan-relay && /tmp/oan-relay/bin/pip -q install httpx
     /tmp/oan-relay/bin/python tools/live_relay.py ~/.oan-relay-token
 Afterwards: Ctrl-C, ./down.sh, rm ~/.oan-relay-token, and /deletebot in BotFather.
-
-The token is read from the file and never printed. It waits as long as Telegram asks
-after a "too many requests" answer, and never polls faster than one request at a time.
 """
 
 from __future__ import annotations
@@ -28,110 +33,148 @@ import hashlib
 import hmac
 import os
 import sys
-import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 import httpx
 
-TOKEN = Path(sys.argv[1]).expanduser().read_text().strip()
-SECRET = os.environ["TG_WEBHOOK_SECRET"]
-REF_KEY = base64.b64decode(os.environ["CONTACT_REF_KEY"])
 # OAN Bot Services derives the Auth link request id from the chat and the update.
 LINK_NS = uuid.UUID("6f1d8c3e-4b2a-4e0f-9c71-0a3b5d7e9f11")
-API = f"https://api.telegram.org/bot{TOKEN}"
+POLL_SECONDS = 3  # getUpdates long-poll; keeps replies quick with one request in flight
 
-real = httpx.Client(timeout=60)
-fake = httpx.Client(base_url="http://127.0.0.1:28301", timeout=10, trust_env=False)
-stubs = httpx.Client(base_url="http://127.0.0.1:28200", timeout=10, trust_env=False)
-gw = httpx.Client(
-    base_url="https://127.0.0.1:28443",
-    verify=False,  # noqa: S501 (the stack's throwaway test CA, loopback port)
-    trust_env=False,
-    timeout=15,
-    headers={"Host": "webhook.example.invalid", "X-Telegram-Bot-Api-Secret-Token": SECRET},
-)
-chats: dict[int, int] = {}  # chat id -> last relayed message id
-lock = threading.Lock()
+
+class Stop(Exception):
+    """Telegram refused or could not be reached: stop the relay, never retry."""
 
 
 def log(*a: object) -> None:
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
 
-def call(method: str, **payload: object) -> dict:
-    """One request at a time; on 429 wait retry_after (+1 s), then try again."""
-    while True:
+class Telegram:
+    """The real Bot API, one call at a time. Any refusal raises Stop."""
+
+    def __init__(self, token: str, client: httpx.Client | None = None) -> None:
+        self._base = f"https://api.telegram.org/bot{token}"
+        self._c = client or httpx.Client(timeout=POLL_SECONDS + 30)
+
+    def call(self, method: str, **payload: object) -> Any:
         try:
-            r = real.post(f"{API}/{method}", json=payload)
+            r = self._c.post(f"{self._base}/{method}", json=payload)
             body = r.json()
         except (httpx.HTTPError, ValueError) as exc:
-            log(method, "error", type(exc).__name__, "- waiting 10 s")
-            time.sleep(10)
-            continue
+            # Never include the exception text: it can carry the URL, and so the token.
+            raise Stop(f"{method}: Telegram could not be reached ({type(exc).__name__})") from None
         if body.get("ok"):
-            return body
-        wait = (body.get("parameters") or {}).get("retry_after")
-        log(method, "failed", r.status_code, str(body.get("description", ""))[:80])
-        if r.status_code in (429, 409):
-            time.sleep((wait or 10) + 1)
-            continue
-        return body
+            return body["result"]
+        if r.status_code == 429:
+            wait = (body.get("parameters") or {}).get("retry_after")
+            raise Stop(
+                f"{method}: Telegram says too many requests; wait {wait} s before trying again"
+            )
+        raise Stop(f"{method}: refused ({r.status_code}) {str(body.get('description', ''))[:80]}")
 
 
-def print_code(chat_id: int, update_id: int) -> None:
-    ref = hmac.new(REF_KEY, str(chat_id).encode(), hashlib.sha256).hexdigest()
-    lrid = uuid.uuid5(LINK_NS, f"{ref}:{update_id}")
-    for _ in range(20):
-        r = stubs.get("/auth/_test/codes", params={"link_request_id": str(lrid)})
-        if r.status_code == 200:
-            log(">>> code sent by the stand-in Auth service:", r.json()["code"])
-            return
-        time.sleep(1)
-    log("no code found (wrong Farmer ID, or not your own contact?)")
+class Stack:
+    """The local stack: fake Telegram test routes, stubs and the webhook gateway."""
+
+    def __init__(self, secret: str, ref_key: bytes, clients: dict[str, httpx.Client] | None = None):
+        c = clients or {}
+        self.fake = c.get("fake") or httpx.Client(
+            base_url="http://127.0.0.1:28301", timeout=10, trust_env=False
+        )
+        self.stubs = c.get("stubs") or httpx.Client(
+            base_url="http://127.0.0.1:28200", timeout=10, trust_env=False
+        )
+        self.gw = c.get("gw") or httpx.Client(
+            base_url="https://127.0.0.1:28443",
+            verify=False,  # noqa: S501 (the stack's throwaway test CA, loopback port)
+            trust_env=False,
+            timeout=15,
+        )
+        self._secret = secret
+        self._ref_key = ref_key
+
+    def add_chat(self, chat_id: int) -> int:
+        """Create the chat at the fake Telegram; return the last message id already there."""
+        self.fake.post("/_test/users", json={"telegram_id": chat_id, "first_name": "Live"})
+        return max((m["message_id"] for m in self.sent(chat_id)), default=0)
+
+    def sent(self, chat_id: int) -> list[dict]:
+        return self.fake.get("/_test/sent", params={"telegram_id": chat_id}).json()["messages"]
+
+    def deliver(self, update: dict) -> int:
+        try:
+            return self.gw.post(
+                "/telegram/webhook",
+                json=update,
+                headers={
+                    "Host": "webhook.example.invalid",
+                    "X-Telegram-Bot-Api-Secret-Token": self._secret,
+                },
+            ).status_code
+        except httpx.HTTPError:
+            return 0
+
+    def code(self, chat_id: int, update_id: int) -> str | None:
+        ref = hmac.new(self._ref_key, str(chat_id).encode(), hashlib.sha256).hexdigest()
+        lrid = uuid.uuid5(LINK_NS, f"{ref}:{update_id}")
+        for _ in range(10):
+            r = self.stubs.get("/auth/_test/codes", params={"link_request_id": str(lrid)})
+            if r.status_code == 200:
+                return r.json()["code"]
+            time.sleep(1)
+        return None
 
 
-def inbound() -> None:
-    call("deleteWebhook")
-    me = call("getMe")
-    if not me.get("ok"):
-        sys.exit("the token was refused")
-    log("bot ready: @" + me["result"]["username"] + " - press Start in Telegram")
-    offset = 0
-    while True:
-        ups = call("getUpdates", offset=offset, timeout=50, allowed_updates=["message"])
-        for up in ups.get("result", []):
-            offset = up["update_id"] + 1
+class Relay:
+    def __init__(self, tg: Telegram, stack: Stack) -> None:
+        self.tg = tg
+        self.stack = stack
+        self.offset = 0
+        self.chats: dict[int, int] = {}  # chat id -> last message id sent on
+
+    def start(self) -> None:
+        me = self.tg.call("getMe")
+        hook = self.tg.call("getWebhookInfo")
+        if hook.get("url"):
+            raise Stop(
+                "a webhook is set on this bot; the relay needs it empty and will not change it"
+            )
+        log(f"bot ready: @{me['username']} - press Start in Telegram")
+
+    def poll_once(self) -> None:
+        updates = self.tg.call(
+            "getUpdates", offset=self.offset, timeout=POLL_SECONDS, allowed_updates=["message"]
+        )
+        for up in updates:
             msg = up.get("message") or {}
             chat = msg.get("chat") or {}
             if chat.get("type") != "private":
+                self.offset = up["update_id"] + 1
                 continue
             cid = int(chat["id"])
-            with lock:
-                if cid not in chats:
-                    fake.post("/_test/users", json={"telegram_id": cid, "first_name": "Live"})
-                    sent = fake.get("/_test/sent", params={"telegram_id": cid}).json()
-                    chats[cid] = max((m["message_id"] for m in sent["messages"]), default=0)
+            if cid not in self.chats:
+                self.chats[cid] = self.stack.add_chat(cid)
             kind = "contact" if "contact" in msg else ("text" if "text" in msg else "other")
-            status = gw.post("/telegram/webhook", json=up).status_code
-            log("update in:", kind, "->", status)
-            if kind == "contact" and status == 200:
-                threading.Thread(
-                    target=print_code, args=(cid, up["update_id"]), daemon=True
-                ).start()
+            status = self.stack.deliver(up)
+            log("update in:", kind, "->", status or "no answer")
+            if status != 200:
+                # Not confirmed to Telegram: the same update comes back on the next poll.
+                return
+            self.offset = up["update_id"] + 1
+            if kind == "contact":
+                code = self.stack.code(cid, up["update_id"])
+                log(
+                    ">>> code from the stand-in Auth service:",
+                    code or "none (wrong Farmer ID or contact?)",
+                )
 
-
-def outbound() -> None:
-    while True:
-        with lock:
-            items = list(chats.items())
-        for cid, last in items:
-            try:
-                sent = fake.get("/_test/sent", params={"telegram_id": cid}).json()["messages"]
-            except httpx.HTTPError:
-                continue
-            for m in sent:
+    def send_once(self) -> None:
+        for cid, last in list(self.chats.items()):
+            for m in self.stack.sent(cid):
                 if m["message_id"] <= last:
                     continue
                 payload: dict = {"chat_id": cid, "text": m["text"]}
@@ -139,17 +182,32 @@ def outbound() -> None:
                     payload["reply_markup"] = m["reply_markup"]
                 if m.get("link_preview_options"):
                     payload["link_preview_options"] = m["link_preview_options"]
-                ok = call("sendMessage", **payload).get("ok")
-                log(
-                    "message out:",
-                    (m["text"] or "")[:40].replace("\n", " "),
-                    "ok" if ok else "FAILED",
-                )
-                last = m["message_id"]
-                with lock:
-                    chats[cid] = last
-        time.sleep(1)
+                self.tg.call("sendMessage", **payload)
+                log("message out:", "with buttons" if m.get("buttons") else "text")
+                self.chats[cid] = m["message_id"]
+
+    def run(self) -> None:
+        self.start()
+        while True:
+            self.send_once()
+            self.poll_once()
 
 
-threading.Thread(target=outbound, daemon=True).start()
-inbound()
+def main() -> int:
+    token = Path(sys.argv[1]).expanduser().read_text().strip()
+    relay = Relay(
+        Telegram(token),
+        Stack(os.environ["TG_WEBHOOK_SECRET"], base64.b64decode(os.environ["CONTACT_REF_KEY"])),
+    )
+    try:
+        relay.run()
+    except Stop as exc:
+        log("stopped:", exc)
+        return 2
+    except KeyboardInterrupt:
+        log("stopped")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
