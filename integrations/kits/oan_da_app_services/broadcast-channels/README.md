@@ -71,7 +71,9 @@ broadcasts are for the Communications Officer and the Admin.
   - in-app recipients;
   - Telegram copies by OAN Messaging status: accepted, sending, **sent**, failed, expired,
     unknown. Telegram ends at **sent**: there is no "delivered" or "read" for Telegram. Also
-    `finished` and `error` (the last Telegram error code, or null);
+    `finished`, `send_failed` (true when the Telegram broadcast could not be sent at all; the
+    count `failed` is the number of copies that failed) and `error` (the last Telegram error
+    code, or null);
   - SMS read, queued, no phone, retrying, not sent, and the OAN status of each queued SMS.
     `skipped_on_telegram` stays in the answer for compatibility and is always 0 now.
 - **SMS length:** up to **3 parts** (OAN Messaging contract 3.1.0, SMS-09). One part is 160
