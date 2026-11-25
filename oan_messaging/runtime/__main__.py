@@ -143,8 +143,11 @@ async def run(
                 assert opts is not None
                 purposes = {Purpose(v) for v in opts.purposes.split(",") if v}
                 stats_reader = bool(getattr(opts, "stats_reader", False))
+                messages_reader = bool(getattr(opts, "messages_reader", False))
                 caller_channels = (
-                    set() if stats_reader else {Channel(v) for v in opts.channels.split(",") if v}
+                    set()
+                    if stats_reader or messages_reader
+                    else {Channel(v) for v in opts.channels.split(",") if v}
                 )
                 # Judged on the caller's channels (contract 3.4.0): every one of them must
                 # allow broadcast, so the Telegram switch never registers an SMS sender.
@@ -161,6 +164,7 @@ async def run(
                     telegram_bot=opts.bot,
                     enabled=not opts.disable,
                     can_read_stats=stats_reader,
+                    can_list_messages=messages_reader,
                 )
                 log.info("caller upserted caller_id=%s enabled=%s", opts.caller, not opts.disable)
                 return
@@ -369,6 +373,12 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="caller: a read-only statistics reader (GET /api/v1/charts); cannot send",
     )
+    parser.add_argument(
+        "--messages-reader",
+        action="store_true",
+        help="caller: a read-only message lister (GET /api/v1/messages, the staff console); "
+        "cannot send",
+    )
     parser.add_argument("--credential", help="revoke-credentials: the one credential id")
     parser.add_argument("--all", action="store_true", help="revoke-credentials: every token")
     args = parser.parse_args(argv)
@@ -381,10 +391,11 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--caller is required")
     if args.component == "revoke-credentials" and bool(args.credential) == bool(args.all):
         parser.error("revoke-credentials needs exactly one of --credential ID or --all")
-    if args.component == "caller" and not args.purposes and not args.stats_reader:
+    reader = args.stats_reader or args.messages_reader
+    if args.component == "caller" and not args.purposes and not reader:
         parser.error("--purposes is required")
-    if args.component == "caller" and args.stats_reader and args.purposes:
-        parser.error("a --stats-reader has no --purposes (it cannot send)")
+    if args.component == "caller" and reader and args.purposes:
+        parser.error("a --stats-reader / --messages-reader has no --purposes (it cannot send)")
     if args.component == "check-heartbeat":
         # Liveness probe: no settings, no database. Exit 1 if the worker loop has not
         # completed a cycle within --max-age seconds.

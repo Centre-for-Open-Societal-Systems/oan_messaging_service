@@ -16,8 +16,9 @@ with its own token, allowed channels and allowed purposes.
 | Endpoint | Success | Notes |
 |---|---|---|
 | `POST /api/v1/messages/sms` | `202` new; `200` identical replay | `Idempotency-Key` header; one Ethiopian mobile; one SMS part |
-| `POST /api/v1/messages/telegram` | `202` new; `200` identical replay | No caller in Phase 1 (§1.3) |
+| `POST /api/v1/messages/telegram` | `202` new; `200` identical replay | One caller: OAN Bot Services (replies and broadcast copies, §5.8) |
 | `GET /api/v1/messages/{id}` | `200` | `404` for unknown ids **and** for other callers' ids |
+| `POST /api/v1/messages/{id}/cancel` | `200` (`failed`, `cancelled`) | Telegram only (contract 3.4.0): the caller's own message not yet claimed; `409 not_cancellable`, `404`, `422` for SMS (§5.8) |
 
 Errors are `application/problem+json`: a top-level `code` (`unauthenticated`, `forbidden`,
 `not_found`, `validation_failed`, `idempotency_conflict`, `payload_too_large`,

@@ -576,7 +576,20 @@ class TestBroadcastChannels(IntegrationTestCase):
 		dispatch.run(name)
 		doc = frappe.get_doc(dispatch.DOCTYPE, name)
 		self.assertEqual((doc.state, doc.telegram_failed, doc.sms_queued), ("Done", 1, 5))
-		self.assertTrue(dispatch.status(name)["telegram"]["failed"])
+		self.assertTrue(dispatch.status(name)["telegram"]["send_failed"])
+
+	def test_the_send_failed_flag_and_the_failed_copy_count_are_both_kept(self):
+		# Both were once called "failed", and the count overwrote the flag.
+		name = self.dispatch_of(self.send(COMMS, channels=["telegram"]))
+		frappe.db.set_value(
+			dispatch.DOCTYPE,
+			name,
+			{"telegram_failed": 0, "telegram_counts": json.dumps({"sent": 3, "failed": 2})},
+		)
+		telegram = dispatch.status(name)["telegram"]
+		self.assertEqual((telegram["send_failed"], telegram["failed"], telegram["sent"]), (False, 2, 3))
+		frappe.db.set_value(dispatch.DOCTYPE, name, "telegram_failed", 1)
+		self.assertTrue(dispatch.status(name)["telegram"]["send_failed"])
 
 	def test_agents_get_the_sms_copy_when_telegram_is_refused(self):
 		FakeBot.fail = UpstreamError("bot_services", "forbidden", 403)

@@ -6,7 +6,7 @@ kit's `bot-services-broadcasts.openapi.yaml`.
 
 Two runtimes, chosen by `OAN_BOT_RAPIDPRO_ENABLED`:
 
-* **false (default): broadcast-only Telegram without RapidPro.** Telegram calls
+* **false (default): Telegram broadcasts plus sign-up, without RapidPro.** Telegram calls
   `POST /telegram/webhook`; Bot Services stores each update (sealed) before answering,
   and its worker runs a short conversation: `/start` → language (English, Amharic) →
   privacy notice and main menu (Link my Farmer ID, I am OAN staff, Updates on/off, Stop);
@@ -40,7 +40,7 @@ python -m oan_bot_services worker       # one replica at a time (advisory lock)
 | `RAPIDPRO_ENABLED` | `false` (default): the reduced runtime. `true`: the RapidPro flows. |
 | `TELEGRAM_WEBHOOK_SECRET` | Required when RapidPro is off: the bot's webhook `secret_token`, 16-256 of `A-Z a-z 0-9 _ -` (Secret). The same value is set on APISIX and in `setWebhook`. |
 | `TEXT_KEYS_FILE` | Path of `text-keys.yaml`. Default: `telegram/contracts/text-keys.yaml` next to the package; an image must copy that file. Checked at start-up (every key, both languages, buttons at most 30 units). |
-| `STOPPED_RETENTION_DAYS` (90), `UPDATE_ID_DAYS` (7), `CONVERSATION_MINUTES` (30), `REPLY_MINUTES` (30) | Retention of stopped or unreachable subscriptions; repeat detection of webhook updates; a conversation step's life; a reply not handed to OAN Messaging by then is dropped. |
+| `STOPPED_RETENTION_DAYS` (90), `UPDATE_ID_DAYS` (30), `CONVERSATION_MINUTES` (30), `REPLY_MINUTES` (30) | Retention of stopped or unreachable subscriptions; repeat detection of webhook updates; a conversation step's life; a reply not handed to OAN Messaging by then is dropped. |
 | `FLOW_SECRET` | RapidPro runtime only: shared secret in `X-OAN-Flow-Secret` (RapidPro global), at least 16 characters. |
 | `CONTACT_REF_KEY`, `FINGERPRINT_KEY` | base64, at least 32 bytes each. `contact_ref` = HMAC-SHA256 of the chat id. |
 | `DATA_KEY` | base64, exactly 32 bytes (AES-GCM for the alternate phone and a broadcast's text until it is sent). |

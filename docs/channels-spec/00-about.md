@@ -15,10 +15,10 @@ It also summarises the OAN Messaging Service design (`docs/architecture.md`, con
 
 | Item | Status |
 |---|---|
-| Document | **Review.** Version 2.0, 16 November 2026; Telegram chapters 5, 6 and 8 revised 19 November 2026 (RapidPro decisions, area broadcasts, availability, weekly report), then again the same day: broadcasts follow the DA web app and reach linked farmers, welcome SMS, DA backend roster, closing and Supervisor rules, and SMS changes in chapters 3, 4 and 7 (broadcast ageing, batching, receipt formats, purposes). Not yet reviewed by ATI, security or the module teams. |
+| Document | **Review.** Version 2.0, 16 November 2026; Telegram chapters 5, 6 and 8 revised 19 November 2026 (RapidPro decisions, area broadcasts, availability, weekly report), then again the same day: broadcasts follow the DA web app and reach linked farmers, welcome SMS, DA backend roster, closing and Supervisor rules, and SMS changes in chapters 3, 4 and 7 (broadcast ageing, batching, receipt formats, purposes). Telegram chapters 2, 5, 6, 7 and 8 revised 24 November 2026 for Telegram broadcasts plus sign-up without RapidPro (TG-36 to TG-46). Not yet reviewed by ATI, security or the module teams. |
 | SMS: OAN Messaging Service | Built and tested, contract 3.2.0: the full suite (950 tests, 23 November 2026) passes on Python 3.13 with PostgreSQL 16. In independent review; not deployed. 16 of 16 release blockers fixed, pending review (§7.5). |
 | SMS: Frappe connector | Trial build; tested end to end with Credit (A2C) in a local trial stack. Not released. |
-| Telegram bot | Specified only. Platform: RapidPro with OAN Bot Services; RP-D1, RP-D2, RP-D4 and RP-D6 decided on 19 November 2026 (§8.2). Delivered in one phase, built in two waves (§8.1). |
+| Telegram bot | Broadcasts plus sign-up (TG-36, 24 November 2026): OAN Bot Services without RapidPro, sending through OAN Messaging contract 3.4.0. Built and tested against stubs; not yet run end to end with a fake Telegram, not deployed. Amharic texts outstanding (release gate). Other modules deferred (§8.1). |
 
 ## 0.3 Who reads what
 
@@ -27,7 +27,7 @@ It also summarises the OAN Messaging Service design (`docs/architecture.md`, con
 | Everyone | Chapters 1 and 2 |
 | Module teams that send SMS (Credit, DPI, Grievance, DA, Auth, eSignet) | Chapter 4, then the integration handoff pack |
 | OAN Messaging developers and reviewers | Chapters 3 and 7 |
-| Telegram bot developers (RapidPro flows and OAN Bot Services) | Chapters 5 and 6 |
+| Telegram bot developers (OAN Bot Services) | Chapters 5 and 6 |
 | DevOps and security | Chapters 3.6, 5.3 and 7 |
 | ATI and product owners | Chapters 1, 2 and 8 |
 

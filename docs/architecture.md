@@ -20,7 +20,7 @@ Frozen interfaces: [`oan_messaging/contracts.py`](../oan_messaging/contracts.py)
 | Version | Change |
 |---|---|
 | 3.1.0 | SMS of up to 3 parts (SMS-09); an OTP stays one part (`too_long_for_sms`, `too_long_for_single_sms`). Broadcast ageing (SMS-03, migration `0004`). 8028 paced at 4 SMS/s with one OTP slot (SMS-10); a 500 from 8028 is retried (SMS-11); receipts read `status` only (SMS-07) |
-| 3.4.0 | **Broadcast-only Telegram** (24 November 2026): optional Telegram `reply_markup` (reply keyboard of 1-4 rows of 1-3 buttons, or keyboard removal), stored in the encrypted content and purged with the text, part of the idempotency fingerprint (only when present, so older fingerprints are unchanged); `POST /api/v1/messages/{id}/cancel` for the caller's own waiting Telegram message (one conditional update that a claim cannot race), failure code `cancelled`; `OAN_MSG_TELEGRAM_BROADCAST_ENABLED` allows broadcast on Telegram only (caller registration, API and worker claim). On Telegram a bot reply (`transactional`) is always claimed before waiting broadcasts; the SMS-03 ageing pass covers SMS rows only. Migration `0008`: trigger function and `failure_code` check. Fields and routes only added; SMS unchanged |
+| 3.4.0 | **Telegram broadcasts plus sign-up** (24 November 2026): optional Telegram `reply_markup` (reply keyboard of 1-4 rows of 1-3 buttons, or keyboard removal), stored in the encrypted content and purged with the text, part of the idempotency fingerprint (only when present, so older fingerprints are unchanged); `POST /api/v1/messages/{id}/cancel` for the caller's own waiting Telegram message (one conditional update that a claim cannot race), failure code `cancelled`; `OAN_MSG_TELEGRAM_BROADCAST_ENABLED` allows broadcast on Telegram only (caller registration, API and worker claim). On Telegram a bot reply (`transactional`) is always claimed before waiting broadcasts; the SMS-03 ageing pass covers SMS rows only. Migration `0008`: trigger function and `failure_code` check. Fields and routes only added; SMS unchanged |
 | 3.3.0 | **Charts labelled by channel** (decided 23 November 2026): every counting row carries `channel` (`sms` or `telegram`); one row per key and channel; `msgKpis` and `msgTrend` keep the overall row (`channel: all`) and add `by_channel`. Migration `0007`: `stats_campaigns.channel`. Telegram pace (`OAN_MSG_TELEGRAM_RATE_PER_SECOND`, default 20) and API address from configuration, link previews off, optional `worker-telegram` Deployment (SMS-02 revised). Fields only added |
 | 3.2.0 | **Statistics:** `GET /api/v1/charts/{chartId}` and `GET /api/v1/charts?charts=`, the dashboard service contract of the OAN dashboards, for statistics readers only (see [Statistics](#statistics-get-apiv1charts)). Migration `0005`: snapshot tables, `callers.can_read_stats`, `ix_messages_created_at` |
 
@@ -85,6 +85,18 @@ Grievance), so Reports Central reads it as one more upstream:
 * **Access:** a **statistics reader** only: a caller created with `caller --stats-reader`
   (no channels, no purposes, `can_read_stats`), whose token is issued as any caller's. A
   sending caller gets `403 stats_not_permitted`; a reader cannot send.
+
+### Message listing (staff console)
+
+`GET /api/v1/messages` lists every caller's messages, newest first, for the staff console
+(`oan_messaging_ui`). It is read-only and metadata-only: status, masked recipient, sender,
+the provider callbacks (8028 delivery receipts) matched to the message and the provider
+attempts made for it; never text, a full recipient, a fingerprint or a provider response
+body. Filters: `channel`, `status`, `caller`, `purpose`, `source_reference` (prefix),
+`limit` (1-100, default 50) and `cursor` (the previous page's `next_cursor`). Access: a
+**message reader** only, a caller created with `caller --messages-reader` (migration 0009,
+`can_list_messages`, no channels, no purposes). Any other caller gets
+`403 listing_not_permitted`. The UI's server holds the reader token; browsers never see it.
 * **Data:** counts only, never a recipient, text or reference. The cleanup component
   rebuilds a snapshot (`stats_daily`, `stats_failures`, `stats_campaigns`, `stats_state`)
   every `OAN_MSG_STATS_REFRESH_SECONDS` (900) under an advisory lock, rebuilding the last

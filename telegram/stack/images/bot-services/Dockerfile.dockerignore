@@ -1,0 +1,6 @@
+# Build context (repository root) for the Bot Services image: the package and its texts.
+*
+!oan_bot_services/
+!telegram/contracts/text-keys.yaml
+**/__pycache__
+**/*.pyc

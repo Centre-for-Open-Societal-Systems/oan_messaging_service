@@ -249,6 +249,42 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/messages:
+    get:
+      operationId: listMessages
+      summary: List messages with their callbacks (staff console, read-only)
+      description: |
+        For the OAN Messaging staff console. Only for a message reader: a credential created
+        with `caller --messages-reader`, which has no channels and no purposes and cannot
+        send. Lists **every** caller's messages, newest first. Never contains message text,
+        a full recipient, a fingerprint or a provider response body. `callbacks` are the
+        provider delivery receipts (8028) matched to the message; `attempt_log` the provider
+        calls made for it. Walk older pages with `next_cursor`. Not part of the calling
+        modules' contract.
+      tags: [messages]
+      parameters:
+        - {name: channel, in: query, required: false, schema: {type: string, enum: [sms, telegram]}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [accepted, sending, sent, delivered, failed, expired, unknown]}}
+        - {name: caller, in: query, required: false, schema: {type: string, maxLength: 64}}
+        - {name: purpose, in: query, required: false, schema: {type: string, maxLength: 32}}
+        - {name: source_reference, in: query, required: false, description: Prefix match., schema: {type: string, maxLength: 256}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, required: false, schema: {type: string}}
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageListPage'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/messages/{id}:
     get:
       operationId: getMessage
@@ -960,6 +996,120 @@ components:
         source_reference: {$ref: '#/components/schemas/SourceReference'}
         created_at: {$ref: '#/components/schemas/Timestamp'}
         expires_at: {$ref: '#/components/schemas/Timestamp'}
+    ReceiptView:
+      type: object
+      required: [id, provider, raw_status, disposition, event_time, received_at]
+      properties:
+        id: {type: string, format: uuid}
+        provider: {type: string}
+        raw_status: {type: string, description: "The provider's own status word."}
+        disposition: {type: string, enum: [applied, recorded_no_change, orphaned, mismatched, unmatched_late]}
+        event_time: {type: string, format: date-time}
+        received_at: {type: string, format: date-time}
+    AttemptView:
+      type: object
+      required: [attempt_no, started_at, units]
+      properties:
+        attempt_no: {type: integer, minimum: 1}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        outcome: {type: string}
+        provider_status: {type: string}
+        failure_code: {type: string}
+        units: {type: integer, minimum: 1}
+    MessageListPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/MessageListItem'}
+        next_cursor: {type: string}
+    MessageListItem:
+      type: object
+      additionalProperties: false
+      required:
+        - caller_id
+        - callbacks
+        - attempt_log
+        - id
+        - idempotency_key
+        - channel
+        - purpose
+        - source_reference
+        - status
+        - final
+        - recipient_masked
+        - delivery_receipts_supported
+        - attempts
+        - created_at
+        - updated_at
+      properties:
+        caller_id: {type: string}
+        callbacks:
+          type: array
+          items: {$ref: '#/components/schemas/ReceiptView'}
+        attempt_log:
+          type: array
+          items: {$ref: '#/components/schemas/AttemptView'}
+        id: {type: string, format: uuid}
+        idempotency_key: {$ref: '#/components/schemas/IdempotencyKeyValue'}
+        channel: {$ref: '#/components/schemas/Channel'}
+        purpose: {$ref: '#/components/schemas/Purpose'}
+        source_reference: {$ref: '#/components/schemas/SourceReference'}
+        status: {$ref: '#/components/schemas/MessageStatus'}
+        final:
+          type: boolean
+          description: True only for delivered, failed, expired.
+        failure_code:
+          $ref: '#/components/schemas/FailureCode'
+        provider_status:
+          type: string
+          maxLength: 64
+          description: Last raw provider status (e.g. `Delivered`, `Expired`, `http_503`, `tg_403`). Informational.
+        recipient_masked:
+          type: string
+          description: e.g. `+2519******01` or `chat:*******89`.
+        delivery_receipts_supported:
+          type: boolean
+          description: Fixed per channel — true for SMS (8028), false for Telegram.
+        attempts: {type: integer, minimum: 0}
+        created_at: {$ref: '#/components/schemas/Timestamp'}
+        updated_at: {$ref: '#/components/schemas/Timestamp'}
+        expires_at: {$ref: '#/components/schemas/Timestamp'}
+        sent_at: {$ref: '#/components/schemas/Timestamp'}
+        delivered_at: {$ref: '#/components/schemas/Timestamp'}
+      allOf:
+        - if:
+            properties:
+              channel: {const: telegram}
+            required: [channel]
+          then:
+            properties:
+              delivery_receipts_supported: {const: false}
+              status:
+                not: {const: delivered}
+            not:
+              required: [delivered_at]
+        - if:
+            properties:
+              channel: {const: sms}
+            required: [channel]
+          then:
+            properties:
+              delivery_receipts_supported: {const: true}
+        - if:
+            properties:
+              status: {const: delivered}
+            required: [status]
+          then:
+            required: [delivered_at]
+        - if:
+            properties:
+              status: {const: failed}
+            required: [status]
+          then:
+            required: [failure_code]
     MessageStatusView:
       type: object
       additionalProperties: false

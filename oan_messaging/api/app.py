@@ -92,6 +92,8 @@ class ApiDependencies:
     telegram_broadcast_enabled: bool = False
     #: GET /api/v1/charts (statistics for the OAN dashboards); None = not available.
     stats: Any = None
+    #: GET /api/v1/messages (staff console); an object with ``async page(params)``. None = off.
+    listing: Any = None
 
 
 def _submission_response(m: StoredMessage) -> dict[str, Any]:
@@ -138,12 +140,16 @@ def create_app(deps: ApiDependencies | None = None) -> FastAPI:
             return await authenticate(sf, secrets.credential_pepper, token)
 
         from oan_messaging.stats.charts import StatsService
+        from oan_messaging.storage.listing import MessageListing
 
         app.state.deps = ApiDependencies(
-            repository=repo, authenticate=auth, max_body_bytes=settings.max_body_bytes,
+            repository=repo,
+            authenticate=auth,
+            max_body_bytes=settings.max_body_bytes,
             broadcast_enabled=settings.broadcast_enabled,
             telegram_broadcast_enabled=settings.telegram_broadcast_enabled,
             stats=StatsService(sf),
+            listing=MessageListing(sf),
         )
         try:
             yield
@@ -315,6 +321,10 @@ def create_app(deps: ApiDependencies | None = None) -> FastAPI:
     async def submit_telegram(request: Request) -> Response:
         return await guarded(submit(request, Channel.TELEGRAM))
 
+    @app.get("/api/v1/messages")
+    async def list_messages(request: Request) -> Response:
+        return await guarded(listing(request))
+
     @app.get("/api/v1/messages/{message_id}")
     async def get_message(request: Request, message_id: str) -> Response:
         return await guarded(status_of(request, message_id))
@@ -362,6 +372,26 @@ def create_app(deps: ApiDependencies | None = None) -> FastAPI:
             return problem(404, "not_found")
         view: MessageStatusView = to_status_view(stored)
         return JSONResponse(content=view.model_dump(mode="json", exclude_none=True))
+
+    async def listing(request: Request) -> Response:
+        """Read-only listing for the staff console: every caller's messages, newest first,
+        masked and without text, each with its callbacks. Only for callers created with
+        --messages-reader."""
+        from oan_messaging.storage.listing import ListQueryError
+
+        caller = await caller_of(request)
+        if caller is None:
+            return unauthenticated()
+        if not caller.can_list_messages:
+            return problem(403, "forbidden", [ErrorItem(code="listing_not_permitted")])
+        d: ApiDependencies = request.app.state.deps
+        if d.listing is None:
+            return problem(503, "service_unavailable")
+        try:
+            page = await d.listing.page(dict(request.query_params))
+        except ListQueryError as exc:
+            return problem(422, "validation_failed", [ErrorItem(field=exc.field, code=exc.code)])
+        return JSONResponse(content=page.model_dump(mode="json", exclude_none=True))
 
     # ------------------------------------------------------------------ charts (statistics)
     # The dashboard service contract of the OAN dashboards (oan_messaging/stats/charts.py):

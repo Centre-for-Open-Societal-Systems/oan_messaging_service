@@ -1,0 +1,6 @@
+# Test fakes of the local stack (standard library only): they open fixed internal URLs
+# and swallow errors while closing sockets.
+extend = "../../pyproject.toml"
+
+[lint]
+extend-ignore = ["S310", "S110"]
