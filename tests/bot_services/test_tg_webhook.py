@@ -175,10 +175,10 @@ async def test_updates_of_one_chat_wait_behind_a_failing_one(
     assert await stored(tg) == 0
 
 
-async def test_update_ids_are_kept_seven_days_then_purged(tg: Tg) -> None:
+async def test_update_ids_are_kept_thirty_days_then_purged(tg: Tg) -> None:
     await tg.send(700001010, "hello")
     await tg.run()
-    tg.clock.now += timedelta(days=6)
+    tg.clock.now += timedelta(days=29)
     assert (await jobs.purge(tg.deps))["seen_updates"] == 0
     tg.clock.now += timedelta(days=2)
     assert (await jobs.purge(tg.deps))["seen_updates"] == 1

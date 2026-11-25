@@ -18,8 +18,8 @@ async def test_start_language_privacy_notice_and_main_menu(tg: Tg) -> None:
     assert r["text"] == tg.text(tk.ONBOARDING_CHOOSE_LANGUAGE)
     r = await tg.say(chat, tg.label(tk.BTN_LANG_AM))
     st = tg.deps.settings
-    assert r["text"] == tg.text(tk.ONBOARDING_PRIVACY_NOTICE, "am", retention_days=90, log_days=7)
-    assert st.stopped_retention_days == 90 and st.update_id_days == 7
+    assert r["text"] == tg.text(tk.ONBOARDING_PRIVACY_NOTICE, "am", retention_days=90, log_days=30)
+    assert st.stopped_retention_days == 90 and st.update_id_days == 30
     assert r["reply_markup"] == {
         "keyboard": [
             [{"text": tg.label(tk.BTN_LINK_FARMER_ID, "am")},

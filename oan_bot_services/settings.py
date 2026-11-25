@@ -29,7 +29,7 @@ Reduced runtime (RapidPro off)::
     OAN_BOT_TEXT_KEYS_FILE=<path>                      text-keys.yaml (default: the copy in
                                                        telegram/contracts/ next to the package)
     OAN_BOT_STOPPED_RETENTION_DAYS=90                  stopped/unreachable rows deleted
-    OAN_BOT_UPDATE_ID_DAYS=7                           update_id kept for repeat detection
+    OAN_BOT_UPDATE_ID_DAYS=30                          update_id kept for repeat detection
     OAN_BOT_CONVERSATION_MINUTES=30                    a conversation step expires
     OAN_BOT_REPLY_MINUTES=30                           a reply not sent by then is dropped
 
@@ -123,7 +123,7 @@ class BotSettings(BaseSettings):
     #: after it stopped; updates on before then restores it.
     stopped_retention_days: int = Field(default=90, gt=0)
     #: Repeat detection of webhook updates: only ``update_id`` is kept this long.
-    update_id_days: int = Field(default=7, gt=0)
+    update_id_days: int = Field(default=30, gt=0)
     #: A conversation step (waiting for a Farmer ID, a contact, a code) expires.
     conversation_minutes: int = Field(default=30, gt=0, le=24 * 60)
     #: A bot reply not handed to OAN Messaging by then is dropped (also its expires_at).

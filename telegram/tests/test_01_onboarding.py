@@ -6,7 +6,7 @@ import httpx
 
 from conftest import BOT, GATEWAY
 
-MENU = [["Link my Farmer ID", "I am OAN staff"], ["Updates on/off", "Stop"]]
+MENU = [["Link my Farmer ID", "I am OAN staff"], ["Updates on/off", "Stop updates"]]
 
 
 def test_start_language_notice_and_menu(tg, new_chat):
@@ -15,7 +15,7 @@ def test_start_language_notice_and_menu(tg, new_chat):
     assert hello["text"] == "Welcome to OpenAgriNet. Please choose your language."
     assert hello["buttons"] == [["English", "አማርኛ"]]
     notice = tg.say(tid, "English")[0]
-    assert notice["text"].startswith("Before we start: what the bot keeps")
+    assert notice["text"].startswith("Before we start: your privacy")
     assert "90 days" in notice["text"]
     assert notice["buttons"] == MENU
     # Sent through OAN Messaging: plain text, no link previews, reply buttons.
@@ -31,8 +31,8 @@ def test_amharic_choice_uses_the_amharic_texts(tg, new_chat):
     tid = new_chat()
     tg.say(tid, "/start")
     notice = tg.say(tid, "አማርኛ")[0]
-    # The Amharic texts are placeholders until the translation is in (release gate).
-    assert notice["text"].startswith("[am] onboarding.privacy_notice")
+    # The privacy notice has its owner-supplied Amharic text.
+    assert notice["text"].startswith("ከመጀመራችን በፊት፡ ስለ ግላዊነትዎ")
 
 
 def test_webhook_needs_the_secret_at_the_gateway_and_in_bot_services():

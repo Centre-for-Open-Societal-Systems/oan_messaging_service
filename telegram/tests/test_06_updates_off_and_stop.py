@@ -27,7 +27,7 @@ def test_updates_off_on_and_stop(tg, stubs, bot, new_chat):
     link_farmer(tg, stubs, b, "FR-TEST-0014")
 
     assert tg.say(a, "Updates on/off")[0]["text"].startswith("Updates are off.")
-    stop = tg.say(b, "Stop")[0]
+    stop = tg.say(b, "Stop updates")[0]
     assert stop["text"].startswith("You will get no more updates here.")
     assert "90 days" in stop["text"]
     assert stop["reply_markup"] == {"remove_keyboard": True}

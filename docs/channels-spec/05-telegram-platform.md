@@ -60,7 +60,7 @@ passes the update to OAN Bot Services instead (TG-38).
 | Source addresses | The gateway accepts only Telegram's webhook ranges (`149.154.160.0/20`, `91.108.4.0/22`); defence in depth, because the ranges can change |
 | TLS | Public certificate, TLS 1.2 or later, port 443 |
 | Limits | Body at most 64 KB (checked by OAN Bot Services); rate limit per source and a short timeout at the gateway; webhook `max_connections` about 20 |
-| What is kept | Only `message` updates from **private** chats. The update's minimal fields are stored sealed **before** the 200 answer. A repeated `update_id` answers 200 and changes nothing; only the `update_id` is kept, for 7 days (`oan_bot_services/telegram.py`) |
+| What is kept | Only `message` updates from **private** chats. The update's minimal fields are stored sealed **before** the 200 answer. A repeated `update_id` answers 200 and changes nothing; only the `update_id` is kept, for 30 days (privacy notice, 25 November 2026) (`oan_bot_services/telegram.py`) |
 | Secrets | Bot token only in OAN Messaging's Kubernetes Secret. Webhook secret in a Kubernetes Secret, set on the gateway and in `OAN_BOT_TELEGRAM_WEBHOOK_SECRET`. One rotation runbook updates the gateway, OAN Bot Services and `setWebhook` together |
 | Monitoring | Gateway counts of rejected calls (alert on spikes); scheduled `getWebhookInfo` (`last_error_message`, `pending_update_count`) |
 
@@ -85,7 +85,7 @@ passes the update to OAN Bot Services instead (TG-38).
   | Farmer link: Farmer ID, registry area, fingerprint of the registered phone, alternate number sealed | Until a new link, or 90 days after Stop, a block or a deleted chat |
   | Subscription: chat id, state (active, stopped, unreachable), updates on or off | Same as the link |
   | A received update (sealed) | Until handled |
-  | `update_id` | 7 days |
+  | `update_id` | 30 days |
   | A broadcast's recipients and statuses; the chat id only until OAN Messaging has the copy; the text only until every copy is handed over | 30 days after the broadcast finishes |
 
   No chat history is kept. A code the farmer types lives only in that sealed update until
