@@ -4,7 +4,7 @@
 
 Channel broadcasts need no bot code: DA Communications Officers post to official
 read-only Telegram channels. Broadcasts from the DA web app, to the linked farmers or the
-Development Agents of a zone, woreda or kebele, go through the bot (§6.8). A bot cannot
+Development Agents of a region, zone, woreda or kebele, go through the bot (§6.8). A bot cannot
 send the first message, so a **welcome SMS** and printed materials bring farmers to it.
 
 **Steps**
@@ -15,9 +15,9 @@ send the first message, so a **welcome SMS** and printed materials bring farmers
    Updates".
 3. Posting rights go to the DA Communications Officer for each area; the list comes from
    the DA backend roster, and channel admins change when it changes.
-4. Generate QR codes and short links for each channel and for the bot. Bot links carry a
-   start code: `t.me/<bot>?start=k_<kebele code>` pre-selects the kebele;
-   `?start=src_<code>` records where the farmer came from (counted by source only).
+4. Generate QR codes and short links for each channel and for the bot. In this release
+   the bot ignores start codes (`?start=k_…`, `?start=src_…`), so one plain bot link is
+   enough.
 5. Development Agents share the links at Farmer Training Centres and kebele meetings.
 6. **Welcome SMS.** Every registered farmer with a phone receives one SMS announcing
    OpenAgriNet with the bot link, for example "OpenAgriNet ተጀምሯል። ዝማኔዎችን፣ ዋጋዎችን
@@ -26,21 +26,23 @@ send the first message, so a **welcome SMS** and printed materials bring farmers
    The link is the same for everyone (no personal token). It is sent from the DA web
    app's Broadcast screen, woreda by woreda over about two weeks, as SMS purpose
    `broadcast`, so it waits for the SMS-03 fix (§8.2).
-7. Main menu has "Official updates", which opens the most local channel for the
-   farmer's kebele: woreda, else zone, else region.
+7. Deferred: an "Official updates" button that opens the most local channel. In this
+   release the channel links are shared directly.
 
-**On `/start`:** language, privacy notice, then **"Link your Farmer ID"** with Link now /
-Later (§6.6). Link now: the OTP steps, after which the kebele comes from the registry.
-Later, or no registry kebele: location menus (with a `k_` code, "Is your kebele X?" with
-Yes / Choose another kebele). Linked farmers receive their area's broadcasts unless they
-turn updates off in Main menu (§6.8); farmers who chose Later are offered linking again
-from Main menu and when a broadcast would have reached them.
+**On `/start`:** language, privacy notice, then the main menu: **Link my Farmer ID**, **I
+am OAN staff**, **Updates on/off**, **Stop updates** (§5.4). There are no location menus:
+a linked farmer's area comes from the registry (§6.6). Linked farmers receive their
+area's broadcasts unless they turn updates off; a farmer who has not linked receives
+nothing on Telegram.
 
-**Acceptance:** the welcome SMS fits one part in English and in Amharic; a kebele QR code
-reaches Main menu with that kebele set, after the notice and Later, in two taps; only the area's Communications Officer can post; Official updates
-opens the most local existing channel.
+**Acceptance:** the welcome SMS fits one part in English and in Amharic; `/start` reaches
+the main menu after the language and the notice; only the area's Communications Officer
+can post in a channel.
 
 ## 6.2 MOD-01: Market prices
+
+> **Deferred, not supported in this release** (TG-36). Kept as the design for a later
+> release; nothing in this section is built or tested now.
 
 A farmer reaches today's price for one commodity at nearby markets in three taps, served
 from the Marketplace backend (prices from NMIS).
@@ -68,6 +70,9 @@ source date; no personal data goes to the Marketplace backend.
 fallback message within 6 seconds and Main menu still works.
 
 ## 6.3 MOD-03 and MOD-04: Development Agent handover and pest escalation
+
+> **Deferred, not supported in this release** (TG-36). Kept as the design for a later
+> release; nothing in this section is built or tested now.
 
 The farmer sends a question with photos or a voice note; OAN Bot Services passes it to a
 Development Agent for the farmer's kebele and relays the reply. Pest and disease cases
@@ -146,6 +151,9 @@ A daily job deletes closed questions 90 days after closing (default). Migrations
 Helm pre-upgrade job.
 
 ## 6.4 Kebele routing
+
+> **Deferred, not supported in this release** (TG-36). Kept as the design for a later
+> release; nothing in this section is built or tested now.
 
 How a farmer's question reaches a Development Agent in the farmer's kebele, what happens
 when nobody answers, and what the bot needs from the DA backend. Grievance routing is
@@ -454,43 +462,33 @@ Tested against the DA backend stub, with a fake clock and a test working calenda
 
 ## 6.5 Linking Development Agents and officers
 
+Linking a staff member's chat lets DA broadcasts reach them on Telegram (§6.8.1).
+
 1. In the DA app the person opens "Link Telegram"; the DA backend issues a one-time code
-   (8 characters, valid 15 minutes, tied to their ref). This covers Development Agents
-   and Supervisors (Woreda Officers). Executives receive the weekly report by email
-   (§6.4.4) and do not need to link. Communications Officers send from the DA web app
-   (§6.8) and do not need to link.
-2. The person opens the bot and sends the code; OAN Bot Services calls R2, and the DA
-   backend stores the chat as their delivery address.
-3. A new phone or account repeats this; the new chat replaces the old. Someone who leaves
-   or moves drops out of the roster and their open questions move at the next sweep
-   (§6.4.2).
-4. After linking, Bot Services adds the contact to the RapidPro group `staff`, so their
-   messages go through the staff flow (§5.8).
-5. A wrong or expired code is refused kindly; 5 failures in an hour lock linking for that
+   (8 characters, valid 15 minutes, tied to their ref). Communications Officers send from
+   the DA web app (§6.8) and do not need to link.
+2. The person opens the bot, taps **I am OAN staff** and types the code. OAN Bot Services
+   calls R2, and the DA backend stores the chat as their delivery address.
+3. A new phone or account repeats this; the new chat replaces the old.
+4. A wrong or expired code is refused kindly; too many wrong codes lock linking for that
    chat for an hour (the lockout stays in the bot).
+5. **Stop** (TG-44): work messages stay on; the bot replies that their supervisor or the
+   DA app can unlink the account. The DA backend contract does not change.
 6. A person who blocks the bot or deletes the chat is reported through R3.
 
-**Option B** (later): the DA app inbox, with "Post question" (`handover_id`,
-`contact_ref`, kebele, topic, text, media links, language → message id) behind the same
-delivery port.
-
-**Acceptance:** a question with 2 photos and a voice note reaches the right agent and the
-farmer is acknowledged within 5 seconds; the reply reaches the farmer with the question
-number; no phone number or chat id is sent to either side; "Sent to Crop Specialist"
-tells the farmer once.
+**Acceptance:** a valid code links the chat and the bot names the role; a wrong code is
+refused; Stop from a staff chat leaves work messages on and says who can unlink.
 
 ## 6.6 MOD-08: Farmer linking (OTP to the registered phone)
 
-Linking tells the bot which registered farmer it is talking to. It is offered during
-onboarding, right after the privacy notice (§6.1), and from Main menu. Menus, prices and
-questions work without it; **broadcasts on Telegram (§6.8)** and MOD-06/07 need it. It is
-built in the first Telegram release, with broadcasts (§8.1).
+Linking tells the bot which registered farmer it is talking to. It is offered in the main
+menu (**Link my Farmer ID**). **Broadcasts on Telegram (§6.8)** need it, and MOD-06/07
+later. It is built in this release, with broadcasts (§8.1).
 
 ![Farmer linking](diagrams/t4-farmer-linking.png)
 
 **Steps**
-1. The farmer chooses Link now at onboarding (or Main menu › Link my Farmer ID) and types
-   their Farmer ID.
+1. The farmer taps Link my Farmer ID and types their Farmer ID.
 2. The farmer taps Share my phone number (Telegram's contact button). OAN Bot Services
    accepts it only if the shared contact's user id equals the sender's.
 3. OAN Bot Services gets the registered phone and the registered **kebele code** for the
@@ -500,33 +498,33 @@ built in the first Telegram release, with broadcasts (§8.1).
    Auth sends it through OAN Messaging as its own OTP caller. The bot shows only the last
    two digits of the number.
 5. The farmer types the code; OAN Bot Services asks Auth to verify it.
-6. On success OAN Bot Services stores the link (contact, Farmer ID, linked phone, a
-   fingerprint of the registered phone, registered kebele code, time) and sets only
-   `linked = yes` on the RapidPro contact, and creates the subscription row with updates
-   on (§6.8.1). If the registered kebele differs from one the farmer chose earlier, the
-   bot asks which one to send questions to (§6.4.1); broadcasts always use the registry
-   kebele.
+6. On success OAN Bot Services stores the link (contact, Farmer ID, a fingerprint of the
+   registered phone, the registry area codes, time) and creates the subscription row with
+   updates on (§6.8.1). Broadcasts always use the registry area.
    * **Same number:** the Telegram number equals the registered phone.
    * **Alternate number:** the Telegram number differs; the OTP to the registered phone
      approves it. It is used only for Telegram-specific updates, never written to the
      registry, never given to SMS senders and never logged.
-7. **Unlink:** Stop, Main menu › Unlink, or a new link from another Telegram account
-   removes the old link. If the registered phone changes, the link must be approved
-   again.
+7. **Stop** turns updates off; the link is deleted 90 days later unless updates are
+   turned on again (§5.4). A new link from another Telegram account replaces the old one.
+   If the registered phone changes, the link must be approved again.
 
 | Call | Inputs and outputs |
 |---|---|
-| Beneficiary API: registered phone, kebele and name | Farmer ID → phone, Master Data kebele code and registered name, or not found (new lookup). The name is read again when a question is delivered (RP-D4) and is not stored in Bot Services. |
+| Beneficiary API: registered phone and area | Farmer ID → phone and Master Data area codes, or not found (new lookup) |
 | Auth: issue linking OTP | Farmer ID, registered phone, link request id → sent, or rate-limited (new service-client route) |
 | Auth: verify linking OTP | link request id, code → valid, invalid or expired |
 
 **Acceptance:** the OTP always goes to the registered phone; someone else's contact is
 refused; 5 wrong codes in an hour lock linking for an hour; OTP expiry is set by Auth
 (at most 30 minutes); the alternate number never reaches the registry, SMS senders or
-logs; linking makes no call to OAN Messaging (Auth sends the OTP). The code the farmer types is a message, so
-it sits in RapidPro's history under RP-D1 retention; it is single-use and short-lived.
+logs; linking makes no call to OAN Messaging (Auth sends the OTP). The code the farmer
+types lives only in the sealed update until it is handled, and is never logged.
 
 ## 6.7 MOD-06 and MOD-07: Verified status checks (deferred)
+
+> **Deferred, not supported in this release** (TG-36). Kept as the design for a later
+> release; nothing in this section is built or tested now.
 
 Do not build in Phase 1; reserve the menu slot and the adapter interface. Verification
 is decided (TG-30): linked Farmer ID only.
@@ -543,16 +541,13 @@ is decided (TG-30): linked Farmer ID only.
 The **DA web app** is the design: its Broadcast screen (`oan_da_app_ui`, `/broadcast`,
 FR-10) and its Knowledge Base "Send to farmers" (FR-11). Senders write, choose the area,
 recipients and channels there; the bot only delivers the Telegram copy, as OAN Messaging
-delivers the SMS copy. Nobody uses RapidPro screens to send. Bot Services adds no rule the
-app does not have; a change to the app's behaviour is a decision for the DA team and ATI,
+delivers the SMS copy. Bot Services adds no rule the app does not have; a change to the app's behaviour is a decision for the DA team and ATI,
 not for this specification.
 
 | Sender (role in the DA app) | Recipients | Area |
 |---|---|---|
-| Communications Officer, OAN Administrator | All farmers | A whole region, zone or woreda |
-| Communications Officer, OAN Administrator | All Development Agents | Within their grant (none = national desk) |
-| Supervisor or Executive with the DA role | All Development Agents | Their own woreda |
-| Development Agent | All Development Agents | Their own kebele |
+| Communications Officer, OAN Administrator | All farmers | A whole region, zone or woreda the sender may read (region allowed, TG-42) |
+| Anyone with DA Broadcast `create` (Communications Officer, Development Agent, OAN Administrator) | All Development Agents | An area the sender may read, under the DA backend's own rule since `656985b` |
 | Knowledge Base "Send to farmers" | Farmers | One woreda; English or Amharic (not wired yet) |
 
 Farmer broadcasts belong to the Communications Officer (the FSD; checked with the user 20
@@ -566,24 +561,24 @@ or PNG up to 5 MB each), the channels ticked (In-app, SMS, Telegram) and the app
 `client_op_id`. There is no approval step and no priority field.
 
 **Language.** The message is sent **as written**, in one language, to every recipient,
-and the SMS copy is the same text. A text per language (each farmer in their own) is a
-later enhancement that needs DA app changes; it is not built in Phase 1.
+and the SMS copy is the same text (TG-46). It is not translated; the farmer's chosen bot
+language applies to the bot's own texts only. A text per language is a later enhancement
+that needs DA app changes.
 
 ### 6.8.1 Who receives it
 
-* **Farmers: linked farmers only** (§6.6), on their **registry kebele code**, whose updates
-  are on. A farmer who has not linked gets no broadcasts on Telegram; the bot invites them
-  to link. Nobody is asked about updates at onboarding: the privacy notice says that
-  linked farmers receive official updates for their area, and "Updates on/off" in Main
-  menu turns them off and on again.
-* Bot Services keeps one subscription row per linked farmer: RapidPro contact UUID,
-  `contact_ref`, Farmer ID, registry kebele, woreda and zone codes, language, updates on
-  or off, and the Telegram chat id (needed to send the broadcast copy through OAN Messaging;
-never logged). No name or phone. The row lives as long as the link: Stop, unlinking or
-  a deleted Telegram account removes it at once, and 12 months without any activity
-  (configurable) removes the row and the link.
-* **Development Agents:** the roster (R1) of the kebele, or of every kebele in the woreda or
-  zone: active and linked agents, minus the sender, each in their chosen bot language.
+* **Farmers: linked farmers only** (§6.6), by their **registry area**, whose updates are on
+  and whose subscription is active. A farmer who has not linked gets no broadcasts on
+  Telegram. The privacy notice says that linked farmers receive official updates for their
+  area; **Updates on/off** turns them off and on again.
+* Bot Services keeps one subscription row per linked farmer: `contact_ref`, Farmer ID,
+  registry region, zone, woreda and kebele codes, language, updates on or off, state
+  (`active`, `stopped`, `unreachable`) and the Telegram chat id (needed to send the copy
+  through OAN Messaging; never logged). No name or phone. There is **no inactivity
+  expiry**: the row stays while the chat is reachable, and a stopped, blocked or deleted
+  chat is deleted 90 days after it stopped (TG-40).
+* **Development Agents:** the roster (R1) of every kebele in the area: active and linked
+  agents, minus the sender.
 
 ### 6.8.2 `POST /broadcasts`
 
@@ -595,7 +590,7 @@ both channels.
 |---|---|
 | `Idempotency-Key` (header) | The app's `client_op_id`. First request `202`; the same key and body returns the original (`200`); the same key with a different body is `409 idempotency_conflict`. Bindings kept at least 30 days; compared by keyed HMAC fingerprint |
 | `recipients` | `farmers` or `das` |
-| `scope` | `{level: zone, woreda or kebele, code}` (Master Data codes) |
+| `scope` | `{level: region, zone, woreda or kebele, code}` (Master Data codes) |
 | `sender_ref`, `sender_role` | The DA web app has already checked the role and area; Bot Services records both in the audit |
 | `source` | `Knowledge`, `Emergency`, `Weather` or `Informational` |
 | `source_reference` | Names the business event (for example `da_broadcast:BC-2210`); never personal data |
@@ -607,28 +602,29 @@ both channels.
   Agents not linked to the bot).
 * `GET /broadcasts/{id}`: counts per status, with OAN Messaging's names: `accepted`,
   `sending`, `sent`, `failed`, `expired`, `unknown`. Telegram gives no delivery receipt,
-  so a successful send ends at `sent`; the app's "delivered" count shows `sent`.
-* `GET /broadcasts/{id}/telegram-recipients`: the Farmer IDs whose Telegram copy is `sent`,
-  for the SMS step below. Available once the broadcast is finished or after
-  `sms_fallback_wait` (configuration, default 15 minutes), whichever is first.
+  so a successful send ends at `sent` (TG-46); there is no "delivered" or "read" for
+  Telegram. A copy no longer eligible when its turn comes is `failed` (`not_eligible`); one
+  cancelled in OAN Messaging is `failed` (`cancelled`).
+* `GET /broadcasts/{id}/telegram-recipients`: the Farmer IDs whose Telegram copy is `sent`.
+  Still served, but the DA kit no longer uses it (§6.8.3).
 * Errors are `application/problem+json` with OAN Messaging's `code` values
   (`unauthenticated`, `forbidden`, `not_found`, `validation_failed` with `errors[{field,
   code}]`, `idempotency_conflict`, `payload_too_large`, `unsupported_media_type`,
   `service_unavailable`). No `429`; unknown fields are rejected; submitted values are
   never echoed.
 
-### 6.8.3 SMS copy: Telegram first
+### 6.8.3 SMS copy: sent independently
 
-When both channels are ticked, the DA backend sends the Telegram copy first, then the SMS
-copy through OAN Messaging to every registered farmer of the area with a phone **except**
-the Farmer IDs returned by `telegram-recipients`. The farmers of the area, with their
-registered phones, come from the farmer registry's **beneficiary API** by Master Data area
-code (`GET /api/v1/farmers?level=&code=`, cursor paging; ID-01 and ID-04, and the kit's
-`docs/BENEFICIARY-API-REQUIREMENTS.md`). The SMS copy is the message as written and may take
-up to 3 SMS parts (SMS-09); the app warns when it turns multi-part. A farmer whose Telegram copy failed,
-expired, is `unknown` or is still pending after `sms_fallback_wait` gets the SMS. This is
-the app's own wording: "farmers without connectivity receive it by SMS". Development
-Agents in `not_on_telegram` get the SMS copy the same way.
+Decided 24 November 2026 (TG-45); this replaces "Telegram first". When both channels are
+ticked, the DA backend submits the SMS copy and the Telegram copy **independently**, each
+in its own background job. The SMS goes at once and neither waits for the other. Every
+registered farmer of the area with a phone gets the SMS, and every Development Agent of
+the area (minus the sender); someone on both channels may get both copies.
+
+The farmers of the area, with their registered phones, come from the farmer registry's
+**beneficiary API** by Master Data area code (`GET /api/v1/farmers?level=&code=`, cursor
+paging; ID-01 and ID-04, and the kit's `docs/BENEFICIARY-API-REQUIREMENTS.md`). The SMS
+copy is the message as written and may take up to 3 SMS parts (SMS-09).
 
 SMS purpose (§3.1): `Emergency` and `Weather` go as `alert`; `Knowledge` and
 `Informational` as `broadcast` (SMS-03 revised, §8.2). The DA backend's caller is allowed
@@ -641,34 +637,38 @@ both.
   as its own OAN caller, with the recipient's chat id (from the subscription row, or from
   R1 for Development Agents), the text (TG-34), `expires_at` from the request, a
   `source_reference` naming the broadcast (never personal data) and one idempotency key per
-  recipient, so a retry is never a second message. Broadcasts do not pass through RapidPro,
-  so they never disturb a flow the farmer is in.
+  recipient, so a retry is never a second message.
+* **Re-check and cancel** (TG-41): just before handing each copy to OAN Messaging, Bot
+  Services checks again that the farmer's updates are on and the subscription is active;
+  if not, the copy is `failed` (`not_eligible`) and is not sent. When a farmer turns
+  updates off or stops, copies still waiting in OAN Messaging are cancelled
+  (`POST /api/v1/messages/{id}/cancel`). A copy a worker has already taken is not recalled.
 * Purpose as for the SMS copy (SMS-06): `Emergency` and `Weather` go as `alert`,
   `Knowledge` and `Informational` as `broadcast`, so an `Emergency` broadcast goes ahead of
-  other broadcasts. Conversation replies go out through RapidPro, outside OAN Messaging's
-  queue, so a broadcast never holds them up.
+  other broadcasts. The bot's replies go through OAN Messaging too, as `transactional`,
+  and are claimed before waiting broadcasts, so a broadcast never holds them up.
 * Bot Services submits recipients interleaved across woredas (TG-35), so a zone sent as
   many woredas makes progress in every woreda.
-* Pace: OAN Messaging's Telegram limit, **default 20 a second** (TG-08), never above
-  Telegram's 30 for the bot, leaving the rest for RapidPro's replies. The SMS copy is paced
-  by OAN Messaging's SMS limit.
+* Pace: OAN Messaging's one bot-wide Telegram limit, **default 20 a second** (TG-08), for
+  replies and broadcasts together, under Telegram's 30 for the bot; `retry_after` is
+  honoured. The SMS copy is paced by OAN Messaging's SMS limit.
 * OAN Messaging's rules apply unchanged (§3): `expires_at` is checked before every send
   (recipients not reached are `expired` and get the SMS copy); an attempt whose outcome
-  cannot be proven is `unknown`, **never resent**, and counts as not delivered for the SMS
-  copy; temporary errors (429 with `retry_after`, network before the request left) are
+  cannot be proven is `unknown` and **never resent**; temporary errors (429 with `retry_after`, network before the request left) are
   retried, then `failed`.
 * Bot Services reads each message's status from OAN Messaging to build the counts of
-  `GET /broadcasts/{id}` and the `telegram-recipients` list (TG-20). A farmer who blocked
+  `GET /broadcasts/{id}` (TG-20). A farmer who blocked
   the bot or deleted their account comes back as `failed` with that reason: Bot Services
   marks the subscription so later broadcasts skip them, and never retries (TG-09).
 * Link previews off for farmers (OAN Messaging's Telegram adapter sets this).
 
 **Acceptance:** a broadcast with Telegram ticked reaches the linked farmers (or the
-Development Agents) of that zone, woreda or kebele, and nobody else; an unlinked farmer of
-the area gets nothing on Telegram; a repeat `Idempotency-Key` sends nothing twice and
-returns `200`; `GET /broadcasts/{id}` shows the counts the app's history shows; the SMS
-copy skips exactly the farmers in `telegram-recipients` and reaches those whose Telegram
-copy failed, expired or stayed pending; an expired broadcast stops sending; an `unknown`
-send is never repeated; an Emergency broadcast overtakes a running Informational one;
-replies to farmers stay under 5 seconds during a running broadcast; a Development Agent
-broadcast skips the sender and returns agents not on Telegram.
+Development Agents) of that region, zone, woreda or kebele whose updates are on, and
+nobody else; an unlinked farmer of the area gets nothing on Telegram; a repeat
+`Idempotency-Key` sends nothing twice and returns `200`; `GET /broadcasts/{id}` shows the
+counts the app's history shows, ending at `sent`; the SMS copy goes at once to every
+farmer of the area with a phone, whatever happens on Telegram; a farmer who turns updates
+off during a broadcast gets no further copy; an expired broadcast stops sending; an
+`unknown` send is never repeated; an Emergency broadcast overtakes a running
+Informational one; bot replies stay under 5 seconds during a running broadcast; a
+Development Agent broadcast skips the sender and returns agents not on Telegram.

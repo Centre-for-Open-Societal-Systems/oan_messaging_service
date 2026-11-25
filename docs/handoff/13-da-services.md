@@ -85,8 +85,9 @@ installed next to `da_services`, plus one UI patch, and changes nothing in `da_s
 
 * All farmers of a region, zone or woreda (Communications Officer and Admin only), and the
   agents of an area as today.
-* Telegram first through Bot Services, then the SMS copy through the connector to everyone
-  not reached on Telegram. Farmers come from the farmer registry's beneficiary API, whose
+* SMS and Telegram sent independently (TG-45, 24 November 2026): the Telegram copy through
+  Bot Services, and the SMS copy through the connector to every farmer and agent of the
+  area, without waiting for Telegram. A farmer on both may get both. Farmers come from the farmer registry's beneficiary API, whose
   required routes are in the kit's `docs/BENEFICIARY-API-REQUIREMENTS.md`.
 * SMS of up to 3 parts (OAN Messaging 3.1.0); purposes `alert` (Emergency, Weather) and
   `broadcast` (Knowledge, Informational). Caller `da` needs both.

@@ -5,7 +5,7 @@ info:
   description: |
     Two runtimes (`OAN_BOT_RAPIDPRO_ENABLED`). Each path says which one mounts it
     (`x-runtime`): `rapidpro` paths only when the switch is true; `webhook` paths only when
-    it is false (the default: broadcast-only Telegram without RapidPro); paths without
+    it is false (the default: Telegram broadcasts plus sign-up without RapidPro); paths without
     `x-runtime` in both.
 
     Channels Specification v2.0 §5.8. RapidPro flows call these routes through webhook

@@ -650,7 +650,9 @@ def status(name: str) -> dict:
 			"recipients": int(doc.telegram_recipients or 0),
 			"not_on_telegram": len(json.loads(doc.not_on_telegram or "[]")),
 			"finished": bool(doc.telegram_finished),
-			"failed": bool(doc.telegram_failed),
+			# Whether the Telegram broadcast could not be sent at all. Named apart from the
+			# copy counts below, whose "failed" is the number of copies that failed.
+			"send_failed": bool(doc.telegram_failed),
 			"error": doc.telegram_error,
 			**json.loads(doc.telegram_counts or "{}"),
 		}

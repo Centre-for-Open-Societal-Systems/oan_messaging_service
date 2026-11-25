@@ -78,7 +78,7 @@ def test_webhook_secret_is_required_without_rapidpro(reduced_env: None,
 def test_defaults_of_the_reduced_runtime(reduced_env: None) -> None:
     s = BotSettings()
     assert (s.stopped_retention_days, s.update_id_days, s.conversation_minutes,
-            s.reply_minutes) == (90, 7, 30, 30)
+            s.reply_minutes) == (90, 30, 30, 30)
     assert s.text_keys_file.endswith("telegram/contracts/text-keys.yaml")
     assert WEBHOOK_SECRET in s.secrets()
 

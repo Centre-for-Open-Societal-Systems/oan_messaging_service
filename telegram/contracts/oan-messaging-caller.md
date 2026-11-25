@@ -1,24 +1,40 @@
 # Bot Services as an OAN Messaging Telegram caller
 
-SMS-02 revised (23 November 2026): the Telegram copy of each area broadcast is sent by OAN
-Messaging. Bot Services chooses the recipients and submits one message per recipient. The
-DA-facing `POST /broadcasts` contract does not change.
+SMS-02 revised (23 and 24 November 2026): OAN Messaging sends **every** Telegram message
+of the bot. Bot Services submits the bot's replies, with reply buttons (TG-37), and one
+message per recipient of each area broadcast. The DA-facing `POST /broadcasts` contract
+does not change. OAN Messaging contract **3.4.0** (`docs/openapi.yaml`).
 
-## Caller registration (OAN operator, done by the stack's init script)
+## Caller registration (OAN operator; in the local stack, its init script)
 
 ```
 python -m oan_messaging.runtime caller --caller bot-services --channels telegram \
-    --purposes alert,broadcast --bot oan
+    --purposes transactional,alert,broadcast --bot oan
 python -m oan_messaging.runtime issue-credential --caller bot-services
 ```
 
 The worker reads the bot token from `OAN_MSG_TELEGRAM_BOT_TOKEN__OAN` (a Kubernetes Secret
-in clusters; generated on the machine in the stack). Courier holds the same token in its
-channel configuration. One rotation runbook updates both places (§5.3).
+in clusters; generated on the machine in the stack). OAN Messaging is the only place the
+token is kept; Bot Services never holds it.
 
-## One message
+Broadcast copies need the Telegram-only switch, `OAN_MSG_TELEGRAM_BROADCAST_ENABLED`
+(Helm `workerTelegram.broadcastEnabled`, default off). It is set only on the api and
+`worker-telegram` pods; SMS broadcasts keep their own switch.
 
-`POST /api/v1/messages/telegram` with `Authorization: Bearer <bot-services token>`:
+## Bot replies
+
+`POST /api/v1/messages/telegram`, purpose `transactional`, with the text of a text key and
+optional `reply_markup` (a keyboard of 1-4 rows of 1-3 buttons, each 1-30 UTF-16 units,
+optional `request_contact`, `one_time` and `resize`; or `remove_keyboard`). Source
+reference `bot:<contact_ref>:<n>`; the idempotency key is stored before the call. A reply
+not handed over within 30 minutes is dropped. OAN Messaging claims replies before waiting
+broadcasts, at one bot-wide pace (`OAN_MSG_TELEGRAM_RATE_PER_SECOND`, default 20).
+
+## Broadcast copies
+
+
+`POST /api/v1/messages/telegram` with `Authorization: Bearer <bot-services token>`, one
+per recipient:
 
 | Field | Value |
 |---|---|
@@ -35,38 +51,42 @@ Bot Services submits round-robin across the woredas of the broadcast: one recipi
 woreda A, one from B, and so on. OAN Messaging sends oldest first within a purpose, so
 every woreda makes progress.
 
+## Re-check and cancel (TG-41)
+
+* Just before each copy is submitted, Bot Services re-checks the recipient (still linked,
+  updates on, reachable). A copy no longer eligible is `failed` with `not_eligible`.
+* When a farmer turns updates off or stops, Bot Services calls
+  `POST /api/v1/messages/{id}/cancel` for copies OAN Messaging still holds as `accepted`.
+  `200` (`failed`, `cancelled`) is counted `failed` with `cancelled`. `409
+  not_cancellable` means a worker already took it; it may still arrive, and polling records
+  the result. An outage leaves the mark, and the next tick retries.
+
 ## Reading results
 
 Bot Services polls `GET /api/v1/messages/{id}` for recipients not yet final, at most once
-every 10 seconds per broadcast, in pages. Status names are passed through unchanged to
-`GET /broadcasts/{id}` counts.
+every 10 seconds per broadcast, in pages. A Telegram copy ends at `sent`; there is no
+"delivered" (TG-46).
 
 | OAN result | Bot Services does |
 |---|---|
-| `sent` | Counted `sent`; the Farmer ID goes into `telegram-recipients` |
-| `failed`, failure code `recipient_blocked_bot` or `chat_not_found` (the adapter maps "blocked by the user", "kicked", "deactivated", "chat not found") | Counted `failed`; subscription marked `unreachable`, so later broadcasts skip it; for staff, R3 is called (TG-09) |
-| `failed`, other reason | Counted `failed` |
-| `expired` | Counted `expired`; gets the SMS copy |
-| `unknown` | Counted `unknown`; never resent; gets the SMS copy |
+| `sent` | Counted `sent` |
+| `failed`, failure code `recipient_blocked_bot` or `chat_not_found` | Counted `failed`; subscription marked `unreachable`, so later broadcasts skip it; for staff, R3 is called (TG-09) |
+| `failed`, other reason (including `cancelled`) | Counted `failed` |
+| `expired` | Counted `expired` |
+| `unknown` | Counted `unknown`; never resent |
 
-The failure codes come from `FailureCode` in OAN Messaging (`oan_messaging/adapters/telegram.py:425-444`).
-Bot Services maps them in one table, with a test per code; check the exact string values in
-`FailureCode` and in the message view the API returns.
+The SMS copy is sent by the DA backend independently and does not depend on these results
+(TG-45). `GET /broadcasts/{id}/telegram-recipients` is still served but no longer used by
+the DA kit. The mapping is `map_result` in `oan_bot_services/broadcasts.py`.
 
-## Small changes to OAN Messaging (worker 1b, nothing else in `oan_messaging/`)
+## What OAN Messaging provides for this caller (done)
 
-1. **Telegram pace from configuration.** Today it is fixed at 25 a second with 2 reserved
-   for OTP (`TELEGRAM_DEFAULT`, `worker/rate_limit.py:195`). Add
-   `OAN_MSG_TELEGRAM_RATE_PER_SECOND` (default **20**, TG-08; refuse above 30) and
-   `OAN_MSG_TELEGRAM_OTP_RESERVE` (default 0: there is no Telegram OTP caller). Add both to
-   Helm values.
-2. **Link previews off** on every Telegram send (`link_preview_options: {"is_disabled": true}`)
-   (§6.8.4). This is internal to the adapter; the API contract is unchanged.
-3. **Telegram API address from configuration**, `OAN_MSG_TELEGRAM_API_BASE_URL` (default
-   `https://api.telegram.org`, https only, as the adapter already checks), so other
-   environments can point it elsewhere if needed. The stack uses the default name.
-4. Tests for each change. Contract version stays **3.2.0**: no request, response or status
-   changes.
+* Telegram pace from configuration, `OAN_MSG_TELEGRAM_RATE_PER_SECOND` (default 20,
+  refused above 30), and `retry_after` honoured on 429.
+* Link previews off on every Telegram send.
+* Telegram API address from configuration, `OAN_MSG_TELEGRAM_API_BASE_URL` (https only).
+* Contract 3.4.0: `reply_markup`, the cancel route, the Telegram-only broadcast switch, and
+  replies claimed before broadcasts. All additive; SMS unchanged.
 
 ## SMS must not change (rule for every OAN Messaging change)
 
@@ -82,7 +102,7 @@ added next to SMS, never through it:
    `values-pilot.yaml` and every file in `ci/` must give the same output as before, except
    new objects that are off by default. Add a regression check for this.
 3. **SMS code paths untouched.** No change to the SMS adapter, batching, SMS pacing,
-   receipts, the connector or the API contract (3.2.0). The Telegram pace settings only
+   receipts, the connector or the SMS contract. The Telegram pace settings only
    change the Telegram limit.
 4. **Full existing suite passes unchanged.** No existing test is edited to make it pass. The only exception is chart tests that gain the new `channel` field (see Statistics below); they change no number.
    Approved during worker 1b (23 Nov 2026), each changing one value and no behaviour:

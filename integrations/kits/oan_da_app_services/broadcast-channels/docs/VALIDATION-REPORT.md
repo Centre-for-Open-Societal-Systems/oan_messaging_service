@@ -100,7 +100,7 @@ reached on Telegram).
 | Telegram not taken before `expires_at` | (not handled) | Telegram marked failed, so the broadcast can close |
 | Done | When the SMS pass ended | When every ticked channel is finished (SMS pass and retries over; Telegram finished or failed). A row lock lets exactly one job close it |
 | `sms_fallback_wait_minutes` | Setting, 15 | Retired and removed from the form; nothing reads it |
-| Status | `telegram.failed` flag, counts | Same, plus `telegram.error`. `sms.skipped_on_telegram` stays, always 0 |
+| Status | `telegram.failed` flag, counts | The flag is now `telegram.send_failed` (it shared the name `failed` with the copy count, which overwrote it); plus `telegram.error`. `sms.skipped_on_telegram` stays, always 0 |
 
 Unchanged: roles and area rules (region allowed for the Communications Officer and the OAN
 Administrator), `client_op_id` idempotency and the Bot Services `Idempotency-Key`, the

@@ -2,14 +2,15 @@
 #
 # Every farmer- and staff-facing string is keyed by these ids. With RapidPro (the old
 # runtime) they are flow translations and Bot Services returns keys and params. Without
-# RapidPro (broadcast-only Telegram) Bot Services itself renders the reply from this
+# RapidPro (Telegram broadcasts plus sign-up) Bot Services itself renders the reply from this
 # file (`en` or `am`, by the chat's chosen language) and sends it through OAN Messaging;
 # nothing else is ever sent as a reply. A contract test fails if Bot Services can emit a
 # key that is not in this file.
 #
-# `en` is draft wording for tests. `am` is a placeholder ("[am] ...") until the OAN Telegram
-# Bot copy and translation sheet is translated and reviewed by a native Amharic speaker
-# (§5.5). Buttons (`btn.*`) stay at most 30 characters.
+# `en` is draft wording for tests, except where noted. `am` is a placeholder ("[am] ...")
+# until the OAN Telegram Bot copy and translation sheet is translated and reviewed by a
+# native Amharic speaker (§5.5). The privacy notice and the Updates on/off and Stop updates
+# buttons carry the owner-supplied English and Amharic text (25 November 2026). Buttons (`btn.*`) stay at most 30 characters.
 #
 # params: names listed must be supplied; they are never a phone number, chat id or token.
 
@@ -23,8 +24,44 @@ common:
 onboarding:
   onboarding.choose_language: {en: "Welcome to OpenAgriNet. Please choose your language.", am: "[am] onboarding.choose_language"}
   onboarding.privacy_notice:
-    en: "Before we start: what the bot keeps and for how long. (Full text from the approved privacy notice, §5.4; states the configured retention of {retention_days} days and webhook log retention of {log_days} days.)"
-    am: "[am] onboarding.privacy_notice"
+    en: |-
+      Before we start: your privacy
+
+      The OpenAgriNet telegram bot is operated by the Agricultural Transformation Institute under the auspices of the Ministry of Agriculture. The bot shares official updates for your area.
+
+      Data that is stored
+      • Your chosen language and a coded reference for this chat.
+      • If you link your Farmer ID: your Farmer ID, your area from the farmer registry, and a coded check of your registered phone number. Your phone number itself is not stored here but is retrieved from your Farmer Profile record.
+      • Whether updates are on or off.
+      • For each update we send: who it went to and whether it was sent. We keep this data for 30 days.
+
+      Data that is not stored
+      We do not keep a history of this chat. Codes you type are used once and are not stored.
+
+      Duration of data storage
+      Messages you send are deleted once they are handled. Their reference numbers are kept for {log_days} days. If you press Stop updates, or block or delete this chat, your link and data are deleted after {retention_days} days. If you turn updates on again before then, we cannot guarantee that the previously shared content will remain available.
+
+      Options to change choices
+      You can turn updates off or on at any time with "Updates on/off". "Stop updates" ends all broadcasts and updates. We share your data only with OpenAgriNet services that need it to link you and send updates. In case of any further questions: call the Farmer Helpline (8028).
+    am: |-
+      ከመጀመራችን በፊት፡ ስለ ግላዊነትዎ
+
+      የOpenAgriNet የቴሌግራም ቦት (Telegram bot) የሚተዳደረው በግብርና ሚኒስቴር ስር በሚገኘው የግብርና ትራንስፎርሜሽን ኢንስቲትዩት (Agricultural Transformation Institute) ነው። ይህ ቦት ለእርስዎ አካባቢ የሚሆኑ ኦፊሴላዊ መረጃዎችን ያጋራል።
+
+      የሚቀመጡ መረጃዎች
+      • የመረጡት ቋንቋ እና ለዚህ ውይይት የተሰጠ ኮድ (coded reference)።
+      • የገበሬ መለያ ቁጥርዎን (Farmer ID) ካገናኙ፡ የገበሬ መለያ ቁጥርዎ፣ በገበሬዎች መዝገብ ውስጥ የተመዘገበው አካባቢዎ፣ እና የተመዘገበ የስልክ ቁጥርዎን የሚያረጋግጥ ኮድ። የስልክ ቁጥርዎ እራሱ እዚህ አይቀመጥም፤ ነገር ግን ከገበሬ መገለጫዎ (Farmer Profile) መዝገብ ውስጥ ይወሰዳል።
+      • መረጃዎችን (updates) የመቀበል አማራጭዎ (በስራ ላይ መሆኑ ወይም አለመሆኑ)።
+      • የምንልከው እያንዳንዱ መረጃ፡ ለማን እንደተላከ እና መላኩን የሚያረጋግጥ መረጃ። ይህንን መረጃ ለ30 ቀናት እናቆየዋለን።
+
+      የማይቀመጡ መረጃዎች
+      የዚህን ውይይት ታሪክ (history) አናስቀምጥም። የሚጽፏቸው ኮዶች ለአንድ ጊዜ ብቻ ጥቅም ላይ የሚውሉ ሲሆን፣ አይቀመጡም።
+
+      መረጃዎች የሚቆዩበት ጊዜ
+      የሚልኳቸው መልእክቶች ከተስተናገዱ በኋላ ይሰረዛሉ። የመልእክቶቹ መለያ ቁጥሮች (reference numbers) ግን ለ{log_days} ቀናት ይቀመጣሉ። "መረጃዎችን አቁም" (Stop updates) የሚለውን ከመረጡ፣ ወይም ይህንን ውይይት ከከለከሉ (block) ወይም ከሰረዙ፣ የእርስዎ ትስስር እና መረጃ ከ{retention_days} ቀናት በኋላ ይሰረዛሉ። ከዚያ ጊዜ በፊት መረጃዎችን እንደገና ማግኘት ከጀመሩ፣ ቀደም ሲል የተጋሩ ይዘቶች አሁንም እንደሚኖሩ ዋስትና ልንሰጥ አንችልም።
+
+      ምርጫዎችን የመቀየር አማራጮች
+      "መረጃዎችን አብራ/አጥፋ" (Updates on/off) የሚለውን በመጠቀም በማንኛውም ጊዜ መረጃዎችን ማብራት ወይም ማጥፋት ይችላሉ። "መረጃዎችን አቁም" (Stop updates) የሚለው አማራጭ ሁሉንም አይነት መረጃዎች እና መልእክቶች ያስቆማል። መረጃዎን የምናጋራው እርስዎን ለማገናኘት እና መረጃዎችን ለመላክ ለሚያስፈልጉ የOpenAgriNet አገልግሎቶች ብቻ ነው። ተጨማሪ ጥያቄዎች ካሉዎት፡ የገበሬዎች የእርዳታ መስመርን (Farmer Helpline) በስልክ ቁጥር 8028 ያግኙ።
     params: [retention_days, log_days]
   onboarding.link_offer: {en: "Link your Farmer ID to receive official updates for your area.", am: "[am] onboarding.link_offer"}
   onboarding.kebele_confirm: {en: "Is your kebele {kebele_name}?", am: "[am] onboarding.kebele_confirm", params: [kebele_name]}
@@ -88,7 +125,7 @@ buttons:
   btn.share_phone: {en: "Share my phone number", am: "[am] btn.share_phone"}
   btn.prices: {en: "Market prices", am: "[am] btn.prices"}
   btn.official_updates: {en: "Official updates", am: "[am] btn.official_updates"}
-  btn.updates_toggle: {en: "Updates on/off", am: "[am] btn.updates_toggle"}
+  btn.updates_toggle: {en: "Updates on/off", am: "መረጃዎችን አብራ/አጥፋ"}
   btn.link_farmer_id: {en: "Link my Farmer ID", am: "[am] btn.link_farmer_id"}
   btn.unlink: {en: "Unlink", am: "[am] btn.unlink"}
   btn.change_language: {en: "Change language", am: "[am] btn.change_language"}
@@ -96,7 +133,7 @@ buttons:
   btn.confirm_stop: {en: "Yes, delete", am: "[am] btn.confirm_stop"}
   btn.cancel: {en: "Cancel", am: "[am] btn.cancel"}
   btn.staff: {en: "I am OAN staff", am: "[am] btn.staff"}
-  btn.stop_updates: {en: "Stop", am: "[am] btn.stop_updates"}
+  btn.stop_updates: {en: "Stop updates", am: "መረጃዎችን አቁም"}
 
 roles:
   role.development_agent: {en: "Development Agent", am: "[am] role.development_agent"}
