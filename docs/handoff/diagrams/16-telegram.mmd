@@ -1,0 +1,13 @@
+%% Telegram through OAN (caller: OAN Bot Services)
+sequenceDiagram
+  autonumber
+  participant T as OAN Bot Services (caller bot-services)
+  participant OAN as OAN API and Telegram worker
+  participant B as Telegram Bot API
+  actor F as Farmer (has started the bot)
+  T->>OAN: POST /messages/telegram (chat_id, text, purpose, optional reply_markup)
+  OAN->>B: sendMessage via the bot (replies before broadcasts, one pace)
+  B->>F: message
+  T->>OAN: POST /messages/{id}/cancel (only while not yet claimed)
+  T->>OAN: GET /messages/{id}
+  OAN-->>T: sent = final (Telegram never reports delivered)

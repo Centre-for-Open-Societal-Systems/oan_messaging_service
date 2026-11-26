@@ -1,0 +1,639 @@
+---
+# Source: oan-messaging/templates/networkpolicy.yaml
+# API: ingress only from the configured peers (e.g. the gateway). Empty = none.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oan-msg-oan-messaging-api-ingress
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: oan-messaging
+      app.kubernetes.io/instance: oan-msg
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress: []
+
+---
+# Source: oan-messaging/templates/networkpolicy.yaml
+# Everything else in this release (worker, cleanup, migration, status check, statistics refresh): no ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oan-msg-oan-messaging-deny-ingress
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: internal
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app.kubernetes.io/instance, operator: In, values: ["oan-msg"]}
+      - {key: app.kubernetes.io/component, operator: In, values: [worker, cleanup, migration, status-check, stats]}
+  policyTypes: [Ingress]
+  ingress: []
+
+---
+# Source: oan-messaging/templates/api.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: oan-msg-oan-messaging-api
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oan-messaging
+      app.kubernetes.io/instance: oan-msg
+      app.kubernetes.io/component: api
+
+---
+# Source: oan-messaging/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oan-msg-oan-messaging
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: runtime
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+# The service never calls the Kubernetes API.
+automountServiceAccountToken: false
+
+---
+# Source: oan-messaging/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oan-msg-oan-messaging-config
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: config
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+data:
+  # Non-secret settings only. Credentials and keys come from existing Secrets.
+  OAN_MSG_CONTENT_KEY_CURRENT: "v1"
+  OAN_MSG_FINGERPRINT_KEY_CURRENT: "k1"
+  OAN_MSG_MAX_BODY_BYTES: "16384"
+  OAN_MSG_BROADCAST_ENABLED: "false"
+  OAN_MSG_BROADCAST_MAX_WAIT_SECONDS: "180"
+  OAN_MSG_SMS_RATE_PER_SECOND: "4"
+  OAN_MSG_SMS_OTP_RESERVE: "1"
+  OAN_MSG_SMS_BATCH_MAX_RECIPIENTS: "1"
+  OAN_MSG_STATS_REFRESH_SECONDS: "900"
+
+---
+# Source: oan-messaging/templates/api.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: oan-msg-oan-messaging-api
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+
+---
+# Source: oan-messaging/templates/api.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oan-msg-oan-messaging-api
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oan-messaging
+      app.kubernetes.io/instance: oan-msg
+      app.kubernetes.io/component: api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: oan-messaging-0.1.0-draft.2
+        app.kubernetes.io/name: oan-messaging
+        app.kubernetes.io/instance: oan-msg
+        app.kubernetes.io/component: api
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: oan-messaging
+      annotations:
+        checksum/config: d45513c2c892543f6a81b7eb74a823655d22ea0901bb3a16c2744dd54231ceed
+    spec:
+      serviceAccountName: oan-msg-oan-messaging
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          command:
+            - uvicorn
+            - --factory
+            - oan_messaging.runtime.api:create_app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --timeout-graceful-shutdown
+            - "20"
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: oan-msg-oan-messaging-config
+          env:
+            - name: OAN_MSG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-database
+                  key: runtime-url
+            - name: OAN_MSG_CONTENT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-core
+                  key: content-keys
+            - name: OAN_MSG_FINGERPRINT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-core
+                  key: fingerprint-keys
+            - name: OAN_MSG_CREDENTIAL_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-core
+                  key: credential-pepper
+            - name: OAN_MSG_DB_POOL_SIZE
+              value: "5"
+            - name: OAN_MSG_DB_MAX_OVERFLOW
+              value: "5"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          startupProbe:
+            failureThreshold: 30
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 2
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 20
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            privileged: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+
+---
+# Source: oan-messaging/templates/stats-refresh.yaml
+# Statistics refresh: one `stats-refresh` run per schedule rebuilds the snapshot behind
+# GET /api/v1/charts. A run that finds another in progress skips (database lock).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: oan-msg-oan-messaging-stats
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: stats
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        helm.sh/chart: oan-messaging-0.1.0-draft.2
+        app.kubernetes.io/name: oan-messaging
+        app.kubernetes.io/instance: oan-msg
+        app.kubernetes.io/component: stats
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: oan-messaging
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            helm.sh/chart: oan-messaging-0.1.0-draft.2
+            app.kubernetes.io/name: oan-messaging
+            app.kubernetes.io/instance: oan-msg
+            app.kubernetes.io/component: stats
+            app.kubernetes.io/version: "0.1.0"
+            app.kubernetes.io/managed-by: Helm
+            app.kubernetes.io/part-of: oan-messaging
+        spec:
+          restartPolicy: Never
+          serviceAccountName: oan-msg-oan-messaging
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: stats-refresh
+              image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+              imagePullPolicy: IfNotPresent
+              workingDir: /app
+              command:
+                - python
+                - -m
+                - oan_messaging.runtime
+                - stats-refresh
+              envFrom:
+                - configMapRef:
+                    name: oan-msg-oan-messaging-config
+              env:
+                - name: OAN_MSG_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-database
+                      key: runtime-url
+                - name: OAN_MSG_CONTENT_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: content-keys
+                - name: OAN_MSG_FINGERPRINT_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: fingerprint-keys
+                - name: OAN_MSG_CREDENTIAL_PEPPER
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: credential-pepper
+                - name: OAN_MSG_DB_POOL_SIZE
+                  value: "1"
+                - name: OAN_MSG_DB_MAX_OVERFLOW
+                  value: "0"
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                privileged: false
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {sizeLimit: 64Mi}
+
+---
+# Source: oan-messaging/templates/status-check.yaml
+# Alert check: one `status --fail-on-alert` run per schedule. Exit 2 (an active alert)
+# fails the Job; route failed Jobs of this CronJob to paging. Prints counts only.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: oan-msg-oan-messaging-status-check
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: status-check
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        helm.sh/chart: oan-messaging-0.1.0-draft.2
+        app.kubernetes.io/name: oan-messaging
+        app.kubernetes.io/instance: oan-msg
+        app.kubernetes.io/component: status-check
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: oan-messaging
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            helm.sh/chart: oan-messaging-0.1.0-draft.2
+            app.kubernetes.io/name: oan-messaging
+            app.kubernetes.io/instance: oan-msg
+            app.kubernetes.io/component: status-check
+            app.kubernetes.io/version: "0.1.0"
+            app.kubernetes.io/managed-by: Helm
+            app.kubernetes.io/part-of: oan-messaging
+        spec:
+          restartPolicy: Never
+          serviceAccountName: oan-msg-oan-messaging
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: status-check
+              image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+              imagePullPolicy: IfNotPresent
+              workingDir: /app
+              command:
+                - python
+                - -m
+                - oan_messaging.runtime
+                - status
+                - --fail-on-alert
+              envFrom:
+                - configMapRef:
+                    name: oan-msg-oan-messaging-config
+              env:
+                - name: OAN_MSG_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-database
+                      key: runtime-url
+                - name: OAN_MSG_CONTENT_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: content-keys
+                - name: OAN_MSG_FINGERPRINT_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: fingerprint-keys
+                - name: OAN_MSG_CREDENTIAL_PEPPER
+                  valueFrom:
+                    secretKeyRef:
+                      name: oan-messaging-core
+                      key: credential-pepper
+                - name: OAN_MSG_DB_POOL_SIZE
+                  value: "1"
+                - name: OAN_MSG_DB_MAX_OVERFLOW
+                  value: "0"
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+              resources:
+                limits:
+                  cpu: 250m
+                  memory: 192Mi
+                requests:
+                  cpu: 20m
+                  memory: 96Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                privileged: false
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {sizeLimit: 16Mi}
+---
+# Source: oan-messaging/templates/migration-job.yaml
+# Hook resources run before the chart's normal resources exist (install) or alongside the
+# previous release's resources (upgrade), so the migration has its own hook ServiceAccount
+# and NetworkPolicy, and reads only the migration database URL (no storage keys, no
+# ConfigMap, no runtime credentials).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oan-msg-oan-messaging-migration
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+automountServiceAccountToken: false
+
+---
+# Source: oan-messaging/templates/migration-job.yaml
+# Serialized schema migration for THIS release: one Job, one pod, no parallelism, no
+# retries. On install it completes before Helm creates any workload. On upgrade the
+# previous release's workloads keep running during it, so migrations must be backward
+# compatible. Helm's release lock stops two operations on this release from running hooks
+# at once; it is NOT a database-wide lock (see docs/deployment/helm.md).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: oan-msg-oan-messaging-migration
+  labels:
+    helm.sh/chart: oan-messaging-0.1.0-draft.2
+    app.kubernetes.io/name: oan-messaging
+    app.kubernetes.io/instance: oan-msg
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: oan-messaging
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+    oan.coss/migration-network-mode: "unrestricted"
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: oan-messaging-0.1.0-draft.2
+        app.kubernetes.io/name: oan-messaging
+        app.kubernetes.io/instance: oan-msg
+        app.kubernetes.io/component: migration
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: oan-messaging
+    spec:
+      restartPolicy: Never
+      serviceAccountName: oan-msg-oan-messaging-migration
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: registry.example.invalid/oan/oan-messaging:0.1.0-placeholder
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          command:
+            - alembic
+            - -c
+            - migrations/alembic.ini
+            - upgrade
+            - head
+          env:
+            # Read by migrations/env.py.
+            - name: OAN_MSG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oan-messaging-database
+                  key: migration-url
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            privileged: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+

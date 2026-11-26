@@ -1,0 +1,408 @@
+openapi: 3.1.0
+info:
+  title: OAN Bot Services, flow routes (wave 1) and Telegram webhook
+  version: 0.2.0
+  description: |
+    Two runtimes (`OAN_BOT_RAPIDPRO_ENABLED`). Each path says which one mounts it
+    (`x-runtime`): `rapidpro` paths only when the switch is true; `webhook` paths only when
+    it is false (the default: Telegram broadcasts plus sign-up without RapidPro); paths without
+    `x-runtime` in both.
+
+    Channels Specification v2.0 §5.8. RapidPro flows call these routes through webhook
+    nodes. Every call answers within 5 seconds; a flow treats a timeout as "not available
+    right now". Errors are `{error, text_key}`. Calls that change state carry `request_id`,
+    so a repeat with the same `request_id` returns the first answer and changes nothing.
+
+    Contacts are identified by the RapidPro contact UUID and the Telegram id (the URN
+    path). Bot Services derives `contact_ref` from the Telegram id, stores the contact
+    UUID, and stores the Telegram id only in a linked farmer's subscription row (TG-33).
+
+    Wave 2 routes (`/coverage`, `/questions`, follow-ups, close) are reserved and not
+    in Phase A. `POST /broadcasts` and its reads are in the DA kit's
+    `bot-services-broadcasts.openapi.yaml`, reused unchanged.
+servers:
+  - url: http://bot-services:8100
+security:
+  - flowSecret: []
+paths:
+  /telegram/webhook:
+    x-runtime: webhook
+    post:
+      operationId: telegramWebhook
+      description: |
+        Telegram's webhook for the bot, set with `secret_token`. The header
+        is compared in constant time with `OAN_BOT_TELEGRAM_WEBHOOK_SECRET` before the
+        body is read. The update is stored (minimal fields, sealed) before the 200 answer;
+        a repeated `update_id` answers 200 and changes nothing. Only messages from private
+        chats are kept; every other update is answered 200 and dropped.
+      security:
+        - telegramSecret: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [update_id]
+              properties:
+                update_id: {type: integer}
+                message: {type: object}
+              description: A Telegram Update. Other fields are ignored.
+      responses:
+        '200':
+          description: Stored, a repeat, or ignored
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebhookAnswer'}
+        '400':
+          description: Not JSON, or no integer update_id; nothing stored
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebhookAnswer'}
+        '401':
+          description: Wrong or missing secret header; nothing stored
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebhookAnswer'}
+        '413':
+          description: Body over 64 KB; nothing stored
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebhookAnswer'}
+        '503':
+          description: Could not store it (Telegram retries)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebhookAnswer'}
+  /healthz:
+    get:
+      operationId: health
+      security: []
+      responses:
+        '200': {description: Process up and database reachable}
+  /contacts/location:
+    x-runtime: rapidpro
+    post:
+      operationId: setLocation
+      description: Saves the chosen kebele for the contact and returns its parents.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, contact, kebele_code, language]
+              properties:
+                request_id: {$ref: '#/components/schemas/RequestId'}
+                contact: {$ref: '#/components/schemas/Contact'}
+                kebele_code: {$ref: '#/components/schemas/AreaCode'}
+                language: {$ref: '#/components/schemas/Language'}
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [kebele_code, woreda_code, zone_code, region_code]
+                properties:
+                  kebele_code: {$ref: '#/components/schemas/AreaCode'}
+                  woreda_code: {$ref: '#/components/schemas/AreaCode'}
+                  zone_code: {$ref: '#/components/schemas/AreaCode'}
+                  region_code: {$ref: '#/components/schemas/AreaCode'}
+        '422': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /contacts/updates:
+    x-runtime: rapidpro
+    put:
+      operationId: setUpdates
+      description: Turns broadcasts on or off for a linked farmer (TG-07).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, contact, updates]
+              properties:
+                request_id: {$ref: '#/components/schemas/RequestId'}
+                contact: {$ref: '#/components/schemas/Contact'}
+                updates: {type: string, enum: ['on', 'off']}
+      responses:
+        '200':
+          description: Result. `not_linked` when the contact has no link.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result: {type: string, enum: [ok, not_linked]}
+                  text_key: {type: string, description: 'updates.on, updates.off or link.invite'}
+  /contacts/idle:
+    x-runtime: rapidpro
+    post:
+      operationId: contactIdle
+      description: Called by the last node of every flow. Releases queued keyed messages for the contact, in order (TG-10).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [contact]
+              properties:
+                contact: {$ref: '#/components/schemas/Contact'}
+      responses:
+        '200':
+          description: Released count (0 when nothing was queued)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [released]
+                properties:
+                  released: {type: integer, minimum: 0}
+  /contacts/stop:
+    x-runtime: rapidpro
+    post:
+      operationId: contactStop
+      description: |
+        Stop and delete my data (§5.4), in this order: link and subscription and queued
+        messages; open questions closed "farmer stopped"; staff-side copies (if RV-01 allows);
+        Garage media; the RapidPro contact. Each step is recorded so a repeat finishes the rest.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, contact]
+              properties:
+                request_id: {$ref: '#/components/schemas/RequestId'}
+                contact: {$ref: '#/components/schemas/Contact'}
+      responses:
+        '200':
+          description: Deletion done, or accepted to finish in the background
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result, text_key]
+                properties:
+                  result: {type: string, enum: [done, pending]}
+                  text_key: {type: string, const: stop.done}
+  /staff/link:
+    x-runtime: rapidpro
+    post:
+      operationId: staffLink
+      description: A Development Agent or Supervisor sends the 8-character code from the DA app (§6.5). Calls R2. 5 failures in an hour lock linking for that chat for an hour.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, contact, code]
+              properties:
+                request_id: {$ref: '#/components/schemas/RequestId'}
+                contact: {$ref: '#/components/schemas/Contact'}
+                code: {type: string, pattern: '^[A-Za-z0-9]{8}$'}
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result, text_key]
+                properties:
+                  result: {type: string, enum: [linked, invalid, expired, locked]}
+                  role: {type: string, enum: [development_agent, supervisor, executive]}
+                  text_key: {type: string, description: 'staff.linked, staff.code_invalid, staff.code_expired or staff.locked'}
+                  params: {$ref: '#/components/schemas/Params'}
+        '503': {$ref: '#/components/responses/Error'}
+  /staff/inbound:
+    x-runtime: rapidpro
+    post:
+      operationId: staffInbound
+      description: |
+        Every message from a contact in group `staff` (TG-01). Phase A: the skeleton answers
+        `staff.menu` for any text; the routing logic arrives in wave 2.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, contact]
+              properties:
+                request_id: {$ref: '#/components/schemas/RequestId'}
+                contact: {$ref: '#/components/schemas/Contact'}
+                text: {type: string, maxLength: 4096}
+                attachments: {type: array, maxItems: 10, items: {type: string, format: uri}}
+      responses:
+        '200': {$ref: '#/components/responses/Keyed'}
+  /farmer-link/start:
+    x-runtime: rapidpro
+    post:
+      operationId: farmerLinkStart
+      description: |
+        §6.6 steps 1 to 4. The shared contact is accepted only if its user id equals the
+        sender's Telegram id. Bot Services reads the beneficiary API, then asks Auth to send
+        the OTP to the registered phone. Unknown Farmer ID and missing phone give the same answer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, contact, farmer_id, shared_contact]
+              properties:
+                request_id: {$ref: '#/components/schemas/RequestId'}
+                contact: {$ref: '#/components/schemas/Contact'}
+                farmer_id: {type: string, pattern: '^[A-Za-z0-9-]{4,32}$'}
+                shared_contact:
+                  type: object
+                  additionalProperties: false
+                  required: [user_id, phone_number]
+                  properties:
+                    user_id: {type: integer, description: Telegram user id on the shared contact}
+                    phone_number: {type: string, maxLength: 20}
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result, text_key]
+                properties:
+                  result: {type: string, enum: [code_sent, not_found, not_own_contact, rate_limited, locked]}
+                  link_request_id: {type: string, format: uuid}
+                  text_key: {type: string, description: 'link.code_sent (params masked_phone = last two digits), link.not_found, link.not_own_contact, link.rate_limited, link.locked'}
+                  params: {$ref: '#/components/schemas/Params'}
+        '503': {$ref: '#/components/responses/Error'}
+  /farmer-link/verify:
+    x-runtime: rapidpro
+    post:
+      operationId: farmerLinkVerify
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, contact, link_request_id, code]
+              properties:
+                request_id: {$ref: '#/components/schemas/RequestId'}
+                contact: {$ref: '#/components/schemas/Contact'}
+                link_request_id: {type: string, format: uuid}
+                code: {type: string, pattern: '^[0-9]{4,8}$'}
+      responses:
+        '200':
+          description: |
+            On `linked`: link and subscription row (updates on) stored, RapidPro contact field
+            `linked` set to `yes`. `ask_registry_kebele` is true when the registry kebele differs
+            from the kebele the farmer chose earlier (§6.4.1).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result, text_key]
+                properties:
+                  result: {type: string, enum: [linked, invalid, expired, locked]}
+                  ask_registry_kebele: {type: boolean}
+                  text_key: {type: string, description: 'link.done, link.code_invalid, link.code_expired, link.locked'}
+                  params: {$ref: '#/components/schemas/Params'}
+        '503': {$ref: '#/components/responses/Error'}
+  /farmer-link:
+    x-runtime: rapidpro
+    delete:
+      operationId: farmerUnlink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, contact]
+              properties:
+                request_id: {$ref: '#/components/schemas/RequestId'}
+                contact: {$ref: '#/components/schemas/Contact'}
+      responses:
+        '200':
+          description: Link and subscription removed (or there was none)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result, text_key]
+                properties:
+                  result: {type: string, enum: [unlinked, not_linked]}
+                  text_key: {type: string, description: 'link.removed or link.none'}
+components:
+  securitySchemes:
+    flowSecret:
+      type: apiKey
+      in: header
+      name: X-OAN-Flow-Secret
+      description: Shared secret held as a RapidPro global; compared in constant time (§5.8).
+    telegramSecret:
+      type: apiKey
+      in: header
+      name: X-Telegram-Bot-Api-Secret-Token
+      description: The bot's webhook secret_token; compared in constant time.
+  schemas:
+    WebhookAnswer:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok: {type: boolean}
+    RequestId: {type: string, format: uuid}
+    Language: {type: string, enum: [am, en]}
+    AreaCode: {type: string, pattern: '^[A-Z0-9]{2,16}$', description: Master Data area code, e.g. ET01010805}
+    Contact:
+      type: object
+      additionalProperties: false
+      required: [uuid, telegram_id]
+      properties:
+        uuid: {type: string, format: uuid, description: RapidPro contact UUID}
+        telegram_id: {type: integer, description: 'Telegram chat id, from the contact URN telegram:<id>'}
+    Params:
+      type: object
+      additionalProperties: {type: [string, integer]}
+      description: Parameters for the text key. Never a phone number, chat id or token.
+    Error:
+      type: object
+      required: [error, text_key]
+      properties:
+        error: {type: string, enum: [validation_failed, unauthenticated, unavailable, not_found]}
+        text_key: {type: string, description: 'Usually common.unavailable or common.invalid_choice'}
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Keyed:
+      description: What the flow sends back
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [text_key]
+            properties:
+              text_key: {type: string}
+              params: {$ref: '#/components/schemas/Params'}
+              keyboard: {type: array, items: {type: string}, description: Button text keys, at most 8}
