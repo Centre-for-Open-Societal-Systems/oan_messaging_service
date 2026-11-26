@@ -2,4 +2,4 @@
 # Builds add -<branch slug>.<BUILD_NUMBER>: develop 1.0.0-develop.57, staging 1.0.0-staging.12. A pull
 # request build is 1.0.0-pr-75.3 and is never published. Bump it for the next release, or when a
 # recreated job restarts BUILD_NUMBER at 1 (published tags are immutable).
-version: 1.0.0
+version: 1.0.1
