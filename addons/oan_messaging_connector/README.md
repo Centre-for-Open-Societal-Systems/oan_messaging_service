@@ -45,9 +45,22 @@ OAN services (see `LICENSE`).
      (or the row name, if only the enqueue failed; the sweep then sends it) and writes
      an Error Log entry.
 
-3. Keep the texts and event mapping in the caller app. See A2C's `oan_a2c/oan_messaging/`
-   for the pattern: `events.py` holds the templates and mapping, `notify.py` the call
-   sites.
+3. Keep the texts and event mapping in the caller app, as core Notification records
+   (event on the "Method" trigger, Jinja message) rendered by the app and passed to
+   `queue_sms`. Grievance's `services/notifications.py` and A2C's
+   `oan_a2c/oan_messaging/` show the pattern. `queue_sms` refuses a text longer than one
+   SMS part and logs why.
+
+## Which call to use
+
+Never call OAN inside a web request: the network call would hold the transaction open
+and send even if it rolls back.
+
+| Message                                                                  | Call                                                                                                            | Stored?              |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | -------------------- |
+| Any notice about a business event                                        | `queue_sms` (sent after commit, retried, polled)                                                                | Yes, until retention |
+| OTP, or text that must not rest in the database (a sensitive case's PIN) | `send_sms_now`, from `frappe.enqueue(..., enqueue_after_commit=True)` with the text only in the job's arguments | No                   |
+| A module that already sends through Frappe's `_send_sms`                 | The `send_sms` hook, as an interim step only                                                                    | No                   |
 
 ## Existing Frappe SMS senders: the `send_sms` hook (supported, not preferred)
 
