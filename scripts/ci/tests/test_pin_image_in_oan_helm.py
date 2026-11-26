@@ -31,7 +31,9 @@ class PinImage(unittest.TestCase):
             self.assertEqual(pin.get_value(out, pin.PATHS[key]), new)
             changed = [
                 i
-                for i, (a, b) in enumerate(zip(VALUES.splitlines(), out.splitlines(), strict=True), 1)
+                for i, (a, b) in enumerate(
+                    zip(VALUES.splitlines(), out.splitlines(), strict=True), 1
+                )
                 if a != b
             ]
             self.assertEqual(changed, [line])
